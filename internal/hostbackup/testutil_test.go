@@ -218,15 +218,15 @@ func (objects) AddressSet(string) (api.AddressSetSpec, bool) { return api.Addres
 
 var testGen = api.ImageGeneration{Number: 1, Name: "fbsd#g1", Manifest: "mf1", Dataset: "tank/jailops/images/fbsd/g1"}
 
-// makeJail creates the datasets and files of a thin jail in w and returns its
-// record. Layout: container (spec.json, bundle.json), root (not captured),
-// etc, local and db (a few MiB so it has several chunks).
+// makeJail creates the datasets and files of a jail in w and returns its record: the container (spec.json,
+// bundle.json), the root, and three more datasets below the container, etc, local and db (a few MiB so it has
+// several chunks), which the capture treats like any dataset of the jail.
 func makeJail(t *testing.T, w *world, name, uuid string, labels map[string]string) JailRecord {
 	t.Helper()
 	c := "tank/jailops/projects/src/jails/" + name
 	mp := "/jo/" + name
 	j := JailRecord{Name: name, Project: "alpha", UUID: uuid, Labels: labels, Container: c, Image: testGen,
-		Spec: api.JailSpec{Image: "fbsd", Layout: api.LayoutThin, Hostname: name,
+		Spec: api.JailSpec{Image: "fbsd", Hostname: name,
 			Network:  []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.5", MAC: "02:aa:bb"}},
 			Firewall: api.FirewallAttach{Policies: []string{"web"}}}}
 	mk := func(rel, kind, mount string, props map[string]string) {
@@ -241,9 +241,15 @@ func makeJail(t *testing.T, w *world, name, uuid string, labels map[string]strin
 	}
 	mk("", KindContainer, mp, nil)
 	mk("root", KindRoot, mp+"/root", nil)
-	mk("etc", KindPersistent, mp+"/root/etc", map[string]string{"jailops:path": "/etc", "jailops:class": "system"})
-	mk("local", KindPersistent, mp+"/root/usr/local", map[string]string{"jailops:path": "/usr/local", "jailops:class": "data"})
-	mk("db", KindPersistent, mp+"/root/var/db/app", map[string]string{"jailops:path": "/var/db/app", "quota": "1G", "jailops:class": "data"})
+	write0 := func(ds, rel string) {
+		p := filepath.Join(w.m.liveDir(ds), rel)
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		_ = os.WriteFile(p, []byte("FreeBSD"), 0o644)
+	}
+	write0(c+"/root", "bin/freebsd-version")
+	mk("etc", "data", mp+"/root/etc", map[string]string{"jailops:path": "/etc", "jailops:class": "system"})
+	mk("local", "data", mp+"/root/usr/local", map[string]string{"jailops:path": "/usr/local", "jailops:class": "data"})
+	mk("db", "data", mp+"/root/var/db/app", map[string]string{"jailops:path": "/var/db/app", "quota": "1G", "jailops:class": "data"})
 
 	rnd := rand.New(rand.NewSource(int64(len(name))*7 + 1))
 	write := func(ds, rel string, size int) {

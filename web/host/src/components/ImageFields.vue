@@ -97,7 +97,6 @@ const said = (id: string, hint: string) => (props.err(id) ? `${id}-err` : hint)
           <span v-if="err('img-at')" id="img-at-err" class="field-error" role="alert">{{ err('img-at') }}</span>
           <span v-else id="img-at-h" class="hint">{{ s.autoUpgrade.atHint }}</span>
         </div>
-        <label class="check"><input v-model="f.packages" type="checkbox" data-test="image-packages" />{{ s.autoUpgrade.packages }}</label>
       </template>
     </fieldset>
     <template v-if="buildBox">

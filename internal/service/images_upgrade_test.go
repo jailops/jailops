@@ -11,8 +11,6 @@ import (
 
 	"jailops.net/jailops/internal/daemon/dtest"
 	"jailops.net/jailops/internal/service"
-	"jailops.net/jailops/internal/sys/jailos"
-	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -95,122 +93,59 @@ func generationOf(t *testing.T, s *service.Service, project, name string) (gen s
 	return j.Status.ImageGeneration, j.Status.Power == api.PowerRunning
 }
 
-func TestUpgradeImageMovesEveryThinJailAndStopsAtTheFirstFailure(t *testing.T) {
+// An image upgrade builds the next generation for the jails made from it later and touches no jail.
+func TestUpgradeImageBuildsAGenerationAndTouchesNoJail(t *testing.T) {
 	e, s := tickingEnv(t)
 	twoProjectJails(t, e, s)
 	host := as(globalAdmin, "")
-
-	// The repository serves what g1 holds: nothing is kept and no jail is touched.
-	res := upgradeImage(t, s, host, "fb", api.ImageUpgrade{})
-	if !res.Unchanged || res.Generation != nil || res.From != "fb#g1" || len(res.Jails) != 4 {
-		t.Fatalf("%+v", res)
-	}
-	for _, j := range res.Jails {
-		if j.Status != api.ImageUpgradeSkipped {
-			t.Fatalf("%+v", j)
-		}
-	}
-	if im, _ := s.GetImage(host, "fb"); len(im.Status.Generations) != 1 {
-		t.Fatalf("an unchanged upgrade kept a generation: %+v", im.Status)
-	}
-
-	// A newer package set: g2 is built and every candidate moves, stopped or running; the pin is the user's choice.
+	alpha := as(globalAdmin, dtest.SeedProject)
+	before, _ := s.GetJail(alpha, "web")
 	e.SetRepoVersion("15.1p2")
-	res = upgradeImage(t, s, host, "fb", api.ImageUpgrade{})
-	if res.Unchanged || res.Generation == nil || res.Generation.Number != 2 || res.Generation.Parent != 1 || len(res.Plan) == 0 {
+	res := upgradeImage(t, s, host, "fb", api.ImageUpgrade{})
+	if res.Unchanged || res.Generation == nil || res.Generation.Name != "fb#g2" || res.From != "fb#g1" {
 		t.Fatalf("%+v", res)
 	}
-	want := map[string]string{"alpha/db": api.ImageUpgradeUpgraded, "alpha/pin": api.ImageUpgradeSkipped, "alpha/web": api.ImageUpgradeUpgraded, "beta/api": api.ImageUpgradeUpgraded}
-	if len(res.Jails) != len(want) {
-		t.Fatalf("%+v", res.Jails)
+	after, _ := s.GetJail(alpha, "web")
+	if after.Status.ImageGeneration != "fb#g1" || after.Status.Power != api.PowerRunning || after.Status.JID != before.Status.JID || !after.Status.StartedAt.Equal(before.Status.StartedAt) {
+		t.Fatalf("the image upgrade touched web: %+v -> %+v", before.Status, after.Status)
 	}
-	for i, j := range res.Jails {
-		key := j.Project + "/" + j.Jail
-		if j.Status != want[key] {
-			t.Fatalf("jail %d: %+v", i, j)
-		}
-		if j.Status == api.ImageUpgradeUpgraded && (j.From != "fb#g1" || j.To != "fb#g2" || j.Record == "") {
-			t.Fatalf("%+v", j)
-		}
-		if j.Status == api.ImageUpgradeSkipped && j.Reason != "pinned to fb#g1" {
-			t.Fatalf("%+v", j)
+	for _, c := range []struct{ project, name string }{{"alpha", "db"}, {"alpha", "pin"}, {"beta", "api"}} {
+		if gen, _ := generationOf(t, s, c.project, c.name); gen != "fb#g1" {
+			t.Fatalf("%s/%s says %s", c.project, c.name, gen)
 		}
 	}
-	for _, c := range []struct {
-		project, name, gen string
-		running            bool
-	}{{"alpha", "web", "fb#g2", true}, {"alpha", "db", "fb#g2", false}, {"alpha", "pin", "fb#g1", false}, {"beta", "api", "fb#g2", false}} {
-		if gen, up := generationOf(t, s, c.project, c.name); gen != c.gen || up != c.running {
-			t.Fatalf("%s/%s: on %s, running %v\n%s", c.project, c.name, gen, up, e.Log())
-		}
+	if h, _ := s.UpdateHistory(alpha, "web"); len(h) != 0 {
+		t.Fatalf("the image upgrade wrote the history of a jail: %+v", h)
 	}
-	// The same history record as an OS update of `update apply`.
-	h, err := s.UpdateHistory(as(globalAdmin, "beta"), "api")
-	if err != nil || len(h) != 1 || h[0].Kind != api.UpdateKindOS || h[0].Result != api.UpdateSuccess || h[0].ID != res.Jails[3].Record || h[0].To != "fb#g2" {
-		t.Fatalf("%+v %v", h, err)
-	}
-
-	// g3 fails its health check: the first jail is swapped back and the rest are not attempted.
-	e.SetRepoVersion("15.1p3")
-	e.Jails.SetExecFn(func(_ string, o jailos.ExecOpts) (run.Result, error) {
-		if strings.Join(o.Argv, " ") == "/bin/true" {
-			return run.Result{Stderr: []byte("not healthy")}, errors.New("exit status 1")
-		}
-		return run.Result{}, nil
-	})
+	// nothing new: no generation is kept
 	res = upgradeImage(t, s, host, "fb", api.ImageUpgrade{})
-	if res.Generation == nil || res.Generation.Number != 3 || len(res.Jails) != 4 {
+	if !res.Unchanged || res.Generation != nil {
 		t.Fatalf("%+v", res)
 	}
-	if j := res.Jails[0]; j.Jail != "db" || j.Status != api.ImageUpgradeFailed || !strings.Contains(j.Reason, "health check") || !strings.Contains(j.Reason, "swapped back") {
-		t.Fatalf("%+v", j)
+	// a new jail is copied from the new generation
+	op, err := s.CreateJail(alpha, dtest.WebJail("fresh"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if j := res.Jails[1]; j.Jail != "pin" || j.Status != api.ImageUpgradeSkipped {
-		t.Fatalf("%+v", j)
-	}
-	for _, j := range res.Jails[2:] {
-		if j.Status != api.ImageUpgradeNotAttempted || j.Reason != "stopped after alpha/db failed" {
-			t.Fatalf("%+v", j)
-		}
-	}
-	for _, c := range []struct{ project, name string }{{"alpha", "web"}, {"alpha", "db"}, {"beta", "api"}} {
-		if gen, _ := generationOf(t, s, c.project, c.name); gen != "fb#g2" {
-			t.Fatalf("%s/%s moved to %s", c.project, c.name, gen)
-		}
-	}
-	h, _ = s.UpdateHistory(as(globalAdmin, dtest.SeedProject), "db")
-	if len(h) != 2 || h[0].Result != api.UpdateRolledBack || !h[0].RootRolledBack {
-		t.Fatalf("%+v", h)
-	}
-	if h, _ := s.UpdateHistory(as(globalAdmin, "beta"), "api"); len(h) != 1 {
-		t.Fatalf("a jail that was not attempted got a record: %+v", h)
+	wait(t, s, op)
+	if gen, _ := generationOf(t, s, "alpha", "fresh"); gen != "fb#g2" {
+		t.Fatalf("a new jail was copied from %s", gen)
 	}
 }
 
-func TestUpgradeImageIsAGlobalAdminsOperationAndHonoursTheProjectFilter(t *testing.T) {
+func TestUpgradeImageIsAGlobalAdminsOperation(t *testing.T) {
 	e, s := tickingEnv(t)
 	twoProjectJails(t, e, s)
 	host := as(globalAdmin, "")
 	e.SetRepoVersion("15.1p2")
-
-	// A project identity may not upgrade an image, however it names the project, so it never moves another project's jails.
 	for _, ctx := range []context.Context{as(alphaOnly, dtest.SeedProject), as(alphaOnly, ""), as(nobody, "")} {
-		for _, req := range []api.ImageUpgrade{{}, {Project: "beta"}, {Project: dtest.SeedProject}, {NoJails: true}} {
-			_, err := s.UpgradeImage(ctx, "fb", req)
-			wantCode(t, err, api.CodeForbidden)
-		}
-	}
-	for _, c := range []struct{ project, name string }{{"alpha", "web"}, {"beta", "api"}} {
-		if gen, _ := generationOf(t, s, c.project, c.name); gen != "fb#g1" {
-			t.Fatalf("%s/%s moved to %s", c.project, c.name, gen)
-		}
+		_, err := s.UpgradeImage(ctx, "fb", api.ImageUpgrade{})
+		wantCode(t, err, api.CodeForbidden)
 	}
 	if im, _ := s.GetImage(host, "fb"); len(im.Status.Generations) != 1 {
 		t.Fatalf("%+v", im.Status)
 	}
-	_, err := s.UpgradeImage(host, "fb", api.ImageUpgrade{Project: "nope"})
-	wantCode(t, err, api.CodeNotFound)
-	_, err = s.UpgradeImage(host, "nope", api.ImageUpgrade{})
+	_, err := s.UpgradeImage(host, "nope", api.ImageUpgrade{})
 	wantCode(t, err, api.CodeNotFound)
 	// An image without a generation says what to run first.
 	if _, err := s.CreateImage(host, api.Image{Metadata: api.ObjectMeta{Name: "empty"}, Spec: api.ImageSpec{
@@ -223,45 +158,13 @@ func TestUpgradeImageIsAGlobalAdminsOperationAndHonoursTheProjectFilter(t *testi
 	if !errors.As(err, &ae) || !strings.Contains(ae.Hint, "jailops image build empty") {
 		t.Fatalf("%v", err)
 	}
-
-	// A dry run plans the build and lists the jails that would move; nothing changes.
+	// A dry run plans the build; nothing changes.
 	res := upgradeImage(t, s, host, "fb", api.ImageUpgrade{DryRun: true})
-	if !res.DryRun || res.Generation != nil || len(res.Plan) == 0 || len(res.Jails) != 4 {
+	if !res.DryRun || res.Generation != nil || len(res.Plan) == 0 {
 		t.Fatalf("%+v", res)
-	}
-	for _, j := range res.Jails {
-		if j.Jail == "pin" && j.Status != api.ImageUpgradeSkipped || j.Jail != "pin" && (j.Status != api.ImageUpgradePlanned || j.To != "fb#g2") {
-			t.Fatalf("%+v", j)
-		}
 	}
 	if im, _ := s.GetImage(host, "fb"); len(im.Status.Generations) != 1 {
-		t.Fatalf("a dry run kept a generation: %+v", im.Status)
-	}
-	if gen, _ := generationOf(t, s, "alpha", "web"); gen != "fb#g1" {
-		t.Fatalf("a dry run moved a jail to %s", gen)
-	}
-
-	// The project filter moves one project's jails and lists only them.
-	res = upgradeImage(t, s, host, "fb", api.ImageUpgrade{Project: "beta"})
-	if res.Generation == nil || res.Generation.Number != 2 || len(res.Jails) != 1 || res.Jails[0].Jail != "api" || res.Jails[0].Status != api.ImageUpgradeUpgraded {
-		t.Fatalf("%+v", res)
-	}
-	if gen, _ := generationOf(t, s, "alpha", "web"); gen != "fb#g1" {
-		t.Fatalf("the filter did not hold: web is on %s", gen)
-	}
-	// NoJails builds only.
-	e.SetRepoVersion("15.1p3")
-	res = upgradeImage(t, s, host, "fb", api.ImageUpgrade{NoJails: true})
-	if res.Generation == nil || res.Generation.Number != 3 || len(res.Jails) != 4 {
-		t.Fatalf("%+v", res)
-	}
-	for _, j := range res.Jails {
-		if j.Jail != "pin" && j.Status != api.ImageUpgradeNotAttempted {
-			t.Fatalf("%+v", j)
-		}
-	}
-	if gen, _ := generationOf(t, s, "beta", "api"); gen != "fb#g2" {
-		t.Fatalf("no_jails moved a jail to %s", gen)
+		t.Fatalf("a dry run built a generation: %+v", im.Status)
 	}
 }
 
@@ -279,57 +182,6 @@ func TestImageReleaseOlderThan151OrWithoutItsTypeIsRefused(t *testing.T) {
 		if _, err := s.CreateImage(host, api.Image{Metadata: api.ObjectMeta{Name: "ok" + string(rune('a'+i))}, Spec: api.ImageSpec{
 			OS: api.OSFreeBSD, Release: r, Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}}); err != nil {
 			t.Fatalf("%s: %v", r, err)
-		}
-	}
-}
-
-// A run that stopped at a failing jail leaves the jails after it on the old generation. The next run builds nothing
-// (the package set did not change) but still moves them to the newest generation.
-func TestUpgradeImageMovesJailsThatAreBehindWhenNothingNewWasBuilt(t *testing.T) {
-	e, s := tickingEnv(t)
-	twoProjectJails(t, e, s)
-	host := as(globalAdmin, "")
-	e.SetRepoVersion("15.1p2")
-	e.Jails.SetExecFn(func(_ string, o jailos.ExecOpts) (run.Result, error) {
-		if strings.Join(o.Argv, " ") == "/bin/true" {
-			return run.Result{Stderr: []byte("not healthy")}, errors.New("exit status 1")
-		}
-		return run.Result{}, nil
-	})
-	res := upgradeImage(t, s, host, "fb", api.ImageUpgrade{})
-	if res.Generation == nil || res.Generation.Number != 2 {
-		t.Fatalf("%+v", res)
-	}
-	for _, c := range []struct{ project, name string }{{"alpha", "web"}, {"alpha", "db"}, {"beta", "api"}} {
-		if gen, _ := generationOf(t, s, c.project, c.name); gen != "fb#g1" {
-			t.Fatalf("%s/%s is on %s after a failed run", c.project, c.name, gen)
-		}
-	}
-
-	e.Jails.SetExecFn(func(string, jailos.ExecOpts) (run.Result, error) { return run.Result{}, nil })
-	res = upgradeImage(t, s, host, "fb", api.ImageUpgrade{})
-	if !res.Unchanged || res.Generation != nil {
-		t.Fatalf("a generation was built again: %+v", res)
-	}
-	moved := 0
-	for _, j := range res.Jails {
-		if j.Status == api.ImageUpgradeUpgraded && j.To == "fb#g2" {
-			moved++
-		}
-	}
-	if moved != 3 {
-		t.Fatalf("%+v", res.Jails)
-	}
-	for _, c := range []struct{ project, name string }{{"alpha", "web"}, {"alpha", "db"}, {"beta", "api"}} {
-		if gen, _ := generationOf(t, s, c.project, c.name); gen != "fb#g2" {
-			t.Fatalf("%s/%s is on %s", c.project, c.name, gen)
-		}
-	}
-	// And a third run has nothing left to do.
-	res = upgradeImage(t, s, host, "fb", api.ImageUpgrade{})
-	for _, j := range res.Jails {
-		if j.Status == api.ImageUpgradeUpgraded {
-			t.Fatalf("%+v", j)
 		}
 	}
 }

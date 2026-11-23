@@ -1,11 +1,13 @@
 Jail Autostart: DependencyFailed Locked NotStarted StartFailed Started
-Jail BasePackages: OutOfStep
 Jail FirewallApplied: Applied NotLoaded PFNotApplying StatesPending Unverified
 Jail Healthy: Degraded
 Jail InSync: Drift InSync
 Jail Limits: NotEnforced
 Jail Ready: Invalid Running Stopped
 Jail ShellSetup: Failed Installing
+Jail SuspectedCompromised: PreflightFinding
+Jail UnsupportedLayout: EarlierRelease
+Jail UpgradeIncomplete: RollbackFailed
 Network NDPFlood: Flooded
 Network NDPProxy: Answering BadRange NoCapture StartFailed Starting Stopped SyncFailed Unsupported
 Network Ready: Applied ApplyFailed Invalid Precondition

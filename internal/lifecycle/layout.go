@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
+	"sort"
 	"strconv"
 
 	"jailops.net/jailops/sdk/api"
@@ -11,8 +13,7 @@ import (
 
 // Dataset kinds as the datasets' jailops:kind property names them.
 const (
-	// KindBackupRoot is how a layout names the root dataset (the thin root is
-	// listed but not captured).
+	// KindBackupRoot is how a layout names the root dataset.
 	KindBackupRoot = "root"
 )
 
@@ -31,17 +32,19 @@ type JailDataset struct {
 // JailLayout is what the datasets say about a jail, in the shape backup
 // capture needs.
 type JailLayout struct {
-	Key        string
-	UUID       string
-	Container  string
-	Layout     api.Layout
-	Image      string // image name
-	Generation int
-	Manifest   string
-	Datasets   []JailDataset
+	Key       string
+	UUID      string
+	Container string
+	// UnsupportedLayout marks a jail with the root layout of JailOps 0.9.2 and before: it is not backed up
+	// (UnsupportedLayoutError).
+	UnsupportedLayout bool
+	Image             string // image name, where the root was copied from
+	Generation        int
+	Manifest          string
+	Datasets          []JailDataset
 }
 
-var restoreProps = []string{PropPath, PropClass, PropMerge, "quota", "refquota", "reservation", "readonly", "compression", "recordsize", "atime"}
+var restoreProps = []string{PropPath, "quota", "refquota", "reservation", "readonly", "compression", "recordsize", "atime"}
 
 func (s *Service) layoutProps(ctx context.Context, ds string) map[string]string {
 	out := map[string]string{}
@@ -53,29 +56,38 @@ func (s *Service) layoutProps(ctx context.Context, ds string) map[string]string 
 	return out
 }
 
-// Layout reads the datasets of a jail: the container, the root, the
-// persistent datasets, the volumes parent and the volumes. It changes nothing.
+// Leftovers lists the datasets of a jail that a run of JailOps 0.9.2 left and this release neither uses nor cleans:
+// root.new, root.stale, and a root.old that housekeeping will not destroy (no cleanup mark, or one of a jail with an unsupported root layout). An
+// interrupted 0.9.2 conversion or upgrade can have the jail's live data in one of them.
+func (s *Service) Leftovers(ctx context.Context, key string) ([]string, error) {
+	st, err := s.observe(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	out := slices.Clone(st.Leftovers)
+	if st.RootOld != "" && (st.Unsupported || s.prop(ctx, st.RootOld, PropCleanupAfter) == "" || s.prop(ctx, st.RootOld, PropManaged) != "on") {
+		out = append(out, st.RootOld)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// Layout reads the datasets of a jail: the container, the root and the delegated dataset. It changes nothing.
 func (s *Service) Layout(ctx context.Context, key string) (JailLayout, error) {
 	st, err := s.observe(ctx, key)
 	if err != nil {
 		return JailLayout{}, err
 	}
 	p := s.Cfg.at(key)
-	out := JailLayout{Key: key, UUID: st.ID, Container: st.Container, Layout: st.Layout, Image: st.Image, Generation: st.Gen, Manifest: st.Manifest}
-	// The container carries what the lifecycle needs to observe a restored jail again: its layout and the image.
+	out := JailLayout{Key: key, UUID: st.ID, Container: st.Container, UnsupportedLayout: st.Unsupported, Image: st.Image, Generation: st.Gen, Manifest: st.Manifest}
+	// The container carries what the lifecycle needs to observe a restored jail again: the image it came from.
 	cprops := map[string]string{}
-	if st.Layout != "" {
-		cprops[PropLayout] = string(st.Layout)
-	}
 	if st.Image != "" {
 		cprops[PropImage] = st.Image
 	}
 	out.Datasets = append(out.Datasets,
 		JailDataset{Name: st.Container, Kind: KindContainer, Mountpoint: p.containerMP(), Props: cprops},
 		JailDataset{Name: st.Root, Kind: KindBackupRoot, Mountpoint: p.rootMP(), Props: s.layoutProps(ctx, st.Root)})
-	for _, d := range st.Persist {
-		out.Datasets = append(out.Datasets, JailDataset{Name: d.DS, Kind: KindPersistent, Mountpoint: d.MP, Props: s.layoutProps(ctx, d.DS)})
-	}
 	if st.Delegated != "" {
 		out.Datasets = append(out.Datasets, JailDataset{Name: st.Delegated, Kind: KindDelegated, Props: map[string]string{}, Delegated: true})
 	}
@@ -84,7 +96,7 @@ func (s *Service) Layout(ctx context.Context, key string) (JailLayout, error) {
 
 // WriteRecords writes spec.json and bundle.json of a jail whose datasets
 // exist (a restored jail), into its mounted container. gen is the image
-// generation the root was built from; it may be zero for a thick jail.
+// generation the root was copied from; it may be zero.
 func (s *Service) WriteRecords(ctx context.Context, key string, j api.Jail, gen api.ImageGeneration) error {
 	if err := validName("jail", key); err != nil {
 		return err

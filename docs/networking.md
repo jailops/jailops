@@ -74,6 +74,13 @@ Every jail has a link of its own, so jails never share a network segment:
   not own. An address a jail gives itself sends and receives nothing.
 - **They talk only as far as the firewall allows.** The host forwards between two jails what both jails' policies allow.
   `jailops firewall test` says what happens to a connection before you try it ([firewall-testing](networking-ipv6.md#would-it-pass)).
+- **"Closed from the Internet" assumes your `pf.conf` blocks inbound.** The anchors of the jails say what each jail allows; the
+  host's own `pf.conf` is the door. With no inbound default block in it a jail with a routed IPv6 address, or an IPv4
+  address without NAT, is reachable from outside whatever `firewall test` says. Put `block in all` (and a pass for ssh) in
+  `pf.conf` ([install.md](install.md#3-the-firewall-one-line-in-pfconf)); `jailops doctor` warns (`pf.host_default_deny`) when the loaded ruleset has none. The state limit is the same
+  kind of host setting: ten thousand states per rule in each jail's anchor against pf's default hundred thousand for the host,
+  so a few busy jails can fill it; `pf.states` looks at the running jails and warns for a jail without a limit, and `set
+  limit states` in `pf.conf` raises it.
 - **Nothing is closed inside a project unless you close it.** A jail without policy is open to its project's jails; a
   policy that states no default leaves it so. To close a project or a jail, put a policy with `default_in: deny` in the
   project's mandatory list (`firewall_policies`) or on the jail, and open what is needed with `allow` rules; deny wins over
@@ -194,7 +201,8 @@ in `pf.conf`. `jailops doctor` checks all three and says what to do.
 A jail with a network link does not start while pf is disabled (`pfctl -s info` says `Status: Disabled`): its anchor would be
 loaded and nothing would evaluate it. `jailops doctor` fails `pf.enabled` in that case. Set `allow-start-without-pf = true`
 in `priv.conf` only on a host where that is what you want. `service pf start` and `service pf restart` empty every anchor;
-the daemon looks every few seconds and loads the anchors of the running jails again at once.
+the daemon looks every few seconds and loads the anchors of the running jails again at once, with one warning in its
+log for the empty anchor it found ([troubleshooting.md](troubleshooting.md#common-failures) says how to read it).
 
 ## Letting the Internet in: `jailops expose`
 

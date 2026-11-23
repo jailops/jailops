@@ -243,7 +243,7 @@ export const invalidApp = broken
 export function installSteps(a: App, jail: string, project: string, image: string): string[] {
   const root = `/jailops/${project}/${jail}/root`
   const out: Array<[string, string]> = [
-    ['create-jail', `create thin jail ${jail} from ${image} with ${a.data?.length ?? 0} data volume(s) and the labels jailops.app, jailops.app.hash`],
+    ['create-jail', `create jail ${jail} from ${image} with ${a.data?.length ?? 0} data volume(s) and the labels jailops.app, jailops.app.hash`],
     ['start-jail', `start ${jail}`],
     // one step per repository, the FreeBSD one first, as the server does
     ...(['ports', 'jailops'] as const).flatMap((repo): Array<[string, string]> => {

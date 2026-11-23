@@ -1,7 +1,7 @@
 import type { Jail, Network, Remote, Backup, PoolUsage, DoctorReport } from '@jailops/shared/api/types'
 import { s } from '@/i18n'
 import { percent, sentence } from '@jailops/shared/lib/format'
-import { codeText, conditionProblem } from '@jailops/shared/lib/describe'
+import { codeText, conditionFault } from '@jailops/shared/lib/describe'
 
 export interface Attention {
   key: string
@@ -26,7 +26,7 @@ export function attention(i: AttentionInput): Attention[] {
     const n = j.metadata.name
     if (j.status.power === 'error') out.push({ key: 'err:' + n, tone: 'danger', text: `${n}: ${s.state.error}`, to: `/jails/${n}` })
     for (const c of j.status.conditions ?? []) {
-      if (c.status === 'False' && conditionProblem(c)) out.push({ key: `cond:${n}:${c.type}`, tone: 'danger', text: s.overview.condition(n, c.reason ? codeText(c.reason) : sentence(c.type), c.message ?? ''), to: `/jails/${n}` })
+      if (conditionFault(c)) out.push({ key: `cond:${n}:${c.type}`, tone: 'danger', text: s.overview.condition(n, c.reason ? codeText(c.reason) : sentence(c.type), c.message ?? ''), to: `/jails/${n}` })
     }
     const d = j.status.drift?.length ?? 0
     if (d) out.push({ key: 'drift:' + n, tone: 'warn', text: `${n}: ${s.overview.drift(d)}`, to: `/jails/${n}` })

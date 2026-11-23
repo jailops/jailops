@@ -458,10 +458,10 @@ on the new release and that the helper and the daemon run; `jailops host rollbac
 environment (`bectl activate`) and reboots. Owned: nothing in `/etc`; the module acts through `pkg` and `bectl` only.
 
 Risks: `/etc` merges after a base upgrade (pkgbase leaves `.pkgsave` files; the module reports them and does not merge
-them by hand), a kernel that does not boot (the boot environment is the answer), and jails whose image generation is
-older than the host (reported; images are upgraded separately, design section 4.3). An image is one release: the patch
-levels of the host's release reach the jails through the image's nightly auto upgrade (or `jailops image upgrade`), and a
-new release of the host is followed by a new image (`freebsd-15-2` after 15.2), on which new jails are created; the
+them by hand), a kernel that does not boot (the boot environment is the answer), and jails on an older
+release than the host (reported; jails are upgraded separately, design section 4.3). The patch levels of the host's
+release reach the jails through their in-place upgrade (`jailops jail upgrade`, or each jail's update policy), and a
+new release of the host is followed by `jailops jail upgrade NAME --release` and a new image (`freebsd-15-2` after 15.2), on which new jails are created; the
 console points this out when the host runs a newer release than its newest FreeBSD image ([upgrade.md](upgrade.md#a-new-release-move-the-jails)).
 
 ### 5. System (design)
@@ -541,7 +541,7 @@ With `jailops_appliance`, a fresh host starts without any user. Three parts make
   6. **Base image**: the FreeBSD image of the host's release (`environment.kernel_version` of `GET /api/v1`
      without the patch level; another release of 15.1 or later can be chosen) and architecture, named after the release
      (`freebsd-15-1`; the name follows the release until it is edited), with the checkbox **Upgrade automatically every night**
-     (off until ticked; then 03:00, packages too; one line in the step says what it does): `POST /api/v1/images` (with
+     (off until ticked; then 03:00; one line in the step says what it does): `POST /api/v1/images` (with
      `spec.auto_upgrade` when ticked), then
      its first generation with `POST /api/v1/images/freebsd-15-1/generations`, followed in the step as an operation (progress, Cancel while it may be
      cancelled). The build downloads the base system packages and takes minutes; a failed build keeps the definition,

@@ -14,7 +14,7 @@ type Volume struct {
 	Status   VolumeStatus `json:"status,omitempty"`
 }
 
-// VolumeSpec is what a volume is made with. Everything but Comment, Watch, Probe and OnLoss is fixed at creation.
+// VolumeSpec is what a volume is made with. Everything but Comment, Notes, Watch, Probe and OnLoss is fixed at creation.
 //
 // A volume with a Path is a host directory: no dataset of JailOps, but a directory of the host that is a mount (a
 // storage box, an NFS or CIFS share, a disk of its own) and that jails attach like any volume. Storage, Size, UID, GID,
@@ -47,6 +47,9 @@ type VolumeSpec struct {
 	OnLoss string `json:"on_loss,omitempty"`
 	// Comment says what the volume is for.
 	Comment string `json:"comment,omitempty"`
+	// Notes is a long text about the object: what it does, how it was set up, who to ask. Multi-line, at most
+	// MaxNotes bytes (ValidNotes).
+	Notes string `json:"notes,omitempty"`
 }
 
 // The probes of a watched host-directory volume and what happens when its mount is lost.

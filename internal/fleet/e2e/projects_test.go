@@ -213,7 +213,7 @@ func TestAdoptCoversProjectsAndStorage(t *testing.T) {
 		Storage:  []api.ProjectStorage{{Storage: "fast"}},
 	}})
 	srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "old", Project: "legacy"},
-		Spec: api.JailSpec{Image: "freebsd-15", Storage: "fast", Layout: api.LayoutThin, Hostname: "old",
+		Spec: api.JailSpec{Image: "freebsd-15", Storage: "fast", Hostname: "old",
 			Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.9.0.12"}}}})
 
 	r := mustOK(t, run(t, e, "adopt", "--host", "web1", "--claim"))

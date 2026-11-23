@@ -11,8 +11,7 @@ image-generation-created
 image-generation-deleted
 image-upgrade-failed
 image-upgraded
-jail-base-packages-repaired
-jail-converted
+jail-audit-critical
 jail-created
 jail-deleted
 jail-exposed
@@ -27,6 +26,7 @@ jail-snapshot-deleted
 jail-stale-mounts-cleaned
 jail-started
 jail-stopped
+jail-suspected-compromised
 jail-unexposed
 jail-updated
 jail-upgraded

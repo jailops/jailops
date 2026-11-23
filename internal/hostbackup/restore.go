@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"jailops.net/jailops/internal/repo/catalog"
 	"os"
 	"path"
 	"strings"
 	"time"
+
+	"jailops.net/jailops/internal/repo/catalog"
 
 	"jailops.net/jailops/internal/backup"
 	"jailops.net/jailops/internal/repo/engine"
@@ -149,27 +150,11 @@ func (s *Service) preflight(ctx context.Context, req api.RestoreRequest) (api.Re
 	if err != nil {
 		return api.RestorePreflight{}, nil, err
 	}
-	if st.Generations == nil {
-		st.Generations = map[string]string{}
-	}
 	if b.Spec.Kind == "volume" {
 		pf, err := s.preflightVolume(h, req, rp, st)
 		return pf, rp, err
 	}
 	bundle := b.Spec.Bundle
-	thick := bundle.Spec.Layout == api.LayoutThick
-	var genErr string
-	if bundle.ImageGeneration != "" && !thick {
-		if s.deps.Images == nil {
-			genErr = "this host cannot look up image generations (no image manager is wired)"
-		} else if g, gerr := s.deps.Images.Resolve(ctx, rp.storage, bundle.ImageGeneration); gerr == nil {
-			st.Generations[bundle.ImageGeneration] = g.Manifest
-		} else if api.IsCode(gerr, api.CodeNotFound) {
-			delete(st.Generations, bundle.ImageGeneration)
-		} else {
-			return api.RestorePreflight{}, nil, gerr
-		}
-	}
 	st.KeyDomains = map[string]bool{}
 	if k := s.currentKey(); k != nil {
 		st.KeyDomains[k.DomainID()] = true
@@ -184,18 +169,6 @@ func (s *Service) preflight(ctx context.Context, req api.RestoreRequest) (api.Re
 	if len(volErrs) > 0 {
 		pf.OK = false
 		pf.Errors = append(pf.Errors, volErrs...)
-	}
-	if genErr != "" {
-		pf.OK = false
-		pf.Errors = append(pf.Errors, genErr)
-	}
-	// A generation that is missing from the target pool is refused: the thin
-	// root is rebuilt from it, so it must be built or imported first.
-	if !thick && bundle.ImageGeneration != "" {
-		if _, ok := st.Generations[bundle.ImageGeneration]; !ok && genErr == "" {
-			pf.OK = false
-			pf.Errors = append(pf.Errors, fmt.Sprintf("image generation %s is not present on the target storage %q; build or import it first", bundle.ImageGeneration, rp.storage))
-		}
 	}
 	pl, err := h.Place(ctx, rp.project, rp.target, rp.storage)
 	if err != nil {
@@ -233,8 +206,7 @@ func newUUID() string {
 }
 
 // RestoreWith restores a whole jail: it creates the datasets from the
-// manifest, extracts the data, rebuilds the thin root from the image
-// generation, applies the network map and keep_ip, registers the jail with a
+// manifest, extracts the data (the root included), applies the network map and keep_ip, registers the jail with a
 // new UUID (unless replace) and leaves it stopped unless asked. Any failure
 // undoes everything it created. It needs the key of the backup's key domain.
 func (s *Service) RestoreWith(ctx context.Context, req api.RestoreRequest, opts RestoreOptions) (res *RestoreResult, err error) {
@@ -272,6 +244,11 @@ func (s *Service) RestoreWith(ctx context.Context, req api.RestoreRequest, opts 
 	snap, err := engine.OpenSnapshot(ctx, remote, key.Keys, group, b.Spec.Snapshot)
 	if err != nil {
 		return nil, mapEngineErr(err)
+	}
+	// a backup of a jail with the root layout of 0.9.2 and before holds no root: refused before anything is restored or parked
+	if !holdsRoot(snap) {
+		return nil, api.Errorf(api.CodeUnsupported, "backup %s holds no root: it is the backup of a jail with a root layout of JailOps 0.9.2 and before, which this release does not restore", b.Spec.Snapshot).
+			WithHint("restore it on a host with JailOps 0.9.2 and convert the jail there (jailops jail convert NAME --layout thick)")
 	}
 	pl := rp.placement
 	bundle := b.Spec.Bundle
@@ -435,13 +412,22 @@ type materialize struct {
 	storage string
 }
 
-// materialize creates the container, the root (cloned from the image
-// generation when thin) and the data datasets of a backup below the placement
-// and extracts the data into them. Everything it creates is registered with
+// materialize creates the container, the root and the other datasets of a backup below the placement and extracts
+// the data into them. Everything it creates is registered with
 // the reverter before the step that creates it.
+// holdsRoot says whether a jail backup has the stream of the jail's root.
+func holdsRoot(snap *engine.Snapshot) bool {
+	for _, st := range snap.Manifest.Streams {
+		if rel := st.Props[propRel]; rel == "root" || rel == "" && st.Name == "root" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) materialize(ctx context.Context, rev *reverter, m materialize) (gen api.ImageGeneration, err error) {
 	bundle := m.b.Spec.Bundle
-	thick := bundle.Spec.Layout == api.LayoutThick
+	gen = api.ImageGeneration{Name: bundle.ImageGeneration, Manifest: bundle.ImageManifest}
 	pl := m.pl
 	type item struct {
 		name, rel, kind, mrel string
@@ -510,42 +496,17 @@ func (s *Service) materialize(ctx context.Context, rev *reverter, m materialize)
 		return gen, fmt.Errorf("creating %s: %w", pl.Container, err)
 	}
 
-	if !thick {
-		if err := s.fail("restore.root"); err != nil {
-			return gen, err
-		}
-		if s.deps.Images == nil {
-			return gen, api.Errorf(api.CodeUnsupported, "this daemon wires no image manager for restores")
-		}
-		if gen, err = s.deps.Images.Resolve(ctx, m.storage, bundle.ImageGeneration); err != nil {
-			return gen, err
-		}
-		if gen.Manifest != bundle.ImageManifest {
-			return gen, api.Errorf(api.CodeInvalid, "image generation %s has manifest %s, the backup needs %s", gen.Name, gen.Manifest, bundle.ImageManifest)
-		}
-		imageName, _, _ := strings.Cut(gen.Name, "#")
-		rprops := baseProps(KindRoot)
-		rprops["mountpoint"], rprops["canmount"] = pl.rootMP(), "on"
-		rprops[pGen], rprops[pImage], rprops[pManifest] = fmt.Sprint(gen.Number), imageName, gen.Manifest
-		if err := s.zfs.Clone(ctx, gen.Dataset+"@"+roSnap, pl.root(), rprops, false); err != nil {
-			return gen, fmt.Errorf("cloning the root from %s: %w", gen.Name, err)
-		}
-	}
-
 	dsOf := map[string]string{} // stream name -> dataset
 	for i, it := range items {
 		if it.rel == rootRel {
 			dsOf[it.name] = pl.Container
 			continue
 		}
-		if it.rel == "root" && !thick {
-			continue // never overlay the cloned root
-		}
 		if err := s.fail(fmt.Sprintf("restore.dataset.%d", i)); err != nil {
 			return gen, err
 		}
 		ds := path.Join(pl.Container, it.rel)
-		props := datasetProps(it.props, pl, it.rel, it.mrel, baseProps(firstNonEmpty(it.kind, KindPersistent)))
+		props := datasetProps(it.props, pl, it.rel, it.mrel, baseProps(firstNonEmpty(it.kind, KindRoot)))
 		if it.rel == "root" {
 			props["mountpoint"] = pl.rootMP()
 		}
@@ -555,8 +516,8 @@ func (s *Service) materialize(ctx context.Context, rev *reverter, m materialize)
 		dsOf[it.name] = ds
 	}
 
-	// UNVERIFIED: extraction into the container while the root and the
-	// persistent datasets are mounted below it, and that the empty mountpoint
+	// UNVERIFIED: extraction into the container while the root is mounted
+	// below it, and that the empty mountpoint
 	// directories in the container's catalog (root, ...) are accepted as they
 	// are by the extractor on FreeBSD.
 	if err := s.fail("restore.extract"); err != nil {

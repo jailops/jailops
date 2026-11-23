@@ -811,12 +811,58 @@ type pendingJail struct {
 // jail that does not exist yet, reserves its share of the quotas until
 // release is called. Nothing is created before this passes. A jail names its
 // network and storage itself or through its profiles: nothing is filled in.
+// sensitiveDevices are the device nodes whose grant reaches past the project: bpf sees the frames on the jail's epair,
+// and dri is the host's single shared GPU driver. The device is named in either field of a DevfsDevice.
+var sensitiveDevices = map[string]bool{"bpf": true, "dri": true}
+
+func deviceSensitive(d api.DevfsDevice) bool {
+	return sensitiveDevices[d.Name] || sensitiveDevices[d.Device]
+}
+
+// addedSensitiveDevices lists the sensitive devices present in now that old did not have.
+func addedSensitiveDevices(old, now []api.DevfsDevice) []string {
+	had := map[string]bool{}
+	for _, d := range old {
+		if deviceSensitive(d) {
+			had[d.Name+"\x00"+d.Device] = true
+		}
+	}
+	var out []string
+	for _, d := range now {
+		if deviceSensitive(d) && !had[d.Name+"\x00"+d.Device] {
+			name := d.Device
+			if name == "" {
+				name = d.Name
+			}
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// scheduledBaseUpgrade says whether a spec has the FreeBSD base of its jail upgraded in place on the jail's own
+// schedule (update.mode managed with update.os): the host then runs pkg as root against the jail's root, which belongs
+// to whoever holds the jail.
+func scheduledBaseUpgrade(spec api.JailSpec) bool {
+	return spec.OS != api.OSLinux && spec.Update.Mode == api.UpdateModeManaged && spec.Update.OS
+}
+
+// errScheduledBaseUpgrade refuses turning on the scheduled in-place upgrade of a jail's base for anyone but a global
+// administrator, as upgrading it on demand is (requireUpgradeRights).
+func errScheduledBaseUpgrade() *api.Error {
+	return api.Errorf(api.CodeForbidden, "update.os=true with update.mode=managed (the in-place upgrade of the jail's base on its schedule, pkg run as root of the host against the jail's root) is set by a global administrator only").
+		WithHint("ask a global administrator to set it, or leave update.os=false (or update.mode notify or manual); update.packages, update.schedule and the other update keys need no global administrator")
+}
+
 func (s *Service) admit(ctx context.Context, p project, key string, spec *api.JailSpec, old *api.JailSpec) (release func(), err error) {
 	a := ActorFrom(ctx)
 	isNew := old == nil
 	globalAdmin := a.Global && a.Perm.Satisfies(api.PermAdmin)
 	if spec.Delegate && (old == nil || !old.Delegate) && !globalAdmin {
 		return nil, api.Errorf(api.CodeForbidden, "ZFS delegation is granted by a global administrator only")
+	}
+	if scheduledBaseUpgrade(*spec) && (old == nil || !scheduledBaseUpgrade(*old)) && !globalAdmin {
+		return nil, errScheduledBaseUpgrade()
 	}
 	profs, err := s.resolveProfiles(p.Meta.Name, spec.Profiles)
 	if err != nil {
@@ -845,6 +891,37 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 	}
 	if len(eff.Devfs) > 0 && !a.Perm.Satisfies(api.PermAdmin) {
 		return nil, api.Errorf(api.CodeForbidden, "exposing device nodes needs the admin role")
+	}
+	// bpf and dri cross the project boundary: bpf sees the frames on the jail's epair, and dri is the host's single
+	// shared GPU driver that every tenant would then touch. A project admin may grant the jail-confined devices, but
+	// newly granting one of these is a global administrator's to give.
+	var oldDevfs []api.DevfsDevice
+	if old != nil {
+		oldDevfs = s.effective(api.Jail{Spec: *old}).Devfs
+	}
+	if added := addedSensitiveDevices(oldDevfs, eff.Devfs); len(added) > 0 && !isGlobalAdmin(a) {
+		return nil, api.Errorf(api.CodeForbidden, "the %s device is granted by a global administrator only", strings.Join(added, ", ")).
+			WithHint("bpf can read the frames of the jail's link and dri is the host's shared GPU: both reach past the project")
+	}
+	// A raw PF fragment is the host administrator's: authoring one already needs a global administrator (checkPolicyWas).
+	// Newly attaching a policy that carries one puts that host-level text into the jail's anchor, so an operator or
+	// project admin must not; a global administrator attaches it, as a global administrator wrote it.
+	if !isGlobalAdmin(a) {
+		oldPolicies := map[string]bool{}
+		if old != nil {
+			for _, n := range s.effective(api.Jail{Spec: *old}).Firewall.Policies {
+				oldPolicies[n] = true
+			}
+		}
+		for _, n := range eff.Firewall.Policies {
+			if oldPolicies[n] {
+				continue
+			}
+			if o, perr := s.polKind.p(p.Meta.Name).get(n); perr == nil && o.Spec.Raw != "" {
+				return nil, api.Errorf(api.CodeForbidden, "firewall policy %q carries a raw PF fragment: attaching it is a global administrator's", n).
+					WithHint("raw pf text is the host administrator's; a policy of plain rules does not need this")
+			}
+		}
 	}
 	// a forward that the change adds, removes or changes is a global administrator's to give: it takes a port of the host
 	var wasEff api.JailSpec

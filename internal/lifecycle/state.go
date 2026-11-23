@@ -18,23 +18,21 @@ import (
 
 // ZFS user properties on jail datasets.
 const (
-	PropManaged = "jailops:managed"
-	PropID      = "jailops:id"
-	PropKind    = "jailops:kind"
-	PropName    = "jailops:name"
-	PropProject = "jailops:project"
-	PropImage   = "jailops:image"
-	PropGen     = "jailops:gen"
-	PropPrevGen = "jailops:prev_gen"
-	// PropPrevImage and PropPrevRef are the image of the previous generation and the reference spec.image had, so
-	// that a rollback walks back to the right image after a move to another release.
-	PropPrevImage    = "jailops:prev_image"
-	PropPrevRef      = "jailops:prev_ref"
-	PropManifest     = "jailops:manifest"
-	PropLayout       = "jailops:layout"
+	PropManaged  = "jailops:managed"
+	PropID       = "jailops:id"
+	PropKind     = "jailops:kind"
+	PropName     = "jailops:name"
+	PropProject  = "jailops:project"
+	PropImage    = "jailops:image"
+	PropGen      = "jailops:gen"
+	PropManifest = "jailops:manifest"
+	// PropLayout is set on the container of a jail with the root layout of JailOps 0.9.2 and before (see
+	// jailState.Unsupported); a jail of this release does not set it.
+	PropLayout = "jailops:layout"
+	// OldLayoutValue is the value of PropLayout that JailOps 0.9.2 and before stored for that root layout: kept only
+	// to detect it.
+	OldLayoutValue   = "thin"
 	PropComplete     = "jailops:complete"
-	PropClass        = "jailops:class"
-	PropMerge        = "jailops:merge"
 	PropPath         = "jailops:path"
 	PropCleanupAfter = "jailops:cleanup_after"
 	PropComment      = "jailops:comment"
@@ -45,8 +43,10 @@ const (
 	PropOSRelease = "jailops:osrelease"
 	PropOS        = "jailops:os"
 
-	KindContainer  = "container"
-	KindRoot       = "root"
+	KindContainer = "container"
+	KindRoot      = "root"
+	// KindPersistent is a dataset of a jail with the root layout of JailOps 0.9.2 and before, mounted over a directory of
+	// its root (/etc, /usr/local, /var/db, ...).
 	KindPersistent = "persistent"
 	KindVolume     = "volume"
 	KindVolumes    = "volumes"
@@ -76,8 +76,6 @@ type Service struct {
 	Keys Keys
 	// Warn, when set, is told of something a stop could not finish or had to force: the jail, the event's action, what.
 	Warn func(ctx context.Context, jail, action, what string)
-	// BaseRecords, when set, is told how the pass over the base package records at a start ended (nil: in step).
-	BaseRecords func(ctx context.Context, jail string, err error)
 }
 
 func (s *Service) executor() *plan.Executor {
@@ -107,12 +105,10 @@ func validName(kind, n string) error {
 
 // dsInfo describes one dataset of a jail.
 type dsInfo struct {
-	DS    string
-	Kind  string
-	Class Class
-	Path  string // mount path inside the jail
-	Merge bool
-	MP    string // absolute mountpoint
+	DS   string
+	Kind string
+	Path string // mount path inside the jail
+	MP   string // absolute mountpoint
 	// Encrypted is set on a volume that is its own encryption root (jailops:encrypted=on).
 	Encrypted bool
 }
@@ -122,55 +118,65 @@ type jailState struct {
 	Name      string
 	Container string
 	ID        string
-	Layout    api.Layout
-	Image     string // image name
-	Gen       int
-	Prev      int
-	// PrevImage is the image of the previous generation (the jail's own image when it never moved to another) and
-	// PrevRef the reference spec.image had then.
-	PrevImage string
-	PrevRef   string
-	Manifest  string
-	Complete  bool
-	Root      string
-	Persist   []dsInfo // persistent datasets, mount order
-	Volumes   []dsInfo // the volumes attached to the jail
+	// Unsupported marks a jail with the root layout of JailOps 0.9.2 and before, which this release does not support:
+	// its root is a clone of an image generation and /etc, /usr/local, /var/db and other directories are datasets of
+	// their own (Persist). A running one can be stopped, any can be deleted and read; it does not start and every other
+	// operation is refused (refuseUnsupported).
+	Unsupported bool
+	// Image and Gen are the image generation the root was copied from: where the jail came from, nothing it depends on.
+	Image    string // image name
+	Gen      int
+	Manifest string
+	Complete bool
+	Root     string
+	Persist  []dsInfo // the datasets of an unsupported root layout mounted over the root, mount order
+	Volumes  []dsInfo // the volumes attached to the jail
 	// HostDirs are the attached volumes that are directories of the host: they have no dataset.
 	HostDirs []Attached
 	// VolumeErr is why an attached volume could not be found: the jail does not start, everything else still works.
 	VolumeErr error
-	Delegated string   // the dataset handed to the jail (zfs_delegation), empty when there is none
-	Extra     []string // root.new, root.old if present
+	Delegated string // the dataset handed to the jail (zfs_delegation), empty when there is none
+	// RootOld is the previous root a 0.9.2 conversion to thick left below the container (root.old), empty when there
+	// is none; housekeeping destroys it after its retention (CleanupRootOld).
+	RootOld string
+	// Leftovers are root.new and root.stale below the container: datasets only an interrupted run of JailOps 0.9.2
+	// leaves.
+	Leftovers []string
 }
 
-func (st *jailState) hasRootOld() bool   { return st.has("/root.old") }
-func (st *jailState) hasRootNew() bool   { return st.has("/root.new") }
-func (st *jailState) hasRootStale() bool { return st.has("/root.stale") }
-func (st *jailState) has(suffix string) bool {
-	for _, e := range st.Extra {
-		if strings.HasSuffix(e, suffix) {
-			return true
-		}
+// refuseUnsupported refuses every operation but stop and delete on a jail with an unsupported root layout.
+func (st *jailState) refuseUnsupported() error {
+	if !st.Unsupported {
+		return nil
 	}
-	return false
+	return UnsupportedLayoutError(plainName(st.Name))
 }
 
-// all returns every dataset of the snapshot set: container, root, persistent and the delegated dataset (not
-// root.new/root.old, and not the volumes attached to the jail: they belong to the project and are never snapshotted,
-// rolled back or copied with a jail).
+// UnsupportedLayoutError is the refusal of an operation on a jail with the root layout of JailOps 0.9.2 and before.
+func UnsupportedLayoutError(name string) error {
+	return api.Errorf(api.CodeUnsupported, "%s", UnsupportedLayoutMessage(name)).
+		WithHint("the jail was made by an earlier release of JailOps: create a new jail and move its data over (its datasets stay on the pool as they are), or, before upgrading the host, convert it with `jailops jail convert " + name + " --layout thick` on that earlier release (docs/upgrade.md)")
+}
+
+// UnsupportedLayoutMessage says what a jail with the root layout of JailOps 0.9.2 and before is to this release.
+func UnsupportedLayoutMessage(name string) string {
+	return "jail " + name + " has a root layout this release does not support (a clone of an image with separate datasets for /etc, /usr/local and /var, made by JailOps 0.9.2 or earlier): it does not start; a running one can be stopped, and it can be deleted"
+}
+
+// all returns every dataset of the snapshot set: container, root and the delegated dataset (not root.old, and not
+// the volumes attached to the jail: they belong to the project and are never snapshotted, rolled back or copied with
+// a jail).
 func (st *jailState) all() []string {
 	out := []string{st.Container, st.Root}
-	for _, d := range st.Persist {
-		out = append(out, d.DS)
-	}
 	if st.Delegated != "" {
 		out = append(out, st.Delegated)
 	}
 	return out
 }
 
-// mountOrder is root first, then persistent datasets by path depth. The volumes attached to the jail are mounted on
-// the host where their own mountpoint is (the jail reaches them through nullfs) and stay mounted when the jail stops.
+// mountOrder is root first, then, for an unsupported root layout, the datasets mounted over it by path depth. The volumes attached
+// to the jail are mounted on the host where their own mountpoint is (the jail reaches them through nullfs) and stay
+// mounted when the jail stops.
 func (st *jailState) mountOrder() []string {
 	out := []string{st.Root}
 	for _, d := range st.Persist {
@@ -201,16 +207,9 @@ func (s *Service) observe(ctx context.Context, name string) (*jailState, error) 
 		return nil, api.Errorf(api.CodeNotFound, "jail %q does not exist", name)
 	}
 	st := &jailState{Name: name, Container: c, ID: s.prop(ctx, c, PropID), Root: s.Cfg.at(name).rootDS(),
-		Layout: api.Layout(s.prop(ctx, c, PropLayout)), Complete: s.prop(ctx, c, PropComplete) == "on"}
-	// the container carries the image name, so it is known even in the middle
-	// of a root swap when no dataset is named root
+		Unsupported: s.prop(ctx, c, PropLayout) == OldLayoutValue, Complete: s.prop(ctx, c, PropComplete) == "on"}
 	st.Image = s.prop(ctx, c, PropImage)
 	st.Gen, _ = strconv.Atoi(s.prop(ctx, st.Root, PropGen))
-	st.Prev, _ = strconv.Atoi(s.prop(ctx, st.Root, PropPrevGen))
-	if st.PrevImage = s.prop(ctx, st.Root, PropPrevImage); st.PrevImage == "" {
-		st.PrevImage = st.Image
-	}
-	st.PrevRef = s.prop(ctx, st.Root, PropPrevRef)
 	st.Manifest = s.prop(ctx, st.Root, PropManifest)
 	desc, err := s.ZFS.Descendants(ctx, c)
 	if err != nil {
@@ -220,8 +219,10 @@ func (s *Service) observe(ctx context.Context, name string) (*jailState, error) 
 		rel := strings.TrimPrefix(d, c+"/")
 		switch {
 		case rel == "root":
-		case rel == "root.new" || rel == "root.old" || rel == "root.stale":
-			st.Extra = append(st.Extra, d)
+		case rel == "root.old":
+			st.RootOld = d
+		case rel == "root.new" || rel == "root.stale":
+			st.Leftovers = append(st.Leftovers, d)
 		case rel == "data":
 		case rel == "delegated":
 			st.Delegated = d
@@ -238,6 +239,8 @@ func (s *Service) observe(ctx context.Context, name string) (*jailState, error) 
 		})
 	}
 	sortByDepth(st.Persist)
+	// a jail of an older release that has no layout property has the old layout when it has its datasets
+	st.Unsupported = st.Unsupported || len(st.Persist) > 0
 	att, verr := s.Cfg.attached(name)
 	st.VolumeErr = verr
 	for _, a := range att {
@@ -245,52 +248,26 @@ func (s *Service) observe(ctx context.Context, name string) (*jailState, error) 
 			st.HostDirs = append(st.HostDirs, a)
 			continue
 		}
-		st.Volumes = append(st.Volumes, dsInfo{DS: a.Dataset, Kind: KindVolume, Class: ClassData, Path: a.Path, MP: a.Mountpoint, Encrypted: a.Encrypted})
+		st.Volumes = append(st.Volumes, dsInfo{DS: a.Dataset, Kind: KindVolume, Path: a.Path, MP: a.Mountpoint, Encrypted: a.Encrypted})
 	}
 	sortByDepth(st.Volumes)
 	return st, nil
 }
 
 func (s *Service) info(ctx context.Context, ds, kind string) dsInfo {
-	return dsInfo{DS: ds, Kind: kind, Class: Class(s.prop(ctx, ds, PropClass)), Path: s.prop(ctx, ds, PropPath),
-		Merge: s.prop(ctx, ds, PropMerge) == "on", MP: s.prop(ctx, ds, "mountpoint"), Encrypted: kind == KindVolume && s.prop(ctx, ds, PropEncrypted) == "on"}
+	return dsInfo{DS: ds, Kind: kind, Path: s.prop(ctx, ds, PropPath), MP: s.prop(ctx, ds, "mountpoint"),
+		Encrypted: kind == KindVolume && s.prop(ctx, ds, PropEncrypted) == "on"}
 }
 
-func (s *Service) mergeDatasets(st *jailState) []string {
-	var out []string
-	for _, d := range st.Persist {
-		if d.Merge {
-			out = append(out, d.DS)
-		}
-	}
-	return out
-}
-
-// dataDatasets are the datasets a "data" rollback restores.
+// dataDatasets are the datasets a "data" rollback restores: the delegated dataset.
 func dataDatasets(st *jailState) []string {
-	var out []string
-	for _, d := range st.Persist {
-		if d.Class != ClassSystem {
-			out = append(out, d.DS)
-		}
-	}
 	if st.Delegated != "" {
-		out = append(out, st.Delegated)
+		return []string{st.Delegated}
 	}
-	return out
+	return nil
 }
 
-func (s *Service) systemDatasets(st *jailState) []string {
-	var out []string
-	for _, d := range st.Persist {
-		if d.Class == ClassSystem {
-			out = append(out, d.DS)
-		}
-	}
-	return out
-}
-
-// mountTree mounts the root, the persistent datasets and the volumes, creating
+// mountTree mounts the root (with the datasets of an unsupported root layout) and the volumes, creating
 // volume mount directories inside the root first. Mount is idempotent.
 func (s *Service) mountTree(ctx context.Context, name string) error {
 	st, err := s.observe(ctx, name)
@@ -400,13 +377,15 @@ func (s *Service) doStart(ctx context.Context, name string) error {
 	if err := s.mountTree(ctx, name); err != nil {
 		return err
 	}
-	s.baseRecordsAtStart(ctx, name)
 	if err := s.Hooks.PreStart(ctx, name); err != nil {
 		return err
 	}
 	if up, err := s.Jails.Running(ctx, name); err != nil {
 		return err
 	} else if !up {
+		if err := s.markStarted(ctx, name); err != nil {
+			return err
+		}
 		if err := s.Jails.Start(ctx, name); err != nil {
 			return err
 		}
@@ -453,7 +432,7 @@ type Record struct {
 }
 
 // Bundle is bundle.json, the restore closure this package knows about: the
-// spec and the image generation. Networks, policies and sealed secret
+// spec and the image generation the root was copied from. Networks, policies and sealed secret
 // references are added by their owners (design section 9).
 type Bundle struct {
 	Version  int                `json:"version"`
@@ -464,7 +443,7 @@ type Bundle struct {
 	Written  time.Time          `json:"written_at"`
 }
 
-// BundleImage names the generation the root was built from.
+// BundleImage names the generation the root was copied from.
 type BundleImage struct {
 	Ref        string `json:"ref"`
 	Name       string `json:"name"`
@@ -525,4 +504,24 @@ func (s *Service) destroyIfExists(ds string) func(context.Context) error {
 		}
 		return s.ZFS.DestroyRecursive(ctx, ds)
 	}
+}
+
+// NeverStartedFile is the file in a jail's container that says no jail has run in its root yet (priv.NeverStartedFile):
+// written when the jail is made, removed at its first start.
+const NeverStartedFile = "never-started"
+
+// markStarted removes NeverStartedFile before a start: from then on the root is the tenant's. A start that cannot
+// remove it does not start.
+func (s *Service) markStarted(ctx context.Context, name string) error {
+	p := s.Cfg.at(name).containerMP() + "/" + NeverStartedFile
+	ok, err := s.Files.Exists(ctx, p)
+	if err != nil {
+		return fmt.Errorf("the never-started marker of %s: %w", name, err)
+	}
+	if ok {
+		if err := s.Files.RemoveAll(ctx, p); err != nil {
+			return fmt.Errorf("the never-started marker of %s: %w", name, err)
+		}
+	}
+	return nil
 }

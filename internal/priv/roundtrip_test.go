@@ -469,12 +469,12 @@ func TestRunnerRoundTrip(t *testing.T) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	f.runner.Add(run.Rule{Name: "/usr/sbin/pkg", Args: []string{"-r", root, "install", "-y", "nginx"}, Fn: func(c run.Cmd) (run.Result, error) {
+	f.runner.Add(run.Rule{Name: "/usr/sbin/pkg", Args: []string{"-C", run.AnyArg, "-o", "PKG_ENABLE_PLUGINS=false", "-o", "RUN_SCRIPTS=false", "-r", root, "install", "-y", "nginx"}, Fn: func(c run.Cmd) (run.Result, error) {
 		in, _ := io.ReadAll(c.Stdin)
 		fmt.Fprint(c.Stdout, "installed ", string(in))
 		return run.Result{}, nil
 	}})
-	f.runner.OnFail("/usr/sbin/pkg", []string{"-r", root, "install", "-y", "broken"}, 70, "no such package\n")
+	f.runner.OnFail("/usr/sbin/pkg", []string{"-C", run.AnyArg, "-o", "PKG_ENABLE_PLUGINS=false", "-o", "RUN_SCRIPTS=false", "-r", root, "install", "-y", "broken"}, 70, "no such package\n")
 	r := f.client.Runner()
 	res, err := r.Run(ctx, run.Cmd{Name: "pkg", Args: []string{"-r", root, "install", "-y", "nginx"}, Stdin: strings.NewReader("now")})
 	if err != nil || string(res.Stdout) != "installed now" {

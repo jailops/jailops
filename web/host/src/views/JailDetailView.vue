@@ -9,18 +9,17 @@ import { can, hasExt } from '@jailops/shared/composables/session'
 import { askLifecycle, askDelete, isLocked, lifecycle, type Lifecycle } from '@/composables/jailActions'
 import { confirmAction } from '@jailops/shared/composables/confirm'
 import { canEditLabels, canFiles, canShell, loadJailTab, saveJailTab } from '@/composables/shell'
-import { projectState } from '@/composables/project'
+import { isGlobalAdmin, projectState } from '@/composables/project'
 import { jailId, pushRecent } from '@/lib/search'
 import JailLabels from '@/components/JailLabels.vue'
 import { useTabQuery } from '@jailops/shared/composables/tabs'
 import TabBar from '@jailops/shared/components/TabBar.vue'
 import TimeStamp from '@jailops/shared/components/TimeStamp.vue'
-import { codeText, conditionProblem } from '@jailops/shared/lib/describe'
+import { codeText, conditionFault, conditionProblem } from '@jailops/shared/lib/describe'
 import UnlockDialog from '@/components/UnlockDialog.vue'
 import AttachVolumeDialog from '@/components/AttachVolumeDialog.vue'
 import LockChip from '@/components/LockChip.vue'
 import { runOp } from '@jailops/shared/composables/ops'
-import JailBasePackages from '@/components/JailBasePackages.vue'
 import { bytes, sentence, snapshotLabel } from '@jailops/shared/lib/format'
 import StatePill from '@/components/StatePill.vue'
 import Icon from '@jailops/shared/components/Icon.vue'
@@ -32,7 +31,6 @@ import RenameDialog from '@/components/RenameDialog.vue'
 import JailExportDialog from '@/components/JailExportDialog.vue'
 import { canExport } from '@/composables/xport'
 import CopyDialog from '@/components/CopyDialog.vue'
-import ConvertDialog from '@/components/ConvertDialog.vue'
 import { canRename } from '@/composables/rename'
 import { renamedAddress } from '@/lib/rename'
 import { sourcesOf, flatten } from '@/lib/configKeys'
@@ -44,7 +42,6 @@ import JailUpdatesTab from '@/components/JailUpdatesTab.vue'
 import JailLogsTab from '@/components/JailLogsTab.vue'
 import JailAccessTab from '@/components/JailAccessTab.vue'
 import JailReachTab from '@/components/JailReachTab.vue'
-import JailChangesTab from '@/components/JailChangesTab.vue'
 import NotesPanel from '@/components/NotesPanel.vue'
 import { isInstalledApp } from '@/lib/access'
 import ProvisionPanel from '@/components/ProvisionPanel.vue'
@@ -105,8 +102,6 @@ const tabList = computed(() => ([
   ['logs', s.logs.tab, hasExt('jail_logs')],
   // what reaches the jail and why, for every jail
   ['reach', s.reach.tab, hasExt('jail_reach')],
-  // only a thin jail has an image to compare with
-  ['changes', s.diff.tab, hasExt('jail_diff') && jail.value?.spec.layout !== 'thick'],
   // who may connect: for the jails an app installation made
   ['access', s.appAccess.tab, hasExt('app_access') && isInstalledApp(jail.value)],
   // files to and from a running jail: the role of the shell
@@ -156,6 +151,8 @@ watch(() => jail.value?.metadata.name, (n) => { if (n) pushRecent({ id: jailId(p
 const rollbackOpen = ref(false)
 const rollbackSnap = ref<string | undefined>()
 const upgradeOpen = ref(false)
+// an in-place upgrade of a FreeBSD jail runs pkg as root of the host against the jail's root: a global administrator's
+const mayUpgrade = computed(() => jail.value?.spec.os === 'linux' || isGlobalAdmin())
 const unlockOpen = ref(false)
 const attachOpen = ref(false)
 function detach(volume: string): void {
@@ -187,7 +184,6 @@ function renamed(to: string): void {
   void router.replace(renamedAddress('jail', name.value, to, route.fullPath) ?? `/jails/${encodeURIComponent(to)}`)
 }
 const copyOpen = ref(false)
-const convertOpen = ref(false)
 function copied(to: string): void {
   void router.push(`/jails/${encodeURIComponent(to)}`)
 }
@@ -240,7 +236,7 @@ const rows = computed(() => {
 const attentionItems = computed(() => {
   const j = jail.value
   if (!j) return []
-  return (j.status.conditions ?? []).filter((c) => conditionProblem(c) && c.status === 'False' && c.reason !== 'ApplyFailed')
+  return (j.status.conditions ?? []).filter((c) => conditionFault(c) && c.reason !== 'ApplyFailed')
 })
 </script>
 
@@ -269,10 +265,9 @@ const attentionItems = computed(() => {
               <button class="btn" type="button" @click="act('restart')"><Icon name="rotateCw" />{{ s.jails.restart }}</button>
             </template>
             <button v-if="can('snapshots')" class="btn" type="button" @click="openRollback()" :disabled="!snaps.length"><Icon name="undo" />{{ s.jail.rollback }}</button>
-            <button class="btn" type="button" @click="upgradeOpen = true"><Icon name="arrowUp" />{{ s.jail.upgrade }}</button>
+            <button v-if="mayUpgrade" class="btn" type="button" data-test="jail-upgrade" @click="upgradeOpen = true"><Icon name="arrowUp" />{{ s.jail.upgrade }}</button>
             <button v-if="canExport()" class="btn" type="button" data-test="jail-export" @click="exportOpen = true"><Icon name="download" />{{ s.xport.exportOpen }}</button>
             <button v-if="hasExt('jail_copy')" class="btn" type="button" data-test="jail-copy" @click="copyOpen = true"><Icon name="copy" />{{ s.copy.open }}</button>
-            <button v-if="hasExt('jail_convert') && jail.spec.os !== 'linux'" class="btn" type="button" data-test="jail-convert" @click="convertOpen = true">{{ s.convert.open }}</button>
             <template v-if="mayRename">
               <button class="btn" type="button" data-test="jail-rename" :aria-disabled="!!renameWhy" :aria-describedby="renameWhy ? 'jail-rename-why' : undefined" @click="openRename">{{ s.rename.open(s.rename.kinds.jail) }}</button>
               <span v-if="renameWhy" id="jail-rename-why" class="why-disabled" data-test="jail-rename-why">{{ renameWhy }}</span>
@@ -300,7 +295,6 @@ const attentionItems = computed(() => {
         <JailUpdatesTab v-else-if="tab === 'updates'" :jail="jail" @saved="l.reload" />
         <JailLogsTab v-else-if="tab === 'logs'" :jail="jail" :file="logFile" />
         <JailReachTab v-else-if="tab === 'reach'" :jail="jail" />
-        <JailChangesTab v-else-if="tab === 'changes'" :jail="jail" />
         <JailAccessTab v-else-if="tab === 'access'" :jail="jail" />
         <JailFilesTab v-else-if="tab === 'files'" :jail="jail" />
         <JailExecTab v-else-if="tab === 'console'" :jail="jail" :connect="shellAsk" @changed="l.reload" />
@@ -316,7 +310,6 @@ const attentionItems = computed(() => {
                   <td class="mono" :data-label="s.jail.spec">{{ r.spec }}</td>
                   <td class="mono" :data-label="s.jail.status">{{ r.status }}<span v-if="r.diff && hasDrift" class="pill warn" style="margin-left: 8px">{{ s.jails.drift }}</span></td>
                 </tr>
-                <tr><th scope="row">{{ s.jail.layout }}</th><td :data-label="s.jail.spec">{{ jail.spec.layout || (jail.spec.os === 'linux' ? 'thick' : 'thin') }}</td><td class="faint" :data-label="s.jail.status">-</td></tr>
                 <tr><th scope="row">{{ s.jail.hostname }}</th><td class="mono" :data-label="s.jail.spec">{{ jail.spec.hostname || jail.metadata.name }}</td><td class="faint" :data-label="s.jail.status">-</td></tr>
                 <tr><th scope="row">{{ s.jail.update }}</th><td :data-label="s.jail.spec">{{ jail.spec.update?.mode || 'manual' }}<span v-if="jail.spec.update?.schedule" class="faint"> · {{ jail.spec.update.schedule }}</span></td><td class="faint" :data-label="s.jail.status">-</td></tr>
                 <tr>
@@ -334,11 +327,10 @@ const attentionItems = computed(() => {
               <ul class="plain"><li v-for="d in jail.status.drift" :key="d" class="mono">{{ d }}</li></ul>
             </Callout>
             <p v-else class="muted">{{ s.jail.driftNone }}</p>
-            <JailBasePackages :jail="jail" @done="l.reload" />
             <template v-if="jail.status.conditions?.length">
               <h3 style="margin-top: 12px">{{ s.jail.conditions }}</h3>
               <ul class="plain">
-                <li v-for="c in jail.status.conditions" :key="c.type"><span class="pill" :class="c.status === 'True' ? 'ok' : conditionProblem(c) ? 'danger' : ''">{{ c.reason && c.status === 'False' ? codeText(c.reason) : sentence(c.type) }}</span> <span class="muted">{{ c.message }}</span></li>
+                <li v-for="c in jail.status.conditions" :key="c.type"><span class="pill" :class="conditionProblem(c) ? 'danger' : c.status === 'True' ? 'ok' : ''">{{ c.reason && (c.status === 'False' || conditionProblem(c)) ? codeText(c.reason) : sentence(c.type) }}</span> <span class="muted">{{ c.message }}</span></li>
               </ul>
             </template>
           </div>
@@ -430,8 +422,7 @@ const attentionItems = computed(() => {
         </div>
         <RollbackDialog :open="rollbackOpen" :jail="jail.metadata.name" :snapshots="snaps" :initial="rollbackSnap" @close="rollbackOpen = false" @done="l.reload" />
         <UpgradeDialog :open="upgradeOpen" :jail="jail" @close="upgradeOpen = false" @done="l.reload" />
-        <JailExportDialog :open="exportOpen" :jail="jail.metadata.name" :thick="jail.spec.layout === 'thick'" :snapshots="snaps" :has-volumes="!!jail.spec.volumes?.length" @close="exportOpen = false" />
-        <ConvertDialog :open="convertOpen" :jail="jail" @close="convertOpen = false" @done="l.reload" />
+        <JailExportDialog :open="exportOpen" :jail="jail.metadata.name" :snapshots="snaps" :has-volumes="!!jail.spec.volumes?.length" @close="exportOpen = false" />
         <CopyDialog :open="copyOpen" :jail="jail" :snapshots="snaps" @close="copyOpen = false" @done="copied" />
         <RenameDialog :open="renameOpen" kind="jail" :name="jail.metadata.name" :etag="l.data.value?.etag" @close="renameOpen = false" @done="renamed" />
         <UnlockDialog :open="unlockOpen" :volume="jail.status.locked?.[0] ?? ''" @close="unlockOpen = false" @done="l.reload" />

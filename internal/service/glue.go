@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,6 +73,16 @@ func (a *jailRuntimeAdapter) HostRelease(ctx context.Context) (string, error) {
 	return r, nil
 }
 
+// HostOSVersion is the kernel's __FreeBSD_version (kern.osreldate): pkg is held to it when it upgrades the base of a
+// jail.
+func (a *jailRuntimeAdapter) HostOSVersion(ctx context.Context) (int, error) {
+	r, err := a.s.sysctl(ctx, "kern.osreldate")
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(r))
+}
+
 // imageAdapter implements lifecycle.Images over the image manager.
 type imageAdapter struct{ s *Service }
 
@@ -100,6 +111,11 @@ func (a *imageAdapter) Peek(ctx context.Context, ref string) (api.ImageGeneratio
 		err = gerr
 	}
 	return api.ImageGeneration{}, err
+}
+
+// ImageSpec is the spec of an image: the release and package source a jail is upgraded in place against.
+func (a *imageAdapter) ImageSpec(ctx context.Context, image string) (api.ImageSpec, error) {
+	return a.s.imageSpec(ctx, image)
 }
 
 func (a *imageAdapter) Collect(ctx context.Context) ([]string, error) {

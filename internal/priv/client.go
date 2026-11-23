@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"jailops.net/jailops/internal/jailaudit"
 	"jailops.net/jailops/internal/sys/run"
-	"jailops.net/jailops/internal/sys/zfs"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -499,13 +499,20 @@ func (c *Client) ProbeSource(ctx context.Context, q SourceProbeReq) (SourceProbe
 }
 
 // StaleMounts implements Host.
-func (c *Client) TreeDiff(ctx context.Context, q TreeDiffReq) (zfs.DiffResult, error) {
-	return callJSON[zfs.DiffResult](ctx, c, OpFSTreeDiff, q, callOpts{})
-}
-
 func (c *Client) StaleMounts(ctx context.Context) ([]StaleMount, error) {
 	r, err := callJSON[StaleMountsRes](ctx, c, OpMountsStale, empty{}, callOpts{})
 	return r.Mounts, err
+}
+
+// CheckRoot implements Host.
+func (c *Client) CheckRoot(ctx context.Context, q RootCheckReq) error {
+	_, err := callJSON[empty](ctx, c, OpJailCheck, q, callOpts{})
+	return err
+}
+
+// AuditRoot implements Host.
+func (c *Client) AuditRoot(ctx context.Context, q RootAuditReq) (jailaudit.Facts, error) {
+	return callJSON[jailaudit.Facts](ctx, c, OpJailAudit, q, callOpts{})
 }
 
 // HealJail implements Host.

@@ -6,10 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 
 	"jailops.net/jailops/internal/imagegen"
-	"jailops.net/jailops/internal/lifecycle"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
@@ -20,37 +18,6 @@ func jailDisplay(project, name string) string {
 		return name
 	}
 	return project + "/" + name
-}
-
-// jailRefs lists the jails that reference images; keep selects the projects
-// whose jails are listed (nil lists every jail).
-func (s *Service) jailRefs(ctx context.Context, keep func(project string) bool) []imagegen.JailRef {
-	s.mu.RLock()
-	keys := sortedKeys(s.jails)
-	var out []imagegen.JailRef
-	var rootKeys []string
-	for _, k := range keys {
-		j := s.jails[k].jail
-		if keep != nil && !keep(j.Metadata.Project) {
-			continue
-		}
-		out = append(out, imagegen.JailRef{Name: jailDisplay(j.Metadata.Project, j.Metadata.Name), Image: j.Spec.Image, Current: j.Status.ImageGeneration})
-		rootKeys = append(rootKeys, k)
-	}
-	s.mu.RUnlock()
-	if s.d.ZFS != nil {
-		for i := range out {
-			ds := s.lcfg.RootDS(rootKeys[i])
-			if g, _ := s.d.ZFS.Get(ctx, ds, lifecycle.PropPrevGen); g != "" {
-				if img, _, ok := cutImage(out[i].Current); ok {
-					if n, err := strconv.Atoi(g); err == nil {
-						out[i].Previous = imagegen.GenerationName(img, n)
-					}
-				}
-			}
-		}
-	}
-	return out
 }
 
 func cutImage(gen string) (img, rest string, ok bool) {
@@ -133,11 +100,6 @@ func (s *Service) imageToAPI(ctx context.Context, o object[api.ImageSpec]) api.I
 	img := api.Image{Metadata: o.Meta, Spec: o.Spec}
 	if st, _, ok := s.observeAcross(ctx, o.Meta.Name); ok {
 		img.Status = st
-		var keep func(string) bool
-		if a := ActorFrom(ctx); !a.Global {
-			keep = a.CanProject
-		}
-		imagegen.ApplyRefs(o.Meta.Name, &img.Status, s.jailRefs(ctx, keep))
 	}
 	img.Status.AutoUpgrade = s.autoUpgradeStatus(o.Meta.Name, o.Spec)
 	return img
@@ -322,8 +284,8 @@ func (s *Service) PatchImage(ctx context.Context, name string, patch map[string]
 	return s.UpdateImage(ctx, name, out, cur.Metadata.Generation)
 }
 
-// DeleteImage removes an image with all its generations. It is refused, naming the jails, while any jail
-// references the image.
+// DeleteImage removes an image with all its generations. No jail depends on an image (a jail is a copy of a
+// generation); a generation that still has ZFS clones is parked until they are gone (imagegen.Manager.Delete).
 func (s *Service) DeleteImage(ctx context.Context, name string, expect int64) error {
 	if err := requireGlobal(ctx, "deleting an image"); err != nil {
 		return err
@@ -336,27 +298,13 @@ func (s *Service) DeleteImage(ctx context.Context, name string, expect int64) er
 	if !s.imgKind.exists(name) {
 		return notFound("image", name)
 	}
-	var users []string
-	s.mu.RLock()
-	for _, k := range sortedKeys(s.jails) {
-		j := s.jails[k].jail
-		if ref, err := validate.ParseImageRef(j.Spec.Image); err == nil && ref.Name == name {
-			users = append(users, jailDisplay(j.Metadata.Project, j.Metadata.Name))
-		}
-	}
-	s.mu.RUnlock()
-	if len(users) > 0 {
-		return api.Errorf(api.CodeImageInUse, "image %q is used by jail %s", name, strings.Join(users, ", ")).
-			WithDetail("jails", strings.Join(users, ",")).WithHint("upgrade or destroy those jails first")
-	}
-	refs := s.jailRefs(ctx, nil)
 	for _, m := range s.imageManagers() {
 		o, err := m.Observe(ctx, name)
 		if err != nil {
 			continue
 		}
 		for _, g := range o.Status.Generations {
-			if _, err := m.Delete(ctx, name, g.Number, refs, false); err != nil {
+			if _, err := m.Delete(ctx, name, g.Number, false); err != nil {
 				return err
 			}
 		}
@@ -485,53 +433,10 @@ func (s *Service) buildBody(ctx context.Context, h *OpHandle, mgr *imagegen.Mana
 
 // imageUpgradeTarget is one jail that uses an image, with the reason it is
 // not moved (empty for a jail that is).
-type imageUpgradeTarget struct {
-	key  string
-	jail api.Jail
-	skip string
-}
-
-// imageUpgradeTargets lists the jails that use an image in the projects the
-// caller may use (one project when named), in key order. A thick jail (every
-// Linux jail is one) is updated in place, not rebased; a strategy other than
-// rebase and a spec that pins a generation are the user's choice and are
-// left alone.
-func (s *Service) imageUpgradeTargets(ctx context.Context, image, project string) []imageUpgradeTarget {
-	a := ActorFrom(ctx)
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var out []imageUpgradeTarget
-	for _, k := range sortedKeys(s.jails) {
-		j := s.jails[k].jail
-		ref, err := validate.ParseImageRef(j.Spec.Image)
-		if err != nil || ref.Name != image || !a.CanProject(j.Metadata.Project) || project != "" && j.Metadata.Project != project {
-			continue
-		}
-		t := imageUpgradeTarget{key: k, jail: cloneJail(j)}
-		switch {
-		case j.Spec.OS == api.OSLinux:
-			t.skip = "a Linux jail is thick and is updated in place"
-		case j.Spec.Layout == api.LayoutThick:
-			t.skip = "a thick jail is updated in place"
-		case ref.Pinned:
-			t.skip = "pinned to " + j.Spec.Image
-		case len(s.jails[k].locked) > 0:
-			t.skip = "locked: its encrypted volumes wait for a passphrase (jailops volume unlock)"
-		}
-		out = append(out, t)
-	}
-	return out
-}
-
-// UpgradeImage builds the next generation of an image from its newest one
-// and moves the thin jails that use the image to it, one at a time, as one
-// operation. Each move is the OS update of the update pipeline (snapshot, new
-// root, /etc merge, swap, health check, automatic root rollback, a history
-// record and the update events). A jail that fails or needs a human stops
-// the operation before the next jail: a bad generation is not rolled across
-// the host. A stopped jail is moved like a running one (started for the
-// health check, then stopped again). When the package set did not change no
-// generation is kept and no jail is touched.
+// UpgradeImage builds the next generation of an image from its newest one, with the packages of its repository at
+// their newest versions, as one operation. No jail is touched: a jail is a copy of a generation and is upgraded in
+// place (jail upgrade); the new generation is what new jails are copied from. When the package set did not change no
+// generation is kept.
 func (s *Service) UpgradeImage(ctx context.Context, image string, req api.ImageUpgrade) (api.Operation, error) {
 	if err := requireGlobal(ctx, "upgrading an image"); err != nil {
 		return api.Operation{}, err
@@ -542,148 +447,37 @@ func (s *Service) UpgradeImage(ctx context.Context, image string, req api.ImageU
 	if !s.imgKind.exists(image) {
 		return api.Operation{}, notFound("image", image)
 	}
-	if req.Project != "" {
-		if _, err := s.projKind.get(req.Project); err != nil || !ActorFrom(ctx).CanProject(req.Project) {
-			return api.Operation{}, notFound("project", req.Project)
-		}
-	}
-	if req.To != "" {
-		return s.moveImageJails(ctx, image, req)
-	}
 	mgr, err := s.buildPool(req.Storage)
 	if err != nil {
 		return api.Operation{}, err
 	}
+	from := s.newestGeneration(ctx, image)
+	if from == 0 {
+		return api.Operation{}, api.Errorf(api.CodeNotFound, "image %q has no generation to upgrade", image).
+			WithHint("build the first one with 'jailops image build " + image + "'")
+	}
+	return s.Submit(ctx, OpSpec{
+		Action: api.OpImageUpgrade, Description: "Upgrade image " + image, Locks: []string{imageLock(image)},
+		Resources: map[string][]string{"images": {"/api/v1/images/" + image}},
+		Run: func(ctx context.Context, h *OpHandle) (any, error) {
+			return s.upgradeImageRun(ctx, h, mgr, image, from, req)
+		},
+	})
+}
+
+// newestGeneration is the number of the newest generation of an image on any pool, 0 when it has none.
+func (s *Service) newestGeneration(ctx context.Context, image string) int {
 	st, _, _ := s.observeAcross(ctx, image)
 	from := 0
 	for _, g := range st.Generations {
 		from = max(from, g.Number)
 	}
-	if from == 0 {
-		return api.Operation{}, api.Errorf(api.CodeNotFound, "image %q has no generation to upgrade", image).
-			WithHint("build the first one with 'jailops image build " + image + "'")
-	}
-	targets := s.imageUpgradeTargets(ctx, image, req.Project)
-	resources := map[string][]string{"images": {"/api/v1/images/" + image}}
-	for _, t := range targets {
-		if t.skip == "" {
-			resources["jails"] = append(resources["jails"], "/api/v1/jails/"+t.jail.Metadata.Name)
-		}
-	}
-	return s.Submit(ctx, OpSpec{
-		Action: api.OpImageUpgrade, Description: "Upgrade image " + image, Locks: []string{imageLock(image)}, Resources: resources,
-		Run: func(ctx context.Context, h *OpHandle) (any, error) {
-			return s.upgradeImageRun(ctx, h, mgr, image, from, req, targets, false)
-		},
-	})
+	return from
 }
 
-// moveImageJails moves the thin jails that use an image to the newest generation of another image (a new release),
-// one at a time, as one operation: every move is a `jail upgrade --image` (snapshot, new root, /etc merge, swap,
-// health check, root rollback, history record). The first jail that fails stops it. Nothing is built: the other
-// image has a generation already. A dry run checks every jail and changes nothing.
-func (s *Service) moveImageJails(ctx context.Context, image string, req api.ImageUpgrade) (api.Operation, error) {
-	to := strings.TrimSpace(req.To)
-	ref, err := validate.ParseImageRef(to)
-	switch {
-	case err != nil:
-		return api.Operation{}, err
-	case ref.Pinned:
-		return api.Operation{}, invalid("to names an image, not a generation: %q", to)
-	case ref.Name == image:
-		return api.Operation{}, invalid("to names the image itself: leave it out to build the next generation")
-	case req.NoJails:
-		return api.Operation{}, invalid("no_jails and to cannot be combined: moving the jails is all a move to another image does")
-	case !s.imgKind.exists(ref.Name):
-		return api.Operation{}, notFound("image", ref.Name)
-	}
-	st, _, _ := s.observeAcross(ctx, ref.Name)
-	newest := api.ImageGeneration{}
-	for _, g := range st.Generations {
-		if g.Number > newest.Number {
-			newest = g
-		}
-	}
-	if newest.Number == 0 {
-		return api.Operation{}, api.Errorf(api.CodeNotFound, "image %q has no generation to move the jails to", ref.Name).
-			WithHint("build the first one with 'jailops image build " + ref.Name + "'")
-	}
-	targets := s.imageUpgradeTargets(ctx, image, req.Project)
-	resources := map[string][]string{"images": {"/api/v1/images/" + image, "/api/v1/images/" + ref.Name}}
-	for _, t := range targets {
-		if t.skip == "" {
-			resources["jails"] = append(resources["jails"], "/api/v1/jails/"+t.jail.Metadata.Name)
-		}
-	}
-	return s.Submit(ctx, OpSpec{
-		Action: api.OpImageMove, Description: "Move the jails of image " + image + " to " + ref.Name, Locks: []string{imageLock(image), imageLock(ref.Name)}, Resources: resources,
-		Run: func(ctx context.Context, h *OpHandle) (any, error) {
-			out := api.ImageUpgradeResult{From: imagegen.GenerationName(image, 0), DryRun: req.DryRun, Jails: []api.ImageUpgradeJail{}}
-			g := newest
-			out.Generation = &g
-			stopped := ""
-			for i, t := range targets {
-				j := api.ImageUpgradeJail{Jail: t.jail.Metadata.Name, Project: t.jail.Metadata.Project, From: t.jail.Status.ImageGeneration}
-				switch {
-				case t.skip != "":
-					j.Status, j.Reason = api.ImageUpgradeSkipped, t.skip
-				case stopped != "":
-					j.Status, j.Reason = api.ImageUpgradeNotAttempted, "stopped after "+stopped+" failed"
-				default:
-					j = s.moveJailToRelease(ctx, h, t, ref.Name, req.DryRun)
-					if j.Status == api.ImageUpgradeFailed && !req.DryRun {
-						stopped = jailDisplay(j.Project, j.Jail)
-					}
-				}
-				out.Jails = append(out.Jails, j)
-				h.Progress((i + 1) * 100 / (len(targets) + 1))
-			}
-			moved := false
-			for _, j := range out.Jails {
-				moved = moved || j.Status == api.ImageUpgradeUpgraded
-			}
-			if !req.DryRun && moved {
-				s.emit(ctx, "image-upgraded", "/api/v1/images/"+image)
-			}
-			return out, nil
-		},
-	})
-}
-
-// moveJailToRelease moves one jail of a move of an image to another image, under the jail's locks, and reports the outcome. A
-// dry run plans the move and says why it would fail.
-func (s *Service) moveJailToRelease(ctx context.Context, h *OpHandle, t imageUpgradeTarget, image string, dry bool) api.ImageUpgradeJail {
-	j := api.ImageUpgradeJail{Jail: t.jail.Metadata.Name, Project: t.jail.Metadata.Project, From: t.jail.Status.ImageGeneration}
-	unlock, err := s.locks.lockPatient(ctx, "move jail "+t.key+" to image "+image, jailLock(t.key), anchorLock(t.key))
-	if err != nil {
-		j.Status, j.Reason = api.ImageUpgradeFailed, err.Error()
-		return j
-	}
-	defer unlock()
-	up := api.JailUpgrade{Image: image, DryRun: dry}
-	req := lifecycle.UpgradeRequest{JailUpgrade: up, Stamp: s.stamp()}
-	_, res, rec, err := s.moveRun(ctx, h, t.jail.Metadata.Project, t.jail.Metadata.Name, t.key, up, req)
-	j.Record = rec
-	if res != nil {
-		j.From, j.To = res.From, res.To
-	}
-	switch {
-	case err != nil:
-		j.Status, j.Reason = api.ImageUpgradeFailed, err.Error()
-	case res == nil || !res.Changed:
-		j.Status, j.To, j.Reason = api.ImageUpgradeSkipped, "", "already on "+image
-	case dry:
-		j.Status = api.ImageUpgradePlanned
-	default:
-		j.Status = api.ImageUpgradeUpgraded
-	}
-	return j
-}
-
-// upgradeImageRun is the body of the image upgrade operation: the build of the next generation from generation
-// `from`, then the move of every target jail.
-func (s *Service) upgradeImageRun(ctx context.Context, h *OpHandle, mgr *imagegen.Manager, image string, from int, req api.ImageUpgrade, targets []imageUpgradeTarget, scheduled bool) (api.ImageUpgradeResult, error) {
-	out := api.ImageUpgradeResult{From: imagegen.GenerationName(image, from), DryRun: req.DryRun, Jails: []api.ImageUpgradeJail{}}
+// upgradeImageRun is the body of the image upgrade operation: the build of the next generation from generation from.
+func (s *Service) upgradeImageRun(ctx context.Context, h *OpHandle, mgr *imagegen.Manager, image string, from int, req api.ImageUpgrade) (api.ImageUpgradeResult, error) {
+	out := api.ImageUpgradeResult{From: imagegen.GenerationName(image, from), DryRun: req.DryRun}
 	res, err := s.buildBody(ctx, h, mgr, image, api.ImageBuild{FromGeneration: from, DryRun: req.DryRun, Storage: req.Storage}, true)
 	if err != nil {
 		return out, err
@@ -693,87 +487,13 @@ func (s *Service) upgradeImageRun(ctx context.Context, h *OpHandle, mgr *imagege
 		g := res.Generation
 		out.Generation = &g
 	}
-	stopped := ""
-	for i, t := range targets {
-		j := api.ImageUpgradeJail{Jail: t.jail.Metadata.Name, Project: t.jail.Metadata.Project, From: t.jail.Status.ImageGeneration}
-		switch {
-		case t.skip != "":
-			j.Status, j.Reason = api.ImageUpgradeSkipped, t.skip
-		case res.Unchanged && t.jail.Status.ImageGeneration == imagegen.GenerationName(image, from):
-			j.Status, j.Reason = api.ImageUpgradeSkipped, "already on the newest generation"
-		case res.Unchanged && req.DryRun:
-			j.Status, j.To = api.ImageUpgradePlanned, imagegen.GenerationName(image, from)
-		case res.Unchanged && req.NoJails:
-			j.Status, j.Reason = api.ImageUpgradeNotAttempted, "no_jails was set"
-		case res.Unchanged && stopped != "":
-			j.Status, j.Reason = api.ImageUpgradeNotAttempted, "stopped after "+stopped+" failed"
-		case res.Unchanged:
-			// nothing new was built, but this jail is still on an older generation (an earlier run stopped before it)
-			j = s.moveJailToImage(ctx, h, t, imagegen.GenerationName(image, from), scheduled)
-			if j.Status == api.ImageUpgradeFailed {
-				stopped = jailDisplay(j.Project, j.Jail)
-			}
-		case req.DryRun:
-			j.Status, j.To = api.ImageUpgradePlanned, imagegen.GenerationName(image, from+1)
-		case req.NoJails:
-			j.Status, j.Reason = api.ImageUpgradeNotAttempted, "no_jails was set"
-		case stopped != "":
-			j.Status, j.Reason = api.ImageUpgradeNotAttempted, "stopped after "+stopped+" failed"
-		default:
-			j = s.moveJailToImage(ctx, h, t, res.Generation.Name, scheduled)
-			if j.Status == api.ImageUpgradeFailed {
-				stopped = jailDisplay(j.Project, j.Jail)
-			}
-		}
-		out.Jails = append(out.Jails, j)
-		h.Progress((i + 1) * 100 / (len(targets) + 1))
-	}
-	moved := false
-	for _, j := range out.Jails {
-		moved = moved || j.Status == api.ImageUpgradeUpgraded
-	}
-	if !req.DryRun && (!res.Unchanged || moved) {
+	if !req.DryRun && !res.Unchanged {
 		s.emit(ctx, "image-upgraded", "/api/v1/images/"+image)
 	}
 	return out, nil
 }
 
-// moveJailToImage moves one jail of an image upgrade through the OS update of
-// the update pipeline, under the jail's locks, and reports the outcome. scheduled marks the history record as the
-// work of an automatic upgrade.
-func (s *Service) moveJailToImage(ctx context.Context, h *OpHandle, t imageUpgradeTarget, target string, scheduled bool) api.ImageUpgradeJail {
-	j := api.ImageUpgradeJail{Jail: t.jail.Metadata.Name, Project: t.jail.Metadata.Project, From: t.jail.Status.ImageGeneration, To: target}
-	unlock, err := s.locks.lockPatient(ctx, "upgrade image for jail "+t.key, jailLock(t.key), anchorLock(t.key))
-	if err != nil {
-		j.Status, j.Reason = api.ImageUpgradeFailed, err.Error()
-		return j
-	}
-	recs := s.applyJail(ctx, h, t.key, applyWhat{os: true}, scheduled)
-	unlock()
-	if len(recs) == 0 {
-		// Nothing to apply: the jail is gone, or its reference does not resolve to the new generation.
-		if cur, err := s.jailSnapshot(t.key); err == nil {
-			j.From = cur.Status.ImageGeneration
-		}
-		j.Status, j.To, j.Reason = api.ImageUpgradeSkipped, "", "already on "+j.From
-		return j
-	}
-	rec := recs[0]
-	j.From, j.To, j.Record = rec.From, rec.To, rec.ID
-	if rec.Result == api.UpdateSuccess {
-		j.Status = api.ImageUpgradeUpgraded
-		return j
-	}
-	j.Status, j.Reason = api.ImageUpgradeFailed, rec.Error
-	if rec.Note != "" {
-		j.Reason += " (" + rec.Note + ")"
-	}
-	return j
-}
-
-// DeleteGeneration deletes a generation no jail references, on every pool that
-// holds a copy, as an operation. Aliases that pointed at it move to the next newest
-// remaining generation, or are removed when none remains.
+// DeleteGeneration deletes a generation on every pool that holds a copy, as an operation.
 func (s *Service) DeleteGeneration(ctx context.Context, image string, n int) (api.Operation, error) {
 	if err := requireGlobal(ctx, "deleting an image generation"); err != nil {
 		return api.Operation{}, err
@@ -784,10 +504,6 @@ func (s *Service) DeleteGeneration(ctx context.Context, image string, n int) (ap
 	g, err := s.GetGeneration(ctx, image, n)
 	if err != nil {
 		return api.Operation{}, err
-	}
-	if len(g.Refs) > 0 {
-		return api.Operation{}, api.Errorf(api.CodeImageInUse, "generation %s is used by jail %s", g.Name, strings.Join(g.Refs, ", ")).
-			WithDetail("jails", strings.Join(g.Refs, ",")).WithHint("upgrade or destroy those jails first")
 	}
 	return s.Submit(ctx, OpSpec{
 		Action: api.OpImageGenerationDelete, Description: "Delete generation " + g.Name, Locks: []string{imageLock(image)},
@@ -801,7 +517,7 @@ func (s *Service) DeleteGeneration(ctx context.Context, image string, n int) (ap
 				} else if _, ok := genOf(o, n); !ok {
 					continue
 				}
-				if _, err := m.Delete(ctx, image, n, s.jailRefs(ctx, nil), false); err != nil {
+				if _, err := m.Delete(ctx, image, n, false); err != nil {
 					if firstErr == nil {
 						firstErr = err
 					}

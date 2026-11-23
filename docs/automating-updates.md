@@ -2,7 +2,7 @@
 
 One administrator's way of keeping a JailOps host current, written out with the commands. The host is `host1`, a
 pkgbase host on FreeBSD 15.1 with the image `freebsd-15-1`, the projects `shop` and `blog`, and in each of them the
-thin jails `web` and `db`. A script in FreeBSD's [periodic(8)](https://man.freebsd.org/cgi/man.cgi?query=periodic&sektion=8)
+jails `web` and `db`. A script in FreeBSD's [periodic(8)](https://man.freebsd.org/cgi/man.cgi?query=periodic&sektion=8)
 does the nightly work; the move to 15.2, and later to 16.0, is done by hand with the same commands. The model, the
 runbooks and the checks this page relies on are in [lifecycle.md](lifecycle.md); the mechanics of each JailOps
 command in [upgrade.md](upgrade.md).
@@ -16,7 +16,8 @@ command in [upgrade.md](upgrade.md).
     release="15.1-RELEASE"
     pkg update -f
     pkg upgrade -y
-    jailops image upgrade freebsd-15-1
+    jailops jail upgrade --all --project shop
+    jailops jail upgrade --all --project blog
     jailops update apply --all --packages -y --project shop
     jailops update apply --all --packages -y --project blog
 
@@ -31,7 +32,8 @@ It does the work, and four things about it are wrong on a JailOps host:
   no line for `jailops`.
 - **`set -e` stops the script at the first command that fails.** `jailops update apply` exits 1 when one jail's
   update failed, and a jail that is stopped counts as failed (its packages are updated inside it, so there is nothing
-  to run). One stopped jail in `shop` means `blog` gets nothing that night, and nothing says so.
+  to run); `jailops jail upgrade` exits 1 when one jail failed. One stopped jail in `shop` means `blog` gets nothing
+  that night, and nothing says so.
 - **The exit status says nothing to periodic.** A script under periodic says with its exit status whether its output
   is notable, and the output of a script that exits above 2 is never masked
   ([periodic(8)](https://man.freebsd.org/cgi/man.cgi?query=periodic&sektion=8)).
@@ -49,7 +51,7 @@ daily` at 03:01 ([crontab of releng/15.1](https://cgit.freebsd.org/src/tree/usr.
 
     #!/bin/sh
     # Nightly update of host1: the patch level of the base system, the third-party packages of the host, the next
-    # generation of the image with every thin jail moved to it, and the packages inside the jails of each project.
+    # generation of the image for new jails, and every jail of each project upgraded in place, base and packages.
     # JailOps itself is not in it: it is upgraded by hand, with its changelog read first (docs/lifecycle.md, 3.4).
     #
     # On:  sysrc -f /etc/periodic.conf daily_jail_upgrade_enable=YES
@@ -64,7 +66,7 @@ daily` at 03:01 ([crontab of releng/15.1](https://cgit.freebsd.org/src/tree/usr.
 
     release="15.1-RELEASE"      # the release this script was written for; it stops when the host runs another
     image="freebsd-15-1"        # the image of that release
-    projects="shop blog"        # the projects whose jails get their packages updated
+    projects="shop blog"        # the projects whose jails are upgraded
 
     case "${daily_jail_upgrade_enable:-NO}" in
     [Yy][Ee][Ss]) ;;
@@ -88,9 +90,10 @@ daily` at 03:01 ([crontab of releng/15.1](https://cgit.freebsd.org/src/tree/usr.
     step pkg upgrade -y -r FreeBSD-base             # the patch level of the base: the kernel and userland packages
     step pkg upgrade -y -r FreeBSD-ports-kmods      # kernel modules from ports, which must match the kernel
     step pkg upgrade -y -r FreeBSD-ports            # the third-party packages of the host
-    step jailops image upgrade "$image" --wait-timeout 2h          # the next generation, then every thin jail of every project
+    step jailops image upgrade "$image" --wait-timeout 1h          # the next generation, for the jails made from now on
     for p in $projects; do
-        step jailops update apply --all --packages -y --project "$p" --wait-timeout 1h
+        step jailops jail upgrade --all --project "$p" --wait-timeout 1h          # the base of each jail, in place
+        step jailops update apply --all --packages -y --project "$p" --wait-timeout 1h   # the ports packages
     done
 
     if [ "$(freebsd-version -k)" != "$(freebsd-version -r)" ]; then
@@ -139,24 +142,30 @@ packages come from the repository `jailops` and are not named, so they stay wher
 ([lifecycle.md 3.4](lifecycle.md#34-jailops-itself)).
 
 **`jailops image upgrade freebsd-15-1`** builds the next generation of the image from the release's current base
-packages (minutes) and moves every thin jail that uses the image, of every project, to it, one at a time, each move
-with a snapshot, the `/etc` merge, the swap, the start and the jail's health check, and the swap back when the start
-or the check fails. The first jail that fails stops the run: the jails after it are listed as `not_attempted`, the
-jail that failed is back on its old root, and the exit status is 1. A later run moves the jails that were left
-behind, on a night when nothing new was built too. When the repository had nothing new, no generation is kept and
-no jail is touched. A stopped jail is moved like a running one: started for the health check, then stopped again.
-Thick jails, Linux jails, jails pinned to a generation (`freebsd-15-1#g3`) and jails whose encrypted volumes are
-locked are skipped and listed with the reason. The run is one operation (`jailops op list`), and each move is a
-record in the jail's update history (`jailops update history web --project shop`). `--wait-timeout 2h`: the client
-waits 10 minutes by default and the operation keeps running when the client stops waiting, so the script would start
-the package step while the image step still holds the jails, and be refused with `busy`; a build plus the moves of a
-host with many jails takes longer than 10 minutes.
+packages (minutes). It touches no jail: a new jail is a copy of the newest generation, so the jails made from tomorrow
+on start at tonight's patch level. When the repository had nothing new, no generation is kept. `--wait-timeout 1h`:
+the client waits 10 minutes by default and the operation keeps running when the client stops waiting, so the script
+would start the next step while the build still runs.
+
+**`jailops jail upgrade --all --project shop`** upgrades every FreeBSD jail of the project in place, one after the
+other, while it runs ([lifecycle.md 3.5](lifecycle.md#35-a-freebsd-jail)). For each jail it asks pkg first, read-only:
+with no newer base package of the jail's installed release the answer is `nothing to upgrade` and nothing happens.
+Otherwise the root is snapshotted while the jail runs (`jo-pre-upgrade-<time>`, kept 14 days), the base is upgraded
+from the host with `pkg -r`, the ports packages inside the jail with `pkg -j`, and one health check runs. The jail is
+never stopped, started or restarted: the result lists the services that still run replaced files ("restart pending"),
+and you restart them in a window of your choosing. A failure is reported, the jail runs on as pkg left it and the next
+night completes it; nothing rolls back on its own. A stopped jail is not upgraded, and a Linux jail is skipped. A
+summary table ends the run (`upgraded`, `nothing to upgrade`, `failed`, `skipped`), and the exit status is 1 when a
+jail failed. Each jail is an operation of its own (`jailops op list`) and a record in its update history (`jailops
+update history web --project shop`). The token of the script is a global administrator's: only a global administrator
+upgrades the base of a jail ([security-model.md](security-model.md#the-in-place-upgrade-of-a-jail)).
 
 **`jailops update apply --all --packages -y --project shop`**, once per project, because the command acts in one
-project and there is no default project. It takes every jail of the project and updates the packages inside it, on
-the root the jail has now, which is the one the image step just gave it: the base first and the packages on top of
-it, the order the daemon itself uses in one update. For a FreeBSD jail the host runs `pkg -j shop_web` with the
-jail's own repositories and names the jail's own packages, so a `FreeBSD-*` package never comes in this way; an
+project and there is no default project. It takes every jail of the project and updates the packages inside it,
+after the base step: the base first and the packages on top of it, the order the daemon itself uses in one update. A
+jail whose base had nothing newer still gets its ports packages here. For a FreeBSD jail the host runs `pkg -j shop_web` with the
+jail's own repositories and names the jail's own packages, so a `FreeBSD-*` package never comes in this way (a jail with
+no ports packages fetches no catalogue: "no ports packages: nothing to update"); an
 Alpine jail runs `apk upgrade`; a Debian jail keeps its own packages, and the record says that nothing was run.
 What one jail gets:
 
@@ -165,11 +174,9 @@ What one jail gets:
 | running, with updates | `pkg update`, a dry run that lists the packages, a snapshot of the jail (`update-...`), the upgrade, `ldconfig -m /usr/local/lib`, the health check (`update.healthcheck`), a record |
 | running, nothing to update | a record `success` with the note `nothing to update`; no snapshot |
 | stopped | a record `failure`: "the jail is not running; packages are updated inside it". It makes the command exit 1, which is why the script remembers the failure and goes on |
-| pinned to a generation | its packages are updated like any other jail's: the pin holds the root, not the packages |
-| thick | its own packages are updated; its base (`FreeBSD-*`) is not, because that is done inside the jail by hand ([lifecycle.md 3.7](lifecycle.md#37-a-thick-freebsd-jail)) |
 | Debian | a record `success` with the note that the jail keeps its own packages |
-| the health check fails, or `pkg upgrade` fails | a record `failure` that names the snapshot and the command that restores it (`jailops jail rollback web --scope all --snapshot S`), and nothing is rolled back for you: package files live in the jail's own datasets, and a root rollback does not undo them |
-| `update.reboot=auto` | the jail is restarted after a successful update, so the updated programs run; with `manual` (the default) the record says "restart the jail to run the updated programs" |
+| the health check fails, or `pkg upgrade` fails | a record `failure` that names the snapshot and the command that restores it (`jailops jail rollback web --scope all --snapshot S`), and nothing is rolled back for you |
+| any `update.reboot` | the jail is never stopped or restarted: the record names the processes that still run replaced files ("restart pending: nginx (pid 812)"), and you restart them in a window of your choosing. `update.reboot=auto` is accepted and does the same as `manual` |
 
 `-y` answers the batch question of `--all` (a typed project name, otherwise); periodic has no terminal, so a script
 without it fails at the question. The command exits 1 when any record is not `success`, and the hint names the
@@ -191,23 +198,24 @@ that starts with `/` is a file instead (`daily_output="/var/log/daily.log"`, whi
 ([periodic.conf(5)](https://man.freebsd.org/cgi/man.cgi?query=periodic.conf&sektion=5)). The script's `echo` lines
 and the tables the commands print are that mail.
 
-What JailOps records on its own, independent of the mail: every move and every package update as a record in the
+What JailOps records on its own, independent of the mail: every in-place upgrade and every package update as a record in the
 jail's history (`jailops update history web --project shop`: result, change, the snapshot, and for a failure the
 error and the way back), and the operations (`jailops op list`). The runs listed under **Automatic upgrades** in
-`jailops image show freebsd-15-1` are the daemon's own nightly runs ([1.6](#16-the-built-in-ways-and-which-to-choose));
-an `image upgrade` run from a script is in the histories and the operations, not there.
+`jailops image show freebsd-15-1` are the daemon's own nightly image builds
+([1.6](#16-the-built-in-ways-and-which-to-choose)); an `image upgrade` run from a script is in the operations, not
+there.
 
 ### 1.5 Before the first night: the checklist for an unattended run
 
 1. **A health check on every jail**, because an upgrade without one passes when the jail starts, not when the service
-   answers. The command runs inside the jail after every move and every package update, and a non-zero exit swaps
-   the root back (a move) or writes the failure with the snapshot (packages):
+   answers. The command runs inside the jail after every upgrade and every package update, and a non-zero exit writes
+   the failure with the snapshot:
 
-       jailops config set web --project shop update.healthcheck="/usr/local/bin/check" update.reboot=auto
-       jailops config set db --project shop update.healthcheck="/usr/local/bin/check" update.reboot=auto
+       jailops config set web --project shop update.healthcheck="/usr/local/bin/check"
+       jailops config set db --project shop update.healthcheck="/usr/local/bin/check"
 
    `/usr/local/bin/check` is yours: a request to the service's port, `service nginx status`, a `psql` that answers.
-   `update.reboot=auto` restarts the jail after a package update, so the night's packages run in the morning.
+   JailOps does not restart a jail after an update: the morning's records name what waits for a restart.
 2. **A backup before the night**, not during it: a backup policy whose schedule runs before 03:00 keeps the night's
    backup ahead of the update ([backup-restore.md](backup-restore.md)):
 
@@ -215,18 +223,20 @@ an `image upgrade` run from a script is in the histories and the operations, not
        jailops backup list --project shop                        # in the morning: last night's backups are there
 
    A host without a backup node has the snapshots the updates take; they are a way back for the jail, not a backup.
-3. **Run the two JailOps lines by hand with `--dry-run` first**, and then without:
+3. **Run the JailOps lines by hand with `--dry-run` first**, and then without:
 
        jailops image upgrade freebsd-15-1 --dry-run
+       jailops jail upgrade --all --project shop --dry-run
+       jailops jail upgrade --all --project blog --dry-run
        jailops update apply --all --packages --project shop --dry-run
        jailops update apply --all --packages --project blog --dry-run
 
 4. **Run the script once by hand** (`sh /usr/local/etc/periodic/daily/490-jail-upgrade`), read what it prints, and
    switch it on: `sysrc -f /etc/periodic.conf daily_jail_upgrade_enable=YES`.
-5. **A safe default for a jail that must not move at night:** pin it (`jailops config set db --project shop
-   image=freebsd-15-1#g3`, [lifecycle.md 3.11](lifecycle.md#311-a-jail-that-stays-behind)); the image step skips it
-   and lists it, and the package step still updates its packages. Leave such a jail out of the package step by
-   naming the others instead of `--all`: `jailops update apply web --packages -y --project shop`.
+5. **A jail that must not change at night:** name the others instead of `--all`, in both steps
+   (`jailops jail upgrade web --project shop`, `jailops update apply web --packages -y --project shop`), or select
+   them by a label (`-l nightly=yes`); upgrade that jail by hand when it suits it
+   ([lifecycle.md 3.10](lifecycle.md#310-a-jail-that-stays-behind)).
 
 **To skip a night:** `sysrc -f /etc/periodic.conf daily_jail_upgrade_enable=NO`, and `YES` the day after. A file
 without the executable bit is ignored by periodic too (`chmod -x` the script), but the variable is the switch the
@@ -234,26 +244,31 @@ mail shows.
 
 ### 1.6 The built-in ways, and which to choose
 
-JailOps has two ways of doing the jail part without a script of yours.
+JailOps has two built-in ways, without a script of yours: one for the jails, one for the images.
 
+- **The update policy of each jail** (`jailops config set web --project shop update.mode=managed
+  update.schedule="0 3 * * *" update.os=true update.packages=true`, [lifecycle.md 3.8](lifecycle.md#38-packages-inside-a-jail)):
+  the daemon checks and applies, per jail, at the jail's own cron expression, what the policy allows: with `update.os`
+  the base is upgraded in place inside the jail's release ([lifecycle.md 3.5](lifecycle.md#35-a-freebsd-jail)), with
+  `update.packages` its packages; `notify` checks and reports only, `manual` (the default) does nothing. It never stops,
+  starts or restarts a jail: the record names the processes that still run replaced files ("restart pending"); restart
+  them in a window of your choosing. A jail whose root holds what an attack on host-side pkg plants
+  (`suspected_compromised`) is refused and reported. Each run that changes or fails something has a record in
+  `jailops update history JAIL`. Whoever may change the jail sets its policy, but `update.os=true` with `update.mode=managed` is turned on by a
+  global administrator only (a project administrator gets `forbidden`); nothing else upgrades a jail at night.
 - **The nightly upgrade of an image** (`jailops image set freebsd-15-1 --auto-upgrade --upgrade-at 03:00`,
-  [upgrade.md](upgrade.md#nightly-auto-upgrade)): the daemon runs the same image upgrade itself at that time, in the
-  host's time zone, and then, with `--upgrade-packages` (the default), updates the packages inside the **running**
-  jails of the image, of every project; a stopped jail's packages are left alone, so a stopped jail is not a failure.
-  A host that was off at the time runs it when it is back within four hours. The first jail that fails stops the run,
-  and every run is recorded on the image (`jailops image show freebsd-15-1`: the next run, the latest runs with their
-  results) with the event `image-upgrade-failed` for a failed one. It needs no token, no client and no mail.
-- **Managed updates per jail** (`jailops config set web --project shop update.mode=managed update.schedule="0 3 * * *"
-  update.packages=true update.os=true`, [lifecycle.md 3.9](lifecycle.md#39-packages-inside-a-jail)): the daemon
-  checks and applies, per jail, at the jail's own cron expression, what the jail's policy allows; `notify` checks and
-  reports only. The OS part moves the jail to the newest generation that exists; it builds none.
+  [upgrade.md](upgrade.md#nightly-auto-upgrade)): the daemon builds the next generation itself at that time, in the
+  host's time zone, for the jails made from then on; it touches no jail. A host that was off at the time runs it when
+  it is back within four hours. Every run is recorded on the image (`jailops image show freebsd-15-1`: the next run,
+  the latest runs with their results) with the event `image-upgrade-failed` for a failed one. It needs no token, no
+  client and no mail.
 
 | You want | Use |
 |---|---|
 | the host's base and packages updated at night too, and one mail in the morning | the periodic script: nothing else touches the host |
-| the jails only, no script, a record per run on the image, and a host that catches up after being off | the nightly upgrade of the image |
-| one jail on its own schedule, or packages only for some jails and the base for others | managed updates per jail |
-| both the script and the nightly upgrade | not at the same hour: an image is locked while it is upgraded, and the second upgrade of it is refused with `busy` |
+| the jails only, no script, no restart, a record per jail, each on its own schedule | the update policy of each jail |
+| new jails on the newest patch level without a script | the nightly upgrade of the image |
+| both the script and a jail's policy | not at the same hour: each jail is locked while it is upgraded, and the second upgrade is refused with `busy` |
 
 The host part has no built-in way: JailOps never upgrades the host ([the third rule](lifecycle.md)).
 
@@ -261,21 +276,21 @@ The host part has no built-in way: JailOps never upgrades the host ([the third r
 
     freebsd-version -kru                                 # -k and -r differ: reboot the host
     jailops doctor                                       # every line ok or info
-    jailops list -c name,state,image,gen                 # every jail running that ran before, on the generation you expect
-    jailops image generation list freebsd-15-1           # who is on which generation; a jail left behind stands out
+    jailops list                                         # every jail running that ran before, on the release you expect
+    jailops update check --project shop                  # what is still newer; a jail left behind stands out
     jailops update history web --project shop            # newest first: success, or the error and the snapshot
     jailops op list                                      # the night's operations and their results
 
 The mail itself: a `! failed:` line names the step. For a jail, the record says what happened and what to do
-([lifecycle.md 6](lifecycle.md#6-when-something-fails)): `rolled_back`, the jail is on its old root, read the health
-check's output, fix, and the next night moves it; `failure` (packages), the packages stay updated and the record names
-the snapshot that undoes them; a stopped jail, start it or leave it out. `jailops info web --project shop` prints the
-conditions (`Ready`, `Healthy`, `BasePackages`) and the last update.
+([lifecycle.md 6](lifecycle.md#6-when-something-fails)): `failure` (os), the jail runs as the upgrade left it, read the
+error and the health check's output, fix, and the next night completes it; `failure` (packages), the packages stay
+updated and the record names the snapshot that undoes them; a stopped jail, start it or leave it out. `jailops info web
+--project shop` prints the conditions (`Ready`, `Healthy`) and the last update.
 
 ## 2. Moving host1 from 15.1 to 15.2 when it is released
 
 The order is [lifecycle.md 3.2](lifecycle.md#32-a-minor-release-of-the-host-151-to-152) (the host) and
-[3.6](lifecycle.md#36-a-thin-jail-to-a-new-release) (the jails); this is the same with the script around it. FreeBSD
+[3.5](lifecycle.md#35-a-freebsd-jail) (the jails); this is the same with the script around it. FreeBSD
 publishes the **Upgrading Instructions** of 15.2 at `https://www.freebsd.org/releases/15.2R/upgrading/` when 15.2 is
 announced; until then the page of 15.1, [releases/15.1R/upgrading](https://www.freebsd.org/releases/15.1R/upgrading/),
 is the shape of it, and the values that change (the `OSVERSION`, the boot environment's name) are the new page's.
@@ -289,7 +304,7 @@ is the shape of it, and the values that change (the `OSVERSION`, the boot enviro
    Upgrading Instructions ask for:
 
        jailops doctor && jailops version && freebsd-version -kru
-       jailops list -c name,state,image,gen              # written down
+       jailops list                                      # written down
        jailops backup run nightly --project shop && jailops backup run nightly --project blog
        bectl create -r pre-15.2
 
@@ -306,28 +321,26 @@ is the shape of it, and the values that change (the `OSVERSION`, the boot enviro
 
    After the reboot: `freebsd-version -kru` prints 15.2 three times; `/etc/pf.conf` still has `anchor "jailops/*"`
    and `pfctl -nf /etc/pf.conf` accepts it; `jailops doctor`; `jailops list` shows every jail that ran before
-   running, on `freebsd-15-1`, where they keep getting 15.1's patch levels. JailOps itself is not touched by this
+   running, on 15.1, where they keep getting 15.1's patch levels. JailOps itself is not touched by this
    step: the packages are the same `FreeBSD:15` packages on 15.2 ([lifecycle.md 2](lifecycle.md#2-what-works-with-what)).
-4. **The image of the new release**, built once:
+4. **The image of the new release**, built once, for the jails made from now on:
 
        jailops image create freebsd-15-2 --release 15.2-RELEASE --build
 
-5. **One jail first, and the rest after it**, the first failure stopping the rest:
+5. **One jail first, and the rest after it**, in place, while they run:
 
-       jailops jail upgrade web --project shop --image freebsd-15-2 --dry-run
-       jailops jail upgrade web --project shop --image freebsd-15-2
-       jailops image upgrade freebsd-15-1 --to freebsd-15-2 --dry-run        # every thin jail of the old image, every project
-       jailops image upgrade freebsd-15-1 --to freebsd-15-2
+       jailops jail upgrade web --project shop --release 15.2-RELEASE --dry-run
+       jailops jail upgrade web --project shop --release 15.2-RELEASE
+       jailops jail upgrade --all --project shop --release 15.2-RELEASE --stop-on-error
+       jailops jail upgrade --all --project blog --release 15.2-RELEASE --stop-on-error
 
-   `image upgrade --to` skips and lists a jail pinned to a generation; naming it moves it:
-   `jailops jail upgrade db --project shop --image freebsd-15-2`. A thick jail moves inside the jail with the same
-   `-oABI` and `-oOSVERSION` as the host ([lifecycle.md 3.7](lifecycle.md#37-a-thick-freebsd-jail)); a Linux jail is
-   not concerned by a FreeBSD release.
+   `--release` is never newer than the host's kernel, so this comes after the host. A jail you leave out stays on
+   15.1 and keeps getting its patch levels. A Linux jail is not concerned by a FreeBSD release.
 6. **The checks** of [lifecycle.md 4](lifecycle.md#4-always-test-after), per jail: the jail runs, `freebsd-version -j
    shop_web` prints 15.2, the health check passed (`jailops update history web --project shop`), the service answers.
 7. **The script afterwards.** Two lines change, and nothing else: the `pkg` lines are the same, because
-   `FreeBSD-base` now points at `base_release_2` through the host's own `OSVERSION`, and the `jailops` lines name
-   the image through the variable.
+   `FreeBSD-base` now points at `base_release_2` through the host's own `OSVERSION`; the image line names the image
+   through the variable, and `jail upgrade` keeps each jail on the release installed in it.
 
        release="15.2-RELEASE"
        image="freebsd-15-2"
@@ -335,17 +348,14 @@ is the shape of it, and the values that change (the `OSVERSION`, the boot enviro
    Run it by hand once (`sh /usr/local/etc/periodic/daily/490-jail-upgrade`), then switch it on:
    `sysrc -f /etc/periodic.conf daily_jail_upgrade_enable=YES`. Until `release` is changed the script exits 3 with
    the line "the host runs 15.2-RELEASE, not 15.1-RELEASE", in the mail: that is the guard.
-8. **The old image.** `freebsd-15-1` stays as long as a jail uses one of its generations, and `jailops image delete
-   freebsd-15-1` is refused with `image_in_use` and the names while one does. Each moved jail keeps its old root for
-   14 days (`jailops jail info web --project shop` prints the day under `Rollback:`); delete the image after that:
+8. **The old image.** No jail holds it: each jail has its own root. Delete it when you make no more 15.1 jails:
 
-       jailops image generation list freebsd-15-1        # USED BY empty for every generation
        jailops image delete freebsd-15-1
 
-9. **Going back**, strongest first: `jailops jail rollback web --project shop` returns the root and the image
-   together, data untouched, within the 14 days; a jail with a thick layout goes back to its snapshot of step 2 in
-   3.7's way; the host goes back with `bectl activate pre-15.2 && shutdown -r now` only after every jail that moved
-   to 15.2 was rolled back, because a 15.2 userland does not run on the 15.1 kernel. Put `release` and `image` back
+9. **Going back**, strongest first: `jailops jail rollback web --project shop`, with the jail stopped, returns its
+   root to the snapshot of the upgrade, within the 14 days, and loses what was written to the root since (its volumes
+   stay); the host goes back with `bectl activate pre-15.2 && shutdown -r now` only after every jail that moved to
+   15.2 was rolled back, because a 15.2 userland does not run on the 15.1 kernel. Put `release` and `image` back
    before you switch the script on again. Do not run `zpool upgrade` while the boot environment is the way back.
 
 ## 3. FreeBSD 16.0
@@ -365,10 +375,9 @@ with the script around it. What differs from the move to 15.2, in the order it m
   /mnt/upgrade upgrade -r FreeBSD-base`, `bectl activate -t`, the reboot, `pkg upgrade` after it; `pkg prime-origins`
   before, `pkg lock pkg` during), and the 16.0 Upgrading Instructions at `https://www.freebsd.org/releases/16.0R/upgrading/`
   are the procedure once 16.0 is announced.
-- **The image is `freebsd-16-0`**, and the jails move with the same commands as to 15.2. A move across majors prints a
-  warning: the packages inside the jail were built for `FreeBSD:15` and are reinstalled for `FreeBSD:16`.
-- **A thick jail is a pkgbase system of its own** and takes the major upgrade inside the jail, with the `-oABI=FreeBSD:16:$(uname -p)`
-  and the `-oOSVERSION` of the 16.0 Upgrading Instructions, then `pkg upgrade -f` of its packages.
+- **The image is `freebsd-16-0`**, for the jails made from then on.
+- **A jail moves in place** with `jailops jail upgrade NAME --release 16.0-RELEASE --no-packages`, then
+  `pkg upgrade -f` inside the jail reinstalls its ports packages for `FreeBSD:16` ([lifecycle.md 3.5](lifecycle.md#35-a-freebsd-jail)).
 
 The commands, in order, once 16.0 is announced and the `FreeBSD:16` packages are published:
 
@@ -377,17 +386,15 @@ The commands, in order, once 16.0 is announced and the `FreeBSD:16` packages are
     pkg upgrade -r FreeBSD-ports-kmods && pkg upgrade -r FreeBSD-ports        # the third-party packages, for FreeBSD:16
     pkg upgrade -r jailops && service jailopsd restart && jailops doctor      # JailOps for FreeBSD:16, as 3.4 does it
     jailops image create freebsd-16-0 --release 16.0-RELEASE --build
-    jailops jail upgrade web --project shop --image freebsd-16-0 --dry-run
-    jailops jail upgrade web --project shop --image freebsd-16-0
-    jailops update apply web --project shop --packages               # the packages of the jail, rebuilt for FreeBSD:16
-    jailops exec web --project shop -- pkg upgrade -f                 # what the first line left on the old ABI
-    jailops image upgrade freebsd-15-2 --to freebsd-16-0              # the rest, one at a time, the first failure stopping it
+    jailops jail upgrade web --project shop --release 16.0-RELEASE --no-packages --dry-run
+    jailops jail upgrade web --project shop --release 16.0-RELEASE --no-packages
+    jailops exec web --project shop -- pkg upgrade -f                 # the ports packages, reinstalled for FreeBSD:16
+    jailops jail upgrade --all --project shop --release 16.0-RELEASE --no-packages --stop-on-error   # the rest, then pkg upgrade -f in each
 
 Then the script: `release="16.0-RELEASE"`, `image="freebsd-16-0"`, and on. Going back is the boot environment of 15
-while no jail has moved to 16, and `jailops jail rollback` per jail within 14 days after that; for a jail whose
-packages were reinstalled for `FreeBSD:16`, `jailops jail rollback web --project shop --scope all --snapshot S
---confirm-data-loss` with the snapshot of its package update returns the root to the 15 image and the packages to
-their `FreeBSD:15` builds in one step, and discards what the jail wrote since.
+while no jail has moved to 16, and `jailops jail rollback` per stopped jail within 14 days after that: the root goes
+back to the snapshot of its upgrade, base and packages on `FreeBSD:15` together, and what the jail wrote to its root
+since is discarded.
 
 ## 4. The command line, by question
 
@@ -395,14 +402,14 @@ Every line is from the built `jailops` of this repository; `shop` is the project
 
 | The question | The command |
 |---|---|
-| Is there anything to update? | `jailops update check --project shop` (every jail of the project; a stopped jail answers with an error for its packages); `jailops image upgrade freebsd-15-1 --dry-run` (the build plan and the jails that would move) |
-| What would an apply do? | `jailops update apply --all --packages --project shop --dry-run` |
-| Apply it | `jailops image upgrade freebsd-15-1`; `jailops update apply --all --packages -y --project shop` |
+| Is there anything to update? | `jailops update check --project shop` (every jail of the project: newer base and ports packages; a stopped jail answers with an error for its packages); `jailops jail upgrade --all --project shop --dry-run` |
+| What would an apply do? | `jailops jail upgrade web --project shop --dry-run`; `jailops update apply --all --packages --project shop --dry-run` |
+| Apply it | `jailops jail upgrade --all --project shop`; `jailops update apply --all --packages -y --project shop` |
 | One jail only | `jailops jail upgrade web --project shop`; `jailops update apply web --packages --project shop` |
-| What happened last night? | `jailops update history web --project shop`; `jailops op list`; `jailops image show freebsd-15-1` for the daemon's own nightly runs |
-| Go back | `jailops jail rollback web --project shop` (the root, and the image after a release move; data untouched, 14 days); `jailops jail rollback web --project shop --scope all --snapshot S --confirm-data-loss` (a package update, discarding what was written since) |
-| Keep a jail where it is | `jailops config set db --project shop image=freebsd-15-1#g3`; back to the newest generation with `jailops config set db --project shop image=freebsd-15-1` |
-| Who is on which generation? | `jailops image generation list freebsd-15-1`; `jailops list -c name,state,image,gen` |
-| Move everyone to a new release | `jailops image create freebsd-15-2 --release 15.2-RELEASE --build`; `jailops image upgrade freebsd-15-1 --to freebsd-15-2` |
-| Delete the old image | `jailops image generation list freebsd-15-1` (no jail in `USED BY`), then `jailops image delete freebsd-15-1` |
-| Let the daemon do the nights | `jailops image set freebsd-15-1 --auto-upgrade --upgrade-at 03:00`; off with `--auto-upgrade=false` |
+| What happened last night? | `jailops update history web --project shop`; `jailops op list`; `jailops image show freebsd-15-1` for the daemon's own nightly image builds |
+| Go back | `jailops jail rollback web --project shop` (a stopped jail: the root to the snapshot of its last upgrade, 14 days); `jailops jail rollback web --project shop --scope all --snapshot S --confirm-data-loss` (a package update, discarding what was written since) |
+| Keep a jail where it is | leave it out of the script's `--all` (name the others, or select by label) and upgrade it by hand later; leave its update policy manual |
+| Which release does a jail run? | `jailops list`; `jailops jail show web --project shop -o json` (`status.freebsd_version`) |
+| Move everyone to a new release | the host first, then `jailops jail upgrade --all --project shop --release 15.2-RELEASE`; `jailops image create freebsd-15-2 --release 15.2-RELEASE --build` for new jails |
+| Delete the old image | `jailops image delete freebsd-15-1`: no jail holds it |
+| Let the daemon do the nights | per jail: `jailops config set web --project shop update.mode=managed update.schedule="0 3 * * *" update.os=true update.packages=true`; for new jails: `jailops image set freebsd-15-1 --auto-upgrade --upgrade-at 03:00` |

@@ -58,12 +58,7 @@ Rolling back all of jail web to snapshot good (taken 3h ago).
 jail/web rolled back
 
 $ jailops jail rollback web
-! invalid: jail "web" has no previous generation
-[exit 2]
-
-$ jailops jail upgrade web
-jail/web upgraded to g2
-
-$ jailops jail rollback web --scope root
-jail/web rolled back
+! not_found: jail "web" has no snapshot from an in-place upgrade to go back to
+! hint: the snapshot of an upgrade is kept for 14 days and a successful rollback uses it up
+[exit 4]
 

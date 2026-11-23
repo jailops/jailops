@@ -49,8 +49,8 @@ Image freebsd-15
   Nightly:   off ('jailops image set freebsd-15 --auto-upgrade' turns it on)
 
 Generations
-  GEN   FREEBSD   PACKAGES   AGE   USED BY
-  g1    -         -          3h    -
+  GEN   FREEBSD   PACKAGES   AGE
+  g1    -         -          3h
 
 $ jailops project show main
 Project main
@@ -59,6 +59,7 @@ Project main
   Storage:     default
   Firewall:    none
   Images:      any
+  Shell:       the host's default
   Age:         3h
 
 Usage
@@ -92,7 +93,7 @@ NAME   IPV4
 web    10.20.0.15 (lan)
 
 $ jailops jail list -c name,ipv4,gen
-! usage: columns name, ipv4, gen are not in one table (columns of -o wide: name, state, image, gen, addresses, exposed, autostart, used, age)
+! usage: columns name, ipv4, gen are not in one table (columns of -o wide: name, state, os, image, gen, addresses, exposed, autostart, used, age)
 ! hint: run 'jailops jail list --help' for usage
 [exit 2]
 

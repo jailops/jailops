@@ -420,13 +420,16 @@ func jailsOf(t *testing.T, e expect, dir string) {
 		if err := json.Unmarshal(raw, &orig); err != nil {
 			t.Fatal(err)
 		}
-		// the conversion of a stored proxy device is the one intended rewrite of the document
+		// the conversion of a stored proxy device and the drop of the layout (a jail is one root of its own; that a jail
+		// has the old root layout, its datasets say: TestADaemonOnAHostWithUnsupportedLayoutJails) are the intended
+		// rewrites
 		var conv map[string]any
 		if err := json.Unmarshal(mustMarshal(t, rec), &conv); err != nil {
 			t.Fatal(err)
 		}
 		if spec, ok := orig["spec"].(map[string]any); ok {
 			delete(spec, "proxy")
+			delete(spec, "layout")
 		}
 		if lost := dropped(orig, conv, ""); len(lost) != 0 {
 			t.Errorf("jail %s of %s: the current type drops %v", name, e.Version, lost)

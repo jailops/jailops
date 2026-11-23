@@ -1,7 +1,6 @@
 package validate
 
 import (
-	"strings"
 	"testing"
 
 	"jailops.net/jailops/sdk/api"
@@ -52,21 +51,6 @@ func TestUpdatePolicyShellAndProvisionValidation(t *testing.T) {
 		mut(&s)
 		if err := JailSpec("web", s); err == nil {
 			t.Errorf("%s: accepted", name)
-		}
-	}
-}
-
-func TestThinLayoutIsRefusedForALinuxJail(t *testing.T) {
-	err := LayoutFits(api.JailSpec{OS: api.OSLinux, Layout: api.LayoutThin})
-	if err == nil || !strings.Contains(err.Error(), "a Linux jail is thick") {
-		t.Fatalf("thin on a Linux jail: %v", err)
-	}
-	for _, s := range []api.JailSpec{
-		{OS: api.OSLinux}, {OS: api.OSLinux, Layout: api.LayoutThick},
-		{OS: api.OSFreeBSD}, {OS: api.OSFreeBSD, Layout: api.LayoutThin}, {OS: api.OSFreeBSD, Layout: api.LayoutThick},
-	} {
-		if err := LayoutFits(s); err != nil {
-			t.Errorf("%+v: %v", s, err)
 		}
 	}
 }

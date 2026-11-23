@@ -38,29 +38,22 @@ func TestJailUsage(t *testing.T) {
 		t.Fatalf("disk without numbers: %+v", u.Disk)
 	}
 
-	// The root counts by itself; the persistent datasets are the data.
+	// The root counts by itself; a jail without a delegated dataset has no data of its own besides it.
 	rows, err := e.ZFS.List(context.Background(), zfs.ListOpts{Root: container, Recursive: true, Props: []string{lifecycle.PropKind}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	persistent := 0
 	for _, r := range rows {
 		switch {
 		case r.Name == container+"/root":
 			e.ZFS.SetSpace(r.Name, 123456, 2_000_000)
-		case r.Props[lifecycle.PropKind] == lifecycle.KindPersistent:
-			e.ZFS.SetSpace(r.Name, 1000, 1000)
-			persistent++
 		default:
 			e.ZFS.SetSpace(r.Name, 1<<40, 1<<40) // the container and anything else: never counted
 		}
 	}
-	if persistent == 0 {
-		t.Fatalf("no persistent datasets: %+v", rows)
-	}
 	u, _ = s.JailUsage(ctx, "web")
-	if u.Disk.Error != "" || u.Disk.RootBytes != 123456 || u.Disk.RootReferencedBytes != 2_000_000 || u.Disk.DataBytes != int64(persistent*1000) {
-		t.Fatalf("disk: %+v (persistent %d)", u.Disk, persistent)
+	if u.Disk.Error != "" || u.Disk.RootBytes != 123456 || u.Disk.RootReferencedBytes != 2_000_000 || u.Disk.DataBytes != 0 {
+		t.Fatalf("disk: %+v", u.Disk)
 	}
 
 	// Running: racct through rctl. An rctl that cannot run is reported, not zeroed.

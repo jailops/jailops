@@ -6,7 +6,6 @@ import (
 	"maps"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"jailops.net/jailops/internal/dnsprobe"
+	"jailops.net/jailops/internal/jailaudit"
 	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/jailos"
@@ -45,11 +45,13 @@ type Host interface {
 	SetVolumeOwner(ctx context.Context, q VolumeOwnerReq) error
 	// StaleMounts lists the mounts below the roots of jails that do not run, of a kind JailOps makes (stalemounts.go).
 	StaleMounts(ctx context.Context) ([]StaleMount, error)
-	// TreeDiff lists the files below q.Dir that differ from the tree below q.Base (treediff.go).
-	TreeDiff(ctx context.Context, q TreeDiffReq) (zfs.DiffResult, error)
 	// HealJail cleans up after one jail that does not run: the mounts below its root, and what its poststop hook removes
 	// (rctl rules, the pf anchor, its links). A running jail is refused.
 	HealJail(ctx context.Context, jail string) (HealJailRes, error)
+	// CheckRoot looks at the root of a jail before the host's pkg upgrades its base (rootcheck.go).
+	CheckRoot(ctx context.Context, q RootCheckReq) error
+	// AuditRoot reads the root of a jail for its audit and changes nothing (rootaudit.go).
+	AuditRoot(ctx context.Context, q RootAuditReq) (jailaudit.Facts, error)
 	// HealNetwork destroys the interfaces of the earlier network layout (a bridge, the gateway pair of a network) that
 	// no jail that runs uses (netheal.go).
 	HealNetwork(ctx context.Context) (HealNetRes, error)
@@ -584,26 +586,6 @@ func (g zfsGuard) Written(ctx context.Context, dataset, since string) (uint64, e
 		}
 	}
 	return g.l.d.ZFS.Written(ctx, dataset, since)
-}
-
-// Diff is read-only and confined: the snapshot and the dataset it is compared with must both lie below a storage root.
-// skip only filters the answer.
-func (g zfsGuard) Diff(ctx context.Context, from, to string, limit int, skip []string) (zfs.DiffResult, error) {
-	if err := g.l.cfg.zfsSnapshot(from); err != nil {
-		return zfs.DiffResult{}, err
-	}
-	if _, err := g.l.cfg.zfsName(to); err != nil {
-		return zfs.DiffResult{}, err
-	}
-	if len(skip) > 64 {
-		return zfs.DiffResult{}, invalid("at most 64 paths to leave out")
-	}
-	for _, p := range skip {
-		if !filepath.IsAbs(p) || len(p) > 4096 || strings.ContainsAny(p, "\x00\n\t") {
-			return zfs.DiffResult{}, invalid("%q is not a path to leave out", p)
-		}
-	}
-	return g.l.d.ZFS.Diff(ctx, from, to, limit, skip)
 }
 
 func (g zfsGuard) GUID(ctx context.Context, name string) (uint64, error) {

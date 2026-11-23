@@ -61,8 +61,9 @@ GET /api/v1/jails
 GET /api/v1/jails/{name}
 GET /api/v1/jails/{name}/access
 GET /api/v1/jails/{name}/app-draft
+GET /api/v1/jails/{name}/audit
+GET /api/v1/jails/{name}/base
 GET /api/v1/jails/{name}/console/{id}/output
-GET /api/v1/jails/{name}/diff
 GET /api/v1/jails/{name}/export
 GET /api/v1/jails/{name}/files/{path...}
 GET /api/v1/jails/{name}/logs
@@ -163,13 +164,11 @@ POST /api/v1/jails/{name}/config
 POST /api/v1/jails/{name}/console
 POST /api/v1/jails/{name}/console/{id}/input
 POST /api/v1/jails/{name}/console/{id}/resize
-POST /api/v1/jails/{name}/convert
 POST /api/v1/jails/{name}/copy
 POST /api/v1/jails/{name}/exec
 POST /api/v1/jails/{name}/expose
 POST /api/v1/jails/{name}/provision
 POST /api/v1/jails/{name}/rename
-POST /api/v1/jails/{name}/repair-packages
 POST /api/v1/jails/{name}/rollback
 POST /api/v1/jails/{name}/shell-setup
 POST /api/v1/jails/{name}/snapshots

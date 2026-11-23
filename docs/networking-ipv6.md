@@ -96,6 +96,10 @@ helper's file operations, which replace only a regular file inside the jail's ro
 | Jail gateway | the link-local `fe80::1` on the jail's link | the link-local `fe80::1` on the jail's link |
 | Depends on the proxy | never | always |
 
+A jail's neighbour solicitations and advertisements go only to link-local (`fe80::/10`) and solicited-node
+(`ff02::1:ff00:0/104`) destinations. Both are link-scoped and never forwarded off the jail's link, so a jail has no way to
+send them to the Internet, to the host's global addresses or to another project.
+
 Nothing uses SLAAC, so prefixes longer than `/64` are fine: a routed `/64` holds 65,536 networks of `/80`, each with 2^48
 addresses.
 
@@ -327,7 +331,8 @@ stops when its rule goes.
   not by `pf.conf`. An `allow in` rule with an external source in a policy of the jail
   (`jailops firewall rule add web in --action allow --proto tcp --from any --port 8080`, or `jailops expose web 8080`) renders `pass in quick on <uplink> ... to
   <jail address> port 8080` in the jail's anchor, which wins over the host's `block ... all` wherever the anchor line
-  stands. A jail with only defaults stays closed from the internet, and `jailops firewall test --from <address outside>
+  stands. A jail with only defaults stays closed from the internet when the host's `pf.conf` blocks inbound traffic by
+  default (`jailops doctor` warns, `pf.host_default_deny`, when it does not), and `jailops firewall test --from <address outside>
   --to jail:web --port 8080` walks that hop too. See [install.md](install.md) section 3.
 - A rule has an action (`allow` or `deny`), a direction (`in` or `out`) and, as it needs them, a protocol, `from` and `to` endpoints, ports, `log`, a name, a comment and `disabled`. The rules of a policy are added and changed one at a time with `jailops firewall rule` (`add`, `list`, `edit`, `move`, `enable`, `disable`, `remove`), each rule addressed by its number or its name, or all at once in a file.
   A rule belongs to the jail that has the policy: an inbound rule is always to the jail itself and an outbound rule always from it, so an inbound rule names only `from` and an outbound rule only `to` (`to` on an inbound rule and `from` on an outbound rule are refused).

@@ -60,10 +60,8 @@ For Debian only:
 - The image's base is built with the helper (`debootstrap` runs with a fixed environment so that it finds its tools). Only the
   hosts in `fetch-host` of `priv.conf` can be downloaded from, and the keyring that checks the release is a file in `keyring-dir`
   (default `/usr/local/share/keyrings`) that root owns.
-- A Linux jail is always **thick** (a full copy of the generation); copying it into the jail runs inside the helper
-  (`zfs.replicate`), 140 MB in about 2 seconds. `--layout thin` is refused: the persistent datasets of a thin jail are ZFS
-  mounts that the nullfs mirror at `compat/linux` does not show, so a Linux process would see empty directories. A
-  thick jail has no `jail diff`, which compares a thin jail with its image.
+- A Linux jail has its own root, a full copy of the generation, as every jail does; the copy runs inside the helper
+  (`zfs.replicate`), 140 MB in about 2 seconds.
 
 ## What a Linux process sees, and what it does not
 
@@ -97,7 +95,7 @@ With an Alpine jail:
   (see [Devices](security-model.md#devices)).
 - **Network:** a Linux userland has no tooling that works here, so the host configures the jail with the `-j` forms
   (`ifconfig -j`, `route -j`) after the epair moved. Linux sees the interface as `eth0`.
-- **Updates** are in place (`apk` inside the jail), with a snapshot first. A root swap does not apply.
+- **Updates** are in place (`apk` inside the jail), with a snapshot first.
 - **The shell** `jailops shell` starts is `/bin/sh` unless the jail's `shell` key says otherwise.
 
 ## Limits to keep in mind

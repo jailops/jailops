@@ -15,8 +15,11 @@ var devfsPaths = map[string][]string{
 	"bpf":  {"bpf*"},
 	"fuse": {"fuse"},
 	"dri":  {"dri", "dri/*"},
-	// zfs is not on the allow-list a user can name: a jail with zfs_delegation gets it (SpecDevfsDevices), because
-	// `zfs` inside the jail talks to the kernel through /dev/zfs.
+	// zfs is not on the allow-list a user can name: a jail with zfs_delegation gets it in its private ruleset
+	// (SpecDevfsDevices), because `zfs` inside the jail talks to the kernel through /dev/zfs. A jail without devices
+	// uses the stock ruleset 4 (devfsrules_jail of /etc/defaults/devfs.rules), which unhides fuse and zfs itself: such a
+	// jail has /dev/zfs and /dev/fuse whatever this map says. A private ruleset includes only the stock sets 1 to 3, so
+	// a jail with devices has neither unless it names them.
 	"zfs": {"zfs"},
 }
 
@@ -68,9 +71,10 @@ func devfsNames(devices []string) ([]string, error) {
 }
 
 // DevfsRuleset returns the devfs ruleset of a FreeBSD jail that is given device nodes: its number and the
-// `devfs rule -s <n> ...` argument lists that load it into the kernel, in order. The base is the stock jail ruleset
-// (include the stock sets that hide everything and unhide the basic and login devices), then the allow-listed
-// devices. A jail without devices uses the stock ruleset DefaultDevfsRuleset and loads nothing. Only devices on
+// `devfs rule -s <n> ...` argument lists that load it into the kernel, in order. The base is the stock sets that hide
+// everything and unhide the basic and login devices (1 to 3, not the stock jail ruleset 4, which also unhides fuse and
+// zfs), then the allow-listed devices. A jail without devices uses the stock ruleset DefaultDevfsRuleset and loads
+// nothing: what the host's ruleset 4 holds is what such a jail sees. Only devices on
 // api.DevfsAllowList are rendered; anything else is an error, so a path can never be injected. The number is the
 // one of jail.conf's devfs_ruleset, and the root helper loads the rules before the jail is created: a number that
 // nobody loaded would show the jail the whole of the host's /dev.

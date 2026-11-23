@@ -589,7 +589,28 @@ func (c *copier) copyData(sf, df *os.File, size int64) error {
 				start, end = d, h
 			}
 		}
-		for pos := start; pos < end; {
+		pos := start
+		if end > start {
+			// The kernel copies the extent itself (copy_file_range): on ZFS with block cloning, inside one pool, it
+			// clones the blocks and writes no data, so the copy takes no space until a file changes; where it cannot
+			// (another filesystem or pool), the standard library falls back to an ordinary copy. Either way the
+			// bytes arrive; a failure to position the files leaves the loop below to do it.
+			if _, serr := sf.Seek(start, io.SeekStart); serr == nil {
+				if _, serr = df.Seek(start, io.SeekStart); serr == nil {
+					n, cerr := io.CopyN(df, sf, end-start)
+					pos += n
+					c.res.Bytes += n
+					c.progress("", false)
+					if cerr != nil && !errors.Is(cerr, io.EOF) {
+						return mapFSErr(cerr)
+					}
+					if cerr != nil { // the file shrank under us
+						end = pos
+					}
+				}
+			}
+		}
+		for pos < end {
 			if err := c.ctx.Err(); err != nil {
 				return err
 			}

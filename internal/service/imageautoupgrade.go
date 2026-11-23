@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -197,8 +196,8 @@ func (s *Service) runImageAutoUpgrades(ctx context.Context) {
 }
 
 // AutoUpgradeImage runs the automatic upgrade of one image now, as the system, and records the run: the next
-// generation is built, the thin jails move to it, and when the spec asks the packages inside the jails are upgraded.
-// A jail that fails stops the run. It returns after the run; a run already going on for the image is not started again.
+// generation is built. No jail is touched: a jail takes its patches by its own update policy (spec.update). It returns
+// after the run; a run already going on for the image is not started again.
 func (s *Service) AutoUpgradeImage(ctx context.Context, image string) api.ImageUpgradeRun {
 	s.imgAuto.mu.Lock()
 	if s.imgAuto.running == nil {
@@ -222,60 +221,34 @@ func (s *Service) AutoUpgradeImage(ctx context.Context, image string) api.ImageU
 		run.Result, run.Detail = api.ImageUpgradeRunFailed, fmt.Sprintf(format, a...)
 		return s.finishAutoRun(actx, image, run)
 	}
-	o, err := s.imgKind.get(image)
-	if err != nil {
+	if _, err := s.imgKind.get(image); err != nil {
 		return fail("the image is gone")
 	}
 	mgr, err := s.buildPool("")
 	if err != nil {
 		return fail("%v", err)
 	}
-	st, _, _ := s.observeAcross(actx, image)
-	from := 0
-	for _, g := range st.Generations {
-		from = max(from, g.Number)
-	}
+	from := s.newestGeneration(actx, image)
 	if from == 0 {
 		return fail("the image has no generation yet; build one with 'jailops image build %s'", image)
 	}
-	withPackages := o.Spec.AutoUpgrade != nil && o.Spec.AutoUpgrade.Packages
-	targets := s.imageUpgradeTargets(actx, image, "")
 	resources := map[string][]string{"images": {"/api/v1/images/" + image}}
-	for _, t := range s.imageJailKeys(image) {
-		resources["jails"] = append(resources["jails"], "/api/v1/jails/"+t)
-	}
 	var runErr error
 	var mu sync.Mutex // the operation fills run while this function may stop waiting for it
 	op, err := s.Submit(actx, OpSpec{
 		Action: api.OpImageAutoUpgrade, Description: "Automatic upgrade of image " + image, Locks: []string{imageLock(image)}, Resources: resources,
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
-			res, err := s.upgradeImageRun(ctx, h, mgr, image, from, api.ImageUpgrade{}, targets, true)
+			res, err := s.upgradeImageRun(ctx, h, mgr, image, from, api.ImageUpgrade{})
 			if err != nil {
 				mu.Lock()
 				runErr = err
 				mu.Unlock()
 				return nil, err
 			}
-			r := api.ImageUpgradeRun{}
-			if res.Generation != nil {
-				r.Generation = res.Generation.Name
-			}
-			for _, j := range res.Jails {
-				switch j.Status {
-				case api.ImageUpgradeUpgraded:
-					r.JailsMoved++
-				case api.ImageUpgradeFailed:
-					r.JailsFailed++
-					if r.Detail == "" {
-						r.Detail = fmt.Sprintf("jail %s: %s", jailDisplay(j.Project, j.Jail), j.Reason)
-					}
-				}
-			}
-			if r.JailsFailed == 0 && withPackages {
-				s.autoUpgradePackages(ctx, h, image, &r)
-			}
 			mu.Lock()
-			run.Generation, run.JailsMoved, run.JailsUpgraded, run.JailsFailed, run.Detail = r.Generation, r.JailsMoved, r.JailsUpgraded, r.JailsFailed, r.Detail
+			if res.Generation != nil {
+				run.Generation = res.Generation.Name
+			}
 			mu.Unlock()
 			return res, nil
 		}})
@@ -290,9 +263,7 @@ func (s *Service) AutoUpgradeImage(ctx context.Context, image string) api.ImageU
 	switch {
 	case runErr != nil:
 		return fail("%v", runErr)
-	case run.JailsFailed > 0:
-		run.Result = api.ImageUpgradeRunFailed
-	case run.Generation == "" && run.JailsMoved == 0 && run.JailsUpgraded == 0:
+	case run.Generation == "":
 		run.Result = api.ImageUpgradeRunUnchanged
 	default:
 		run.Result = api.ImageUpgradeRunOK
@@ -308,53 +279,4 @@ func (s *Service) finishAutoRun(ctx context.Context, image string, run api.Image
 		s.emit(ctx, "image-upgrade-failed", "/api/v1/images/"+image)
 	}
 	return run
-}
-
-// imageJailKeys lists the registry keys of the jails that use an image, in key order.
-func (s *Service) imageJailKeys(image string) []string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var out []string
-	for _, k := range sortedKeys(s.jails) {
-		if ref, err := validate.ParseImageRef(s.jails[k].jail.Spec.Image); err == nil && ref.Name == image {
-			out = append(out, k)
-		}
-	}
-	return out
-}
-
-// autoUpgradePackages upgrades the packages inside the running jails of an image, after the image moved them. A
-// jail that waits for a passphrase and a jail that is not running are left
-// alone; the first failure stops the run.
-func (s *Service) autoUpgradePackages(ctx context.Context, h *OpHandle, image string, run *api.ImageUpgradeRun) {
-	for _, key := range s.imageJailKeys(image) {
-		j, err := s.jailSnapshot(key)
-		if err != nil || !s.managesPackages(j) {
-			continue
-		}
-		s.mu.RLock()
-		locked := len(s.jails[key].locked) > 0
-		s.mu.RUnlock()
-		if locked || !s.jailRunning(ctx, key) {
-			continue
-		}
-		unlock, err := s.locks.lockPatient(ctx, "auto upgrade packages "+key, jailLock(key), anchorLock(key))
-		if err != nil {
-			run.JailsFailed++
-			run.Detail = fmt.Sprintf("jail %s: %v", jailDisplay(j.Metadata.Project, j.Metadata.Name), err)
-			return
-		}
-		recs := s.applyJail(ctx, h, key, applyWhat{packages: true}, true)
-		unlock()
-		for _, r := range recs {
-			if r.Result != api.UpdateSuccess {
-				run.JailsFailed++
-				run.Detail = fmt.Sprintf("jail %s: packages: %s", jailDisplay(j.Metadata.Project, j.Metadata.Name), r.Error)
-				return
-			}
-			if len(r.Packages) > 0 {
-				run.JailsUpgraded++
-			}
-		}
-	}
 }

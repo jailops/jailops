@@ -262,11 +262,6 @@ func (a *Adapter) Holds(ctx context.Context, snapshot string) ([]string, error) 
 	return out, nil
 }
 
-// Diff lists what changed in a dataset since a snapshot of it or of the dataset it was cloned from.
-func (a *Adapter) Diff(ctx context.Context, from, to string, limit int, skip []string) (zfs.DiffResult, error) {
-	return a.C.Diff(ctx, from, to, limit, skip)
-}
-
 // SendStream is `zfs send [-i from] [-w] snapshot` into w. from is the short name of an earlier snapshot of the same
 // dataset ("" for a full stream); raw sends an encrypted dataset as stored.
 func (a *Adapter) SendStream(ctx context.Context, snapshot, from string, raw bool, w io.Writer) error {

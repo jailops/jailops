@@ -54,16 +54,17 @@ func PromptFile(ps1 string) (string, error) {
 		return "", fmt.Errorf("render: the prompt holds a quote or a line break")
 	}
 	var b strings.Builder
-	b.WriteString("# Managed by JailOps: the bash prompt of this jail. JailOps rewrites this file;\n")
+	b.WriteString("# Managed by JailOps: the prompt of this jail. JailOps rewrites this file;\n")
 	b.WriteString("# change the prompt with: jailops config set JAIL prompt default|short|none|PS1\n")
-	b.WriteString("# Your own ~/.bashrc, ~/.bash_profile or ~/.profile is read after this file and wins.\n")
-	b.WriteString("# Only an interactive bash sets the prompt; sh, scripts and bash -c are not affected.\n")
-	b.WriteString("if [ -n \"${BASH_VERSION-}\" ] && [ -n \"${PS1-}\" ]; then\n")
+	b.WriteString("# In bash your own ~/.bashrc or ~/.bash_profile is read after this file and wins; in sh this file is read at\n")
+	b.WriteString("# the end of ~/.shrc, after ~/.profile: set a PS1 of your own below the JailOps block of ~/.shrc.\n")
+	b.WriteString("# Only an interactive shell (sh or bash) sets the prompt; scripts, sh -c and bash -c are not affected.\n")
+	b.WriteString("case \"$-\" in\n*i*)\n")
 	if api.PromptUsesWhere(ps1) {
 		b.WriteString("\t" + api.WhereLine() + "\n")
 	}
 	b.WriteString("\tPS1='" + ps1 + "'\n")
-	b.WriteString("fi\n")
+	b.WriteString("\t;;\nesac\n")
 	return b.String(), nil
 }
 
@@ -118,4 +119,21 @@ func PromptHookSet(existing string, withPrompt bool) (string, error) {
 		return "", err
 	}
 	return promptBlock(withPrompt) + rest, nil
+}
+
+// ShrcHookSet returns existing (the content of api.ShrcPath, empty when the file does not exist) with the marked block
+// that sources api.PromptFile at its END: FreeBSD's root .shrc sets PS1 itself, and the block must come after that line
+// to win. A block that is there already is replaced; without a prompt the block is removed and nothing else changes.
+func ShrcHookSet(existing string, withPrompt bool) (string, error) {
+	rest, _, err := splitPromptBlock(existing)
+	if err != nil {
+		return "", err
+	}
+	if !withPrompt {
+		return rest, nil
+	}
+	if rest != "" && !strings.HasSuffix(rest, "\n") {
+		rest += "\n"
+	}
+	return rest + promptBegin + "\n" + "if [ -r " + api.PromptFile + " ]; then . " + api.PromptFile + "; fi\n" + promptEnd + "\n", nil
 }

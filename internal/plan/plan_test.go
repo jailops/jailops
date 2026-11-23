@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -155,3 +156,19 @@ func TestRecoverOfACompletedPlanUndoesNothing(t *testing.T) {
 type failingDelete struct{ *MemJournal }
 
 func (f *failingDelete) Delete(context.Context, string) error { return errors.New("EIO") }
+
+// A record left in the journal under the same id (a run the recovery could not resolve, one of JailOps 0.9.2 among
+// them) is not overwritten by a new run: the run is refused and does nothing, and the record stays.
+func TestRunDoesNotOverwriteAStuckRecord(t *testing.T) {
+	var l []string
+	j := &MemJournal{}
+	stuck := Record{ID: "convert/alpha_web", Plan: "convert-jail alpha_web", Steps: []string{"rename-root-to-old", "rename-new-to-root"}, Begun: 1, State: StateRunning}
+	j.Put(context.Background(), stuck)
+	err := (&Executor{Journal: j}).Run(context.Background(), "convert/alpha_web", New("p", rec(&l, "a", false, false)))
+	if err == nil || !strings.Contains(err.Error(), "still in the journal") || len(l) != 0 {
+		t.Fatal(err, l)
+	}
+	if got, ok, _ := j.Get(context.Background(), "convert/alpha_web"); !ok || !reflect.DeepEqual(got, stuck) {
+		t.Fatalf("the record changed: %+v", got)
+	}
+}

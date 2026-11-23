@@ -18,8 +18,8 @@ jail/web exposed: 80/tcp
   IPv4  10.20.0.10   forwarded: host 8080->80 (NAT)
 
 $ jailops list
-NAME   STATE     IMAGE         GEN   ADDRESSES    EXPOSED         AUTOSTART   USED   AGE
-web    running   freebsd-151   g1    10.20.0.10   8080→80/tcp 4   -           -      3h
+NAME   STATE     OS        IMAGE         GEN   ADDRESSES    EXPOSED         AUTOSTART   USED   AGE
+web    running   freebsd   freebsd-151   g1    10.20.0.10   8080→80/tcp 4   -           -      3h
 
 $ jailops firewall show web
 Policies of jail/web: none (the host answers ping and DNS only)

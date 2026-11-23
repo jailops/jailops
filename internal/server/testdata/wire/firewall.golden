@@ -53,7 +53,6 @@
         "firewall": {},
         "hostname": "web",
         "image": "fb",
-        "layout": "thin",
         "network": [
           {
             "ipv4": "10.20.0.10",
@@ -391,7 +390,6 @@
         },
         "hostname": "web",
         "image": "fb",
-        "layout": "thin",
         "network": [
           {
             "ipv4": "10.20.0.10",
@@ -537,6 +535,17 @@
       },
       {
         "by": "the host is closed to jails (DNS and ping to the gateway excepted)",
+        "decision": "block",
+        "direction": "from",
+        "family": "4",
+        "from": "any",
+        "pf": "block drop in quick on <link> inet from any to 255.255.255.255",
+        "stage": "host",
+        "to": "255.255.255.255/32",
+        "where": "link"
+      },
+      {
+        "by": "the host is closed to jails (DNS and ping to the gateway excepted)",
         "decision": "pass",
         "direction": "from",
         "family": "4",
@@ -637,7 +646,8 @@
     "caveats": [
       "the answer is for a new connection: a connection that is already open (pf keeps its state) is not asked about",
       "only JailOps' rules are evaluated: a rule of an anchor that passes or blocks is final, so /etc/pf.conf after the anchor line never sees the packet; quick rules of pf.conf before the anchor line are not evaluated (jailops doctor: pf.inbound and pf.order name such rules)",
-      "on the way out of the host only the destination jail's anchor is evaluated, not the anchors of other jails"
+      "on the way out of the host only the destination jail's anchor is evaluated, not the anchors of other jails",
+      "a connection from outside that no rule of the jail admits is closed by the jail's policy: JailOps opens the uplink for what the policies admit and never closes it, so \"blocked\" assumes that the host's pf.conf blocks inbound traffic by default (jailops doctor: pf.host_default_deny)"
     ],
     "verdict": "pass"
   },

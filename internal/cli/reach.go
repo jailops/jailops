@@ -261,7 +261,7 @@ jailops firewall exposed -o json`,
 			}
 			head := []string{"JAIL", "PROTO", "PORTS", "FAMILY", "ADDRESS", "FROM", "BY"}
 			if len(ex.Entries) == 0 {
-				fprintln(w, "Nothing is reachable from the Internet.")
+				fprintln(w, "Nothing is reachable from the Internet by the jails' policies (this assumes the host's pf.conf blocks inbound traffic by default: jailops doctor, pf.host_default_deny).")
 			} else {
 				a.printTable(w, head, rows(ex.Entries), nil)
 			}

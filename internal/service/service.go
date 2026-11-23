@@ -191,8 +191,6 @@ type Deps struct {
 	// ProbeDNS asks a DNS server one question over UDP (doctor checks that the host's own resolver answers); nil
 	// leaves that check out.
 	ProbeDNS dnsprobe.Func
-	// Persistent replaces lifecycle.DefaultPersistent (nil keeps it).
-	Persistent []lifecycle.PersistentPath
 	// ServerFingerprint is the pin of the server certificate; trust tokens
 	// carry it.
 	ServerFingerprint string
@@ -230,6 +228,10 @@ type Service struct {
 	// doctor says what failed.
 	backupMu    sync.Mutex
 	backupFails map[string]backupFailure
+	// audits is the last audit of each jail since the daemon started (jailaudit.go); the doctor names the jails whose
+	// audit found something.
+	auditMu sync.Mutex
+	audits  map[string]auditNote
 	// racctAt and racctVal keep the last answer of the kern.racct.enable sysctl (see racctOn); guarded by mu.
 	racctAt   time.Time
 	racctVal  bool
@@ -368,6 +370,13 @@ type jailEntry struct {
 	problems []string
 	// locked names the encrypted volumes whose key is not loaded.
 	locked []string
+	// incomplete is what an upgrade left behind when its own rollback failed (lifecycle.PropUpgradeIncomplete).
+	incomplete string
+	// suspected is what the preflight detection of an upgrade found in the jail's root (lifecycle.PropSuspected).
+	suspected string
+	// unsupported marks a jail with the root layout of JailOps 0.9.2 and before (lifecycle.Recovered.UnsupportedLayout):
+	// a running one can be stopped, it can be deleted and read, everything else, a start too, is refused.
+	unsupported bool
 }
 
 // jailRuntime is the observed, in-memory part of a jail's status.
@@ -375,8 +384,6 @@ type jailRuntime struct {
 	conditions []api.Condition
 	drift      []string
 	startedAt  time.Time
-	// basePackages is why the last pass over the base package records failed ("" when they are in step).
-	basePackages string
 }
 
 // New builds a Service. Call Start afterwards to load the registry and to roll
@@ -442,7 +449,7 @@ func New(d Deps) (*Service, error) {
 		s.nx = &reconcile.NetExec{Net: d.Net, PF: d.PF, Run: d.Run, Sysctl: d.Sysctl}
 	}
 	s.planExec = &plan.Executor{Journal: s.journal, OnEvent: s.ops.planEvent}
-	s.lcfg = lifecycle.Config{Root: d.Root, MountBase: d.MountBase, Locate: s.locate, Storages: s.lifecycleStorages, Persistent: d.Persistent, Attached: s.attachedVolumes, RootOldRetention: lifecycle.DefaultRootOldRetention}
+	s.lcfg = lifecycle.Config{Root: d.Root, MountBase: d.MountBase, Locate: s.locate, Storages: s.lifecycleStorages, Attached: s.attachedVolumes, RootOldRetention: lifecycle.DefaultRootOldRetention}
 	if d.ZFS != nil {
 		lc := d.Lifecycle
 		lc.Root, lc.MountBase = d.Root, d.MountBase
@@ -450,10 +457,12 @@ func New(d Deps) (*Service, error) {
 		if lc.Now == nil {
 			lc.Now = d.Now
 		}
+		if lc.RootOldRetention == 0 {
+			lc.RootOldRetention = lifecycle.DefaultRootOldRetention // zero would remove root.old and the upgrade snapshots at once
+		}
 		s.lcfg = lc
 		s.life = &lifecycle.Service{Cfg: lc, ZFS: d.ZFS, Exec: d.Exec, Jails: &jailRuntimeAdapter{s: s}, Files: d.Files,
 			Hooks: &hooks{s: s}, Images: &imageAdapter{s: s}, Executor: s.planExec, Keys: d.Keys,
-			BaseRecords: s.setBasePackages,
 			Warn: func(ctx context.Context, key, action, what string) {
 				project, name := validate.SplitQualified(key)
 				s.log.Warn(what, "jail", key, "event", action)

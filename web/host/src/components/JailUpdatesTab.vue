@@ -91,7 +91,6 @@ const tone = (r: string) => (r === 'success' ? 'ok' : r === 'rolled_back' || r =
           <div class="row">
             <label class="check"><input v-model="policy.packages" type="checkbox" />{{ s.updates.packages }}</label>
             <label class="check"><input v-model="policy.os" type="checkbox" />{{ s.updates.os }}</label>
-            <label class="check"><input :checked="policy.reboot === 'auto'" type="checkbox" @change="policy.reboot = ($event.target as HTMLInputElement).checked ? 'auto' : 'manual'" />{{ s.updates.reboot }}</label>
           </div>
           <Callout v-if="policy.mode === 'managed'" tone="warn">{{ s.updates.managedWarn }}</Callout>
           <div class="row"><button class="btn btn-primary" type="button" :disabled="!pdirty" data-test="policy-save" @click="savePolicy">{{ s.updates.savePolicy }}</button>
@@ -114,7 +113,7 @@ const tone = (r: string) => (r === 'success' ? 'ok' : r === 'rolled_back' || r =
           <thead><tr><th>{{ s.updates.time }}</th><th>{{ s.updates.kind }}</th><th class="hide-sm">{{ s.updates.snapshot }}</th><th>{{ s.updates.result }}</th></tr></thead>
           <tbody><tr v-for="h in l.data.value.history" :key="h.id">
             <td class="faint nowrap">{{ stamp(h.started_at) }}<div v-if="h.scheduled" class="faint">scheduled</div></td><td>{{ h.kind }}<div v-if="h.from" class="mono faint">{{ h.from }} &rarr; {{ h.to }}</div></td><td class="mono hide-sm">{{ h.snapshot || '-' }}</td>
-            <td><span class="pill" :class="tone(h.result)">{{ s.updates.results[h.result] }}</span><div v-if="h.error" class="faint">{{ h.error }}</div><div v-if="h.note" class="faint">{{ h.note }}</div><div v-if="h.root_rolled_back" class="faint">{{ s.updates.rootRollbackNote }}</div></td>
+            <td><span class="pill" :class="tone(h.result)">{{ s.updates.results[h.result] }}</span><div v-if="h.error" class="faint">{{ h.error }}</div><div v-if="h.note" class="faint">{{ h.note }}</div></td>
           </tr></tbody></table></div>
       </section>
 

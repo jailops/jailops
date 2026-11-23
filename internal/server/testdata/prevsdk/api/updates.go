@@ -111,8 +111,7 @@ type UpdateRecord struct {
 	To       string `json:"to,omitempty"`
 	// Packages lists the packages the update changed.
 	Packages []PackageUpdate `json:"packages,omitempty"`
-	// RootRolledBack is true when a failed OS update was swapped back to the
-	// previous generation. Application data was not touched.
+	// RootRolledBack is true when a failed OS update put the previous root back. Application data was not touched.
 	RootRolledBack bool `json:"root_rolled_back,omitempty"`
 	// Scheduled is set for updates started by the schedule.
 	Scheduled bool   `json:"scheduled,omitempty"`

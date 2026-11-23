@@ -707,7 +707,8 @@ func TestPFNeighbourDiscoveryAndICMPv6(t *testing.T) {
 		// no advertisement to a multicast group
 		"block in quick on joe1a inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv",
 		// the jail's own addresses are the only sources
-		"from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to any icmp6-type { neighbrsol, neighbradv }",
+		// to its link only: link-local addresses and solicited-node groups, never off the link
+		"from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to { fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv }",
 		// only its own addresses and groups reach the jail
 		"to { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2, ff02::1:ff00:100, ff02::1:ff88:fcd2 } icmp6-type { neighbrsol, neighbradv }",
 		// path MTU discovery: ICMPv6 errors pass both ways, also under a default deny
@@ -719,8 +720,11 @@ func TestPFNeighbourDiscoveryAndICMPv6(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "fe80::/10") {
-		t.Errorf("the jail's own link-local address is known, fe80::/10 must not appear:\n%s", out)
+	if strings.Contains(out, "from fe80::/10") || strings.Contains(out, ", fe80::/10 }") {
+		t.Errorf("the jail's own link-local address is known, fe80::/10 must not be a source:\n%s", out)
+	}
+	if strings.Contains(out, "to any icmp6-type { neighbrsol, neighbradv }") {
+		t.Errorf("a neighbour message of the jail may leave its link:\n%s", out)
 	}
 	// every ICMPv6 pass comes before the default deny
 	if i, j := strings.Index(out, "toobig"), strings.Index(out, "block drop out quick on joe1a all"); i < 0 || j < i {
@@ -750,7 +754,7 @@ func TestPFNeighbourDiscoveryOnTheJailsLink(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden(t, "pf_nd_link", out)
-	if !strings.Contains(out, "from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to any icmp6-type { neighbrsol, neighbradv }") {
+	if !strings.Contains(out, "from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to { fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv }") {
 		t.Errorf("the jail cannot answer the host's solicitation:\n%s", out)
 	}
 	if !strings.Contains(out, "block in quick on joe1a inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv") {
@@ -1238,5 +1242,84 @@ func TestEveryTableOfASetThatARuleNamesIsDefined(t *testing.T) {
 	}
 	if used < 1 {
 		t.Fatalf("the rule of the policy names the set, found %d:\n%s", used, rs)
+	}
+}
+
+// The host's addresses and the other projects' subnets change with the host (a network's first jail starting, a tunnel
+// coming up, a network created in another project), not with what a rule means: the labels stay, so the reconciler
+// ends no connection. A member taken out of an address set a rule names still changes a label.
+func TestLabelsIgnoreHostAddressesAndForeignSubnets(t *testing.T) {
+	render := func(mut func(*PFInput)) map[string]bool {
+		in := pfBase()
+		in.Host = []netip.Addr{ip("10.20.0.1"), ip("192.0.2.10")}
+		in.Foreign = []netip.Prefix{netip.MustParsePrefix("10.30.0.0/24"), netip.MustParsePrefix("10.31.0.0/24")}
+		in.UplinkOf = map[netip.Addr]Uplink{ip("2001:db8:1::100"): {Iface: "em0", Routed: true}}
+		if mut != nil {
+			mut(&in)
+		}
+		s, err := PFAnchor(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]bool{}
+		for _, l := range regexp.MustCompile(`label "(jo-[0-9a-f]{12})"`).FindAllStringSubmatch(s, -1) {
+			m[l[1]] = true
+		}
+		if len(m) == 0 {
+			t.Fatal("no labels")
+		}
+		return m
+	}
+	same := func(a, b map[string]bool) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for l := range a {
+			if !b[l] {
+				return false
+			}
+		}
+		return true
+	}
+	base := render(nil)
+	for name, mut := range map[string]func(*PFInput){
+		"host address added":   func(in *PFInput) { in.Host = append(in.Host, ip("10.89.0.1"), ip("fd50:89::1")) },
+		"host address removed": func(in *PFInput) { in.Host = in.Host[:1] },
+		"foreign network added": func(in *PFInput) {
+			in.Foreign = append(in.Foreign, netip.MustParsePrefix("10.40.0.0/24"), netip.MustParsePrefix("fd40::/64"))
+		},
+		"foreign network removed": func(in *PFInput) { in.Foreign = in.Foreign[:1] },
+	} {
+		if !same(base, render(mut)) {
+			t.Errorf("%s: the labels changed, every established flow of the jail would end", name)
+		}
+	}
+	if same(base, render(func(in *PFInput) {
+		in.Sets = map[string]api.AddressSetSpec{"office": {Addresses: api.Entries("203.0.113.0/24")}, "vpn": {Addresses: api.Entries("198.51.100.7")}}
+	})) {
+		t.Error("a member taken out of a set did not change a label")
+	}
+	if same(base, render(func(in *PFInput) { in.TagMembers = map[string][]netip.Addr{"admin": {ip("10.20.0.4")}} })) {
+		t.Error("a jail leaving a tag a rule names did not change a label")
+	}
+}
+
+// The limited broadcast is delivered to the host's own services; a jail never sends to it, whatever its policies say.
+func TestJailCannotSendToTheLimitedBroadcast(t *testing.T) {
+	in := pfBase()
+	in.Policies = append(in.Policies, PFPolicy{Name: "open", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
+		{Name: "all out", Action: "allow", Direction: "out"}}}})
+	out, err := PFAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := "block drop in quick on jo0123456789a0a inet from any to 255.255.255.255"
+	bi, pi := strings.Index(out, block), strings.Index(out, "# policy web")
+	if bi < 0 || pi < 0 || bi > pi {
+		t.Fatalf("no broadcast block before the policies:\n%s", out)
+	}
+	in.Addresses = []netip.Addr{ip("2001:db8:1::100")}
+	if out, err = PFAnchor(in); err != nil || strings.Contains(out, "255.255.255.255") {
+		t.Fatalf("an IPv6-only jail has an IPv4 rule (%v):\n%s", err, out)
 	}
 }

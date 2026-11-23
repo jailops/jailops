@@ -26,7 +26,6 @@ const (
 	propKind      = "jailops:kind"     // one of the Kind constants
 	propMountRel  = "jailops:mountrel" // mountpoint relative to the container's mountpoint
 	metaProject   = "project"          // manifest meta
-	metaLayout    = "layout"           // thin or thick
 	metaStorage   = "storage"          // storage name of the jail
 	metaContainer = "container"        // the dataset name at backup time (informational)
 	metaKind      = "kind"             // "jail", "state" or "volume"
@@ -81,17 +80,14 @@ func (r *CaptureResult) Err() error {
 }
 
 // capturable returns the datasets of the record that are backed up, container
-// first, then by mount depth (design 9.7: the thin root is not captured).
+// first, then by mount depth.
 func capturable(j JailRecord) ([]Dataset, error) {
-	thick := j.Spec.Layout == api.LayoutThick
 	var out []Dataset
 	hasContainer := false
 	for _, d := range j.Datasets {
 		switch {
 		case d.Name == "":
 			return nil, api.Errorf(api.CodeInvalid, "jail %q lists a dataset without a name", j.Name)
-		case d.Kind == KindRoot && !thick && !j.IsState:
-			continue
 		}
 		if d.Name == j.Container {
 			hasContainer = true
@@ -220,6 +216,9 @@ func (s *Service) BackupJail(ctx context.Context, j JailRecord, o CaptureOptions
 			s.deps.Observer.RunFinished(context.WithoutCancel(ctx), run)
 		}
 	}()
+	if j.Unsupported != "" {
+		return nil, api.Errorf(api.CodeUnsupported, "%s", j.Unsupported)
+	}
 
 	targets := o.Targets
 	if len(targets) == 0 {
@@ -362,7 +361,7 @@ func (s *Service) BackupJail(ctx context.Context, j JailRecord, o CaptureOptions
 		}
 	}
 
-	meta := map[string]string{metaProject: j.Project, metaLayout: string(j.Spec.Layout), metaStorage: j.Spec.Storage,
+	meta := map[string]string{metaProject: j.Project, metaStorage: j.Spec.Storage,
 		metaContainer: j.Container, metaKind: "jail"}
 	if j.IsState {
 		meta[metaKind] = "state"

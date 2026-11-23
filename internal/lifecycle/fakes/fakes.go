@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"jailops.net/jailops/internal/hostdir"
+	"jailops.net/jailops/internal/jailaudit"
 	"jailops.net/jailops/internal/lifecycle/fault"
 	"jailops.net/jailops/internal/mounts"
 	"jailops.net/jailops/sdk/api"
@@ -65,8 +66,17 @@ type Files struct {
 	Trees map[string][]string // CopyTree: src -> file paths relative to src to copy
 	// HostTrees are the approved host directories ImportHostDir copies from: src -> file path relative to src -> content.
 	HostTrees map[string]map[string]string
+	// CheckErr is what CheckRoot answers; Checked are the paths of the last check.
+	CheckErr error
+	Checked  []string
+	// Audit is what AuditRoot answers, AuditErr its error; Audited are the files of the last audit.
+	Audit    jailaudit.Facts
+	AuditErr error
+	Audited  []jailaudit.File
 	// ImportErr makes a copy (not the check before it) fail.
 	ImportErr error
+	// ReadErr makes ReadFile of a path fail with the error (a file the helper refuses to read).
+	ReadErr map[string]error
 	// Imports records what ImportHostDir copied, "src dst".
 	Imports []string
 	Owners  map[string]string // SetOwner: path -> uid:gid:mode
@@ -102,6 +112,9 @@ func (f *Files) WriteAtomic(_ context.Context, p string, data []byte) error {
 func (f *Files) ReadFile(_ context.Context, p string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.ReadErr[p]; err != nil {
+		return nil, err
+	}
 	d, ok := f.Data[p]
 	if !ok {
 		return nil, fmt.Errorf("%s: %w", p, os.ErrNotExist)
@@ -135,6 +148,25 @@ func (f *Files) Probes() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.ProbeCalls
+}
+
+// AuditRoot answers Audit and AuditErr and records the files it was given.
+func (f *Files) AuditRoot(_ context.Context, root string, files []jailaudit.File) (jailaudit.Facts, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Audited = files
+	return f.Audit, f.AuditErr
+}
+
+// CheckRoot answers CheckErr (nil: a clean root) and records the paths it was given.
+func (f *Files) CheckRoot(_ context.Context, root string, paths []string) error {
+	if err := f.F.Hit("checkroot " + root); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Checked = append([]string(nil), paths...)
+	return f.CheckErr
 }
 
 // StaleMounts are the leftover mounts the fake reports; HealJail takes the ones of a jail off the list.

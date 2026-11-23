@@ -147,14 +147,9 @@ type opRequest struct {
 	Upgrade  *lifecycle.UpgradeRequest  `json:"upgrade,omitempty"`
 	State    *lifecycle.SwitchState     `json:"state,omitempty"`
 	Rollback *lifecycle.RollbackOptions `json:"rollback,omitempty"`
-	// Convert is the request of a layout conversion; ConvertState the state it recorded.
-	Convert      *lifecycle.ConvertRequest `json:"convert,omitempty"`
-	ConvertState *lifecycle.ConvertState   `json:"convert_state,omitempty"`
-	Copy         *copyRequest              `json:"copy,omitempty"`
+	Copy     *copyRequest               `json:"copy,omitempty"`
 	// Import is the run of a jail import: the uuid it made its datasets with and the volumes it made so far.
 	Import *importRequest `json:"import,omitempty"`
-	// TargetGen is the generation a root rollback was switching to.
-	TargetGen int `json:"target_gen,omitempty"`
 	// Rename holds the steps of a rename.
 	Rename *renameRequest `json:"rename,omitempty"`
 	// Volume is the request of a volume's creation.

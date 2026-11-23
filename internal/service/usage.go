@@ -55,9 +55,9 @@ func (s *Service) accounting(ctx context.Context, key string) *api.JailAccountin
 	return a
 }
 
-// diskUsage lists the container with used and referenced in one call: the
-// root is the root dataset and the data are the persistent datasets; the
-// volumes a jail attaches belong to the project and are not counted.
+// diskUsage lists the container with used and referenced in one call: the root is the root dataset and the data is
+// the dataset the jail manages itself (zfs_delegation); the volumes a jail attaches belong to the project and are not
+// counted.
 func (s *Service) diskUsage(ctx context.Context, key string) api.JailDiskUsage {
 	if s.d.ZClient == nil {
 		return api.JailDiskUsage{Error: "no ZFS client"}
@@ -78,7 +78,7 @@ func (s *Service) diskUsage(ctx context.Context, key string) api.JailDiskUsage {
 				return api.JailDiskUsage{Error: "zfs reports no used or referenced for " + r.Name}
 			}
 			d.RootBytes, d.RootReferencedBytes, seenRoot = used, ref, true
-		case r.Props[lifecycle.PropKind] == lifecycle.KindPersistent:
+		case r.Props[lifecycle.PropKind] == lifecycle.KindDelegated:
 			if !uok {
 				return api.JailDiskUsage{Error: "zfs reports no used for " + r.Name}
 			}
@@ -97,7 +97,7 @@ func bytesProp(v string) (int64, bool) {
 	return n, err == nil && n >= 0
 }
 
-// jailsDiskUsed is `used` of the root and the persistent datasets of each jail key, read with one ZFS listing for
+// jailsDiskUsed is `used` of the root and the delegated dataset of each jail key, read with one ZFS listing for
 // each directory that holds containers (the jails of a project on a storage), not one for each jail. A jail whose
 // numbers cannot be read is left out of the map.
 func (s *Service) jailsDiskUsed(ctx context.Context, keys []string) map[string]int64 {
@@ -128,7 +128,7 @@ func (s *Service) jailsDiskUsed(ctx context.Context, keys []string) map[string]i
 				switch {
 				case r.Name == root && ok:
 					sum, seen = sum+used, true
-				case strings.HasPrefix(r.Name, container+"/") && r.Props[lifecycle.PropKind] == lifecycle.KindPersistent && ok:
+				case strings.HasPrefix(r.Name, container+"/") && r.Props[lifecycle.PropKind] == lifecycle.KindDelegated && ok:
 					sum += used
 				}
 			}

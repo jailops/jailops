@@ -26,11 +26,13 @@ const (
 
 // Item is one jail of a rollout.
 type Item struct {
-	Host  string `json:"host"`
-	Jail  string `json:"jail"`
+	Host string `json:"host"`
+	Jail string `json:"jail"`
+	// From is the image generation the jail was copied from, for the report.
 	From  string `json:"from"`
-	To    string `json:"to"`
 	State string `json:"state"`
+	// Upgraded is set once the upgrade of the jail finished: a resumed rollout only checks its health again.
+	Upgraded bool `json:"upgraded,omitempty"`
 	// Op is the id of the upgrade operation on the host while it runs, so a
 	// resumed rollout waits for it instead of starting a second upgrade.
 	Op    string `json:"op,omitempty"`

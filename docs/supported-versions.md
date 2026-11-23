@@ -74,7 +74,7 @@ and warns for a release newer than the newest one in the matrix and for another 
 | What moves | How |
 |---|---|
 | The host | With the tool the host uses: `pkg` against `FreeBSD-base` on a pkgbase install, `freebsd-update` on distribution sets, the commands of the release's Upgrading Instructions page. Upgrade the host before any jail: a jail runs on the host's kernel ([lifecycle.md](lifecycle.md#32-a-minor-release-of-the-host-151-to-152)). |
-| The patch levels of a release | `jailops image upgrade freebsd-15-1`, or the nightly auto upgrade. It stays inside the release of the image ([lifecycle.md](lifecycle.md#35-patch-levels-of-thin-jails)). |
-| A jail to a new release | `jailops jail upgrade web --image freebsd-15-2` (after `jailops image create freebsd-15-2 --release 15.2-RELEASE --build`), or `jailops image upgrade freebsd-15-1 --to freebsd-15-2` for every jail of an image: the data, volumes and addresses stay, one snapshot is the way back ([lifecycle.md](lifecycle.md#36-a-thin-jail-to-a-new-release)). A thick or Linux jail is updated by hand inside the jail ([thick-jail-upgrades.md](thick-jail-upgrades.md)), or replaced by a new jail on the new image ([upgrade.md](upgrade.md#a-new-release-move-the-jails)). |
+| The patch levels of a release | `jailops jail upgrade web`, in place while the jail runs, inside the release installed in the jail, or on the jail's schedule by its update policy ([lifecycle.md](lifecycle.md#35-a-freebsd-jail)). `jailops image upgrade freebsd-15-1` builds the next generation for new jails ([lifecycle.md](lifecycle.md#36-images-and-generations)). |
+| A jail to a new release | `jailops jail upgrade web --release 15.2-RELEASE`, in place: the data, volumes and addresses stay, one snapshot is the way back ([lifecycle.md](lifecycle.md#35-a-freebsd-jail)). New jails come from an image of the new release (`jailops image create freebsd-15-2 --release 15.2-RELEASE --build`). A Linux jail is replaced by a new jail on the new image ([upgrade.md](upgrade.md#a-new-release-move-the-jails)). |
 
-Try the new release with one jail first, and keep the old image until no jail uses it.
+Try the new release with one jail first.

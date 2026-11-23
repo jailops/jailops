@@ -107,6 +107,31 @@ Two things to know about a host that already has a firewall:
   `rc.conf`, else `/etc/pf.conf`) lacks it. Because states are bound to interfaces, a host that blocks by default
   needs a rule that lets the jails' traffic out of the uplink (`pass out on vtnet0 keep state`) as it does for any
   other machine it forwards for.
+- **Block inbound traffic by default.** The anchors of the jails open the uplink for what their policies admit and
+  never close it: what no rule decides, pf passes. A `pf.conf` without an inbound default block leaves a jail with a
+  routed address (IPv6, or IPv4 without NAT) reachable from the Internet on every port its policies do not deny, and
+  "closed" in `jailops firewall test`, `firewall show` and `firewall exposed` assumes that block. Put `block in all`
+  after the options and the scrub line and **before** the anchor line, without `quick` (a `block ... quick` before the
+  anchor drops the jails' traffic before their policies are asked, and `pf.inbound` fails), with a pass for what the
+  host itself serves, ssh first:
+
+      set state-policy if-bound
+      scrub in all fragment reassemble
+      block in all                                       # inbound: what no rule passes stays out
+      pass out all keep state                            # the host's connections, and the jails' traffic out of the uplink
+      pass in on vtnet0 proto tcp to (vtnet0) port 22    # ssh to the host itself
+      pass in inet6 proto ipv6-icmp                      # neighbour discovery and path MTU discovery
+      anchor "jailops/*"
+
+  `vtnet0` is the uplink. Check and load with `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf` from a session that
+  survives a mistake (the console, or a second ssh session). `jailops doctor` warns (`pf.host_default_deny`) when the
+  loaded ruleset has no inbound default block on an uplink of the jails, in either address family (`block in inet all`
+  leaves IPv6 open).
+- **The size of the state table.** Each pass rule of a jail may create `jails.max_states` states (10000 unless you set
+  another value), and the host's table holds pf's default of 100000 for the host and every jail together; a full table
+  makes new connections fail host-wide, ssh included. `jailops doctor` (`pf.states`, over the running jails) warns when a
+  jail has no limit or one above half the table, says so as information when the limits add up to more than the table
+  holds, and prints a value for `set limit states` in `pf.conf`.
 - **DNS for the jails.** `jailops-setup` enables the base system's resolver (`local_unbound`), and the jails get names
   (`db.shop.internal`) and the host's nameservers through it with nothing to write by hand: see [dns.md](dns.md). A
   network that names nameservers of its own (`jailops network edit`, `dns:`) keeps them.
@@ -120,7 +145,7 @@ Two things to know about a host that already has a firewall:
   For certain sources a policy rule does it: `jailops firewall rule add web in --action allow --proto tcp --from set:office --port 8080`.
   The Internet: `expose`; certain sources: a policy ([networking.md](networking.md#expose-or-a-policy-rule)).
 
-  A jail with only defaults stays closed from the internet, whatever its `default_in` says, and `allow in from any`
+  With the default block above, a jail with only defaults stays closed from the internet, whatever its `default_in` says, and `allow in from any`
   means the whole internet. `pf.conf` is for the host's own services. If you added a rule of your own for a jail
   prefix (`pass in quick on vtnet0 ... to <jail prefix> ...`), delete it: it keeps a jail without an allow rule
   reachable, and `jailops doctor` (`pf.inbound`) names it. The same check fails when a `block ... quick` rule of yours
@@ -205,7 +230,7 @@ shows it). A project is granted the networks and storages its jails may use.
 
     jailops image create freebsd-15-1 --release 15.1-RELEASE    # the host's release; an image is one release
     jailops image build freebsd-15-1
-    jailops image set freebsd-15-1 --auto-upgrade --upgrade-at 03:00      # optional: its patch levels every night
+    jailops image set freebsd-15-1 --auto-upgrade --upgrade-at 03:00      # optional: every night a new generation, for new jails
     jailops network create lan --ipv4 10.77.0.1/24 --uplink vtnet0 --nat    # vtnet0: the host's uplink, see below
     jailops project create web
     jailops network grant lan --project web && jailops storage grant default --project web
@@ -231,9 +256,11 @@ forwarding is off (section 4) the command warns that the network stays not ready
 net.inet.ip.forwarding=1`. New names have limits so that what is derived from them fits: a project at most 13
 characters, a jail, a volume and an image 32, a snapshot 64 ([design.md](design.md#31-names-and-their-limits)).
 
-The image is named after its release: `freebsd-15-1` is 15.1-RELEASE, and a jail made with `--image freebsd-15-1`
-follows its newest generation (its newest patch level). The patch levels come with `jailops image upgrade freebsd-15-1`
-or the nightly auto upgrade; a new release is a new image, and the jails move to it with `jailops jail upgrade --image` ([upgrade.md](upgrade.md#a-new-release-move-the-jails)).
+The image is named after its release: `freebsd-15-1` is 15.1-RELEASE, and a jail made with `--image freebsd-15-1` is a
+copy of its newest generation (its newest patch level) with a root of its own. The jail's patch levels come with
+`jailops jail upgrade`, in place while it runs, or on its schedule by its update policy (`update.os`); a new
+release is `jailops jail upgrade --release` for the jails and a new image for new jails
+([upgrade.md](upgrade.md#a-new-release-move-the-jails)).
 
 Without an image, `jailops app install` and `jailops create` are refused with a hint that names the two commands
 above, with the host's release filled in.

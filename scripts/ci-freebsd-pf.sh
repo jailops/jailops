@@ -114,6 +114,7 @@ addr4() { $J config get "$2" network.eth0.ipv4 --project "$1" </dev/null 2>/dev/
 addr6() { $J config get "$2" network.eth0.ipv6 --project "$1" </dev/null 2>/dev/null | tail -1; }
 
 # --- setup and cleanup -------------------------------------------------------------------------------------------
+FORGE_DEVFS=4242 # the devfs ruleset of the forge jail's /dev (phase 0e): outside the stock 1-4 and JailOps' 5000 and up
 cleanup() {
 	say "cleanup"
 	[ -n "${PF_KEEP:-}" ] || remove_all
@@ -157,6 +158,7 @@ remove_all() {
 		retry 3 $J project delete -y $p </dev/null
 	done
 	for n in pfa-net pfa-net2 pfa-up pfa-up4 pfa-up6 ndp-up pfb-net; do retry 3 $J network delete -y $n </dev/null; done
+	devfs rule -s "$FORGE_DEVFS" delset >/dev/null 2>&1 # the forge jail's ruleset (phase 0e)
 }
 
 policy() { # policy PROJECT NAME YAML-BODY: create or replace
@@ -484,7 +486,7 @@ PRE=$(snapshot)
 anchor_has() { pfctl -a jailops/pfa/a -sr 2>/dev/null | grep -q "$1"; }
 expect allow "a's anchor passes packet-too-big in both directions" anchor_has "icmp6-type toobig"
 expect allow "a's anchor blocks router advertisements from the jail" anchor_has "block drop in quick on .* icmp6-type routeradv"
-expect deny "a's anchor does not allow all of fe80::/10 as source" anchor_has "fe80::/10"
+expect deny "a's anchor does not allow all of fe80::/10 as source" anchor_has "from fe80::/10"
 expect deny "a's anchor lets :: send anything but a neighbour solicitation to a solicited-node group" anchor_has "from :: to ff02::/16"
 jx pfa a ping -6 -c1 -t2 "$B6" >/dev/null 2>&1
 
@@ -539,10 +541,16 @@ mkdir -p "$(dirname "$EVID")" 2>/dev/null
 : > "$EVID"
 log() { printf '%s\n' "$*" | tee -a "$EVID"; }
 unhide_bpf() { # unhide_bpf PROJECT NAME
+	# The jail's /dev gets a ruleset of the test's own: the jail's ruleset (the stock ruleset 4, shared by every jail of
+	# the host, or a private one JailOps verifies) plus bpf. Adding to the jail's ruleset would change it for good, and
+	# for every jail that uses it; cleanup deletes this one.
 	r=$(jls -j "${1}_${2}" devfs_ruleset 2>/dev/null) || return 1
 	root=$(jls -j "${1}_${2}" path 2>/dev/null) || return 1
-	devfs -m "$root/dev" rule -s "$r" add path 'bpf*' unhide >/dev/null 2>&1
-	devfs -m "$root/dev" rule -s "$r" applyset >/dev/null 2>&1
+	devfs rule -s "$FORGE_DEVFS" delset >/dev/null 2>&1
+	devfs rule -s "$FORGE_DEVFS" add include "$r" >/dev/null 2>&1 || return 1
+	devfs rule -s "$FORGE_DEVFS" add path 'bpf*' unhide >/dev/null 2>&1 || return 1
+	devfs -m "$root/dev" ruleset "$FORGE_DEVFS" >/dev/null 2>&1 || return 1
+	devfs -m "$root/dev" rule applyset >/dev/null 2>&1 || return 1
 	cp "$FORGE_BIN" "$root/tmp/forge" && chmod +x "$root/tmp/forge"
 }
 unhide_bpf pfa a || die "forge: could not reach into pfa_a"

@@ -13,7 +13,7 @@ import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 // Export a jail (extension jail_export), operator in the project. The file is written as it arrives: to a file the
 // browser lets the page choose when it can (nothing is held in memory), else collected and offered as a download. The
 // framing is checked on the way, so a file that ended early is said to be so here and not at the import.
-const props = defineProps<{ open: boolean; jail: string; thick?: boolean; snapshots: JailSnapshot[]; hasVolumes?: boolean }>()
+const props = defineProps<{ open: boolean; jail: string; snapshots: JailSnapshot[]; hasVolumes?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 
 const snapshot = ref('')
@@ -96,7 +96,6 @@ async function go(): Promise<void> {
   <Modal :open="open" :title="s.xport.exportTitle(jail)" @close="busy || emit('close')">
     <form id="xp" class="stack" data-test="export-form" @submit.prevent="go">
       <p class="muted" style="margin: 0">{{ s.xport.exportLead }}</p>
-      <p class="muted" style="margin: 0" data-test="export-layout">{{ thick ? s.xport.exportThick : s.xport.exportThin }}</p>
       <div v-if="sorted.length" class="field">
         <label for="xp-snap">{{ s.xport.snapshot }}</label>
         <select id="xp-snap" v-model="snapshot" :disabled="busy" data-test="export-snapshot">

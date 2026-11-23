@@ -62,7 +62,7 @@ func TestImportRules(t *testing.T) {
 				case isStd(p), allowedImports[p]:
 				case isTest && allowedInTests[p]:
 				case dir != "." && p == modulePath+"/internal/cli":
-					// the command is a thin main around the package
+					// the command is a small main around the package
 				default:
 					t.Errorf("%s imports %q: the client may use only sdk, sdk/api, the standard library, cobra, yaml.v3 and x/term", f, p)
 				}

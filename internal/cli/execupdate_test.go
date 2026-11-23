@@ -181,13 +181,13 @@ func TestExecThroughHub(t *testing.T) {
 func TestUpdates(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.srv.SeedGeneration("freebsd-15") // g2: an OS update for jails on g1
 	tr := h.transcript()
 	tr.ok("create", "web", "--image", "freebsd-15#g1", "--network", "lan", "--storage", "default")
 	tr.ok("create", "db", "--image", "freebsd-15#g1", "--network", "lan", "--storage", "default")
 	tr.ok("start", "web")
 	tr.ok("start", "db")
 	h.srv.SeedPackageUpdates("main", "web", []api.PackageUpdate{{Name: "nginx", From: "1.24", To: "1.26"}, {Name: "curl", From: "8.0", To: "8.1"}})
+	h.srv.SeedPackageUpdates("main", "db", []api.PackageUpdate{{Name: "postgresql17-server", From: "17.5", To: "17.6"}})
 	tr.ok("update", "list")
 	tr.do("", "update", "check")
 	tr.do("", "update", "check", "web", "--all")
@@ -274,20 +274,6 @@ func TestShellSetupAndShellFlags(t *testing.T) {
 	tr.do("", "config", "set", "web", "prompt", "`id`")
 	tr.do("", "jail", "shell-setup", "ghost")
 	tr.golden("shell_setup")
-}
-
-func TestRepairPackages(t *testing.T) {
-	h := newHarness(t)
-	h.seed()
-	tr := h.transcript()
-	tr.ok("create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
-	tr.ok("jail", "repair-packages", "web")
-	tr.ok("jail", "repair-packages", "web", "-o", "json")
-	tr.ok("--dry-run", "jail", "repair-packages", "web")
-	tr.ok("start", "web")
-	tr.do("", "jail", "repair-packages", "web") // running
-	tr.do("", "jail", "repair-packages", "ghost")
-	tr.golden("repair_packages")
 }
 
 func TestBackupKeyRunVerify(t *testing.T) {

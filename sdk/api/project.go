@@ -30,6 +30,9 @@ type ProjectSpec struct {
 	FirewallPolicies []string `json:"firewall_policies,omitempty"`
 	// Images is an allow-list of image names; empty allows every image.
 	Images []string `json:"images,omitempty"`
+	// Shell is the shell a new FreeBSD jail of the project gets when it names none: sh or bash. Empty means the host's
+	// default (jails.shell of jailopsd.yaml, sh unless the operator chose bash).
+	Shell string `json:"shell,omitempty"`
 	// NewNetwork is a create-time convenience: the server creates a dedicated
 	// network with a subnet from its configured pool of subnets, grants it to the
 	// project and clears this flag. It is never stored as true.

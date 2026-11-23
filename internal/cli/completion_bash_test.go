@@ -152,7 +152,6 @@ func TestBashCompletion(t *testing.T) {
 		{line: "jailops config set web update.mode ", want: []string{"manual", "notify", "managed"}},
 		{line: "jailops config get web ", want: []string{"boot.autostart"}},
 		{line: "jailops create x --network ", want: []string{"lan"}},
-		{line: "jailops create x --layout ", want: []string{"thin", "thick"}},
 		{line: "jailops create x --firewall-policy ", want: []string{"floor"}},
 		{line: "jailops jail snapshot delete web ", want: []string{"s1"}},
 		{line: "jailops exec web -- ", empty: true},

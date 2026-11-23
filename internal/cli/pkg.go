@@ -34,8 +34,8 @@ no -y) run in each jail with the same rules as 'jailops exec' (running jails, th
 with [jail] in front when there are several, the same exit status). Name the jails, or select them with -l KEY=VALUE or --all;
 the packages follow "--".
 
-The jail needs the network to reach its package repository. Packages of a jail that JailOps updates (a thin jail's
-base, an app) are changed by 'jailops update' and 'jailops app', not by this command.`,
+The jail needs the network to reach its package repository. Packages of a jail that JailOps updates (its FreeBSD
+base, an app) are changed by 'jailops jail upgrade', 'jailops update' and 'jailops app', not by this command.`,
 		Example: `jailops pkg install web -- nginx
 jailops pkg install web1 web2 -- curl rsync
 jailops pkg upgrade -l role=web

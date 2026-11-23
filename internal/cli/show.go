@@ -307,9 +307,9 @@ func (a *app) showImage(i api.Image) error {
 		if g.Packages > 0 {
 			pkgs = strconv.Itoa(g.Packages)
 		}
-		rows = append(rows, []string{fmt.Sprintf("g%d", g.Number), dash(g.FreeBSDVersion), pkgs, age(now, g.CreatedAt), joinOrDash(g.Refs)})
+		rows = append(rows, []string{fmt.Sprintf("g%d", g.Number), dash(g.FreeBSDVersion), pkgs, age(now, g.CreatedAt)})
 	}
-	a.printTable(indentWriter{s.w}, []string{"GEN", "FREEBSD", "PACKAGES", "AGE", "USED BY"}, rows, nil)
+	a.printTable(indentWriter{s.w}, []string{"GEN", "FREEBSD", "PACKAGES", "AGE"}, rows, nil)
 	return nil
 }
 
@@ -341,6 +341,7 @@ func (a *app) showProject(p api.Project) error {
 	s.kv("Storage", orText(strings.Join(stor, ", "), "none: grant one with 'jailops storage grant NAME --project "+p.Metadata.Name+"'"))
 	s.kv("Firewall", orText(strings.Join(p.Spec.FirewallPolicies, ", "), "none"))
 	s.kv("Images", orText(strings.Join(p.Spec.Images, ", "), "any"))
+	s.kv("Shell", orText(p.Spec.Shell, "the host's default"))
 	s.kv("Age", age(a.env.Now(), p.Metadata.CreatedAt))
 	s.labels(p.Metadata)
 	q, st := p.Spec.Quotas, p.Status
@@ -399,11 +400,8 @@ func (a *app) showAutoUpgrade(s showWriter, i api.Image) {
 		if at == "" {
 			at = api.DefaultAutoUpgradeAt
 		}
-		what := "generation and jails"
-		if au.Packages {
-			what += " and their packages"
-		}
-		line := "every night at " + at + ": " + what
+		// the night builds the generation and touches no jail: each jail is patched by its own update policy
+		line := "every night at " + at + ": the next generation, for new jails"
 		if st != nil && !st.NextAt.IsZero() {
 			line += "; next " + st.NextAt.Local().Format("2006-01-02 15:04")
 		}
@@ -415,12 +413,9 @@ func (a *app) showAutoUpgrade(s showWriter, i api.Image) {
 	s.section("Automatic upgrades")
 	rows := [][]string{}
 	for _, r := range st.Recent {
-		what := fmt.Sprintf("%d moved, %d packages upgraded", r.JailsMoved, r.JailsUpgraded)
-		if r.Generation != "" {
-			what = r.Generation + ", " + what
-		}
+		what := r.Generation
 		if r.Detail != "" {
-			what += "; " + r.Detail
+			what = strings.TrimPrefix(what+"; "+r.Detail, "; ")
 		}
 		rows = append(rows, []string{r.StartedAt.Local().Format("2006-01-02 15:04"), r.Result, what})
 	}

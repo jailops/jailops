@@ -52,7 +52,7 @@ export const common = {
     data_loss_unconfirmed: 'This would lose data and was not confirmed.',
     version_skew: 'The host runs another version.',
     unverified_platform: 'This host lacks a kernel feature it needs.',
-    merge_conflict: 'Files in /etc need a decision: the jail stays on the old generation.',
+    merge_conflict: 'Files in /etc need a decision: the jail was not upgraded.',
     quota_exceeded: 'A project quota would be exceeded.',
     rate_limited: 'Too many attempts. Wait a little.',
     maintenance: 'The backup node is in maintenance. Try again later.',
@@ -62,6 +62,8 @@ export const common = {
     ApplyFailed: 'Apply failed',
     MissingStorage: 'Storage missing',
     MissingNetwork: 'Network missing',
+    // the UnsupportedLayout condition of a jail made by an earlier release: it does not start, it is stopped and deleted
+    EarlierRelease: 'Unsupported root layout',
   } as Record<string, string>,
   verbs: { POST: 'Create', PUT: 'Change', PATCH: 'Change', DELETE: 'Delete', GET: 'Read' } as Record<string, string>,
 

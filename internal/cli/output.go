@@ -126,7 +126,7 @@ func (a *app) emitList(v any, style styleFn, table func() ([]string, [][]string)
 	return nil
 }
 
-// printBoxed draws a table with thin borders for a terminal. A cell may hold
+// printBoxed draws a table with single-line borders for a terminal. A cell may hold
 // several lines; its row grows as tall as the cell. When the terminal is
 // narrower than the table, the columns named in drop are left out, first
 // first, until it fits; a cell is never cut.

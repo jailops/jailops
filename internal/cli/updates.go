@@ -75,10 +75,9 @@ func (a *app) updateCmd() *cobra.Command {
 	d := a.jailDesc()
 	uc := group("update", "Check for and apply updates of jails",
 		`Managed updates: a check lists what could change (packages inside the jail,
-a newer image generation for the root) and changes nothing; an apply takes a
-snapshot first, updates, runs the jail's health check and, when an OS update
-fails, swaps the root back to the previous generation. Application data is
-never rolled back for you. The history keeps the snapshot of every update.
+newer base packages of a FreeBSD jail) and changes nothing; an apply takes a
+snapshot first, updates and runs the jail's health check. Nothing is rolled back
+for you and no jail is stopped. The history keeps the snapshot of every update.
 
 Everything acts in the current project (--project, JAILOPS_PROJECT or
 'project switch'). Which jails update on their own is a matter of each jail's
@@ -151,7 +150,9 @@ shows an error in the result.`,
 		Short: "Apply updates to jails",
 		Long: `Apply updates. By default each jail gets what its update policy allows;
 --packages or --os restrict it. Every update takes an atomic snapshot first,
-which stays in the history.
+which stays in the history. A package update never restarts the jail: the record
+names what waits for a restart. The base of a FreeBSD jail (--os) is upgraded in
+place while the jail runs, by a global administrator ('jailops jail upgrade').
 
 With --dry-run nothing is applied: the command checks the jails and shows
 what an apply would change. Applying to every jail of a project (--all) is a
@@ -194,6 +195,13 @@ jailops update apply --all -y --packages`,
 				}
 				if a.format == fmtTable {
 					fprintf(a.env.Stdout, "dry-run: would apply updates to %d of %d jails in project %s\n", len(todo), len(rs), a.conn.CurrentProject())
+					for _, r := range todo {
+						if r.OS != nil && !pkgs {
+							// an update never stops a jail
+							fprintf(a.env.Stdout, "no jail is stopped: the base is upgraded in place while the jail runs\n")
+							break
+						}
+					}
 				}
 				return a.emitReports(todo)
 			}
@@ -237,7 +245,7 @@ jailops update apply --all -y --packages`,
 	}
 	apply.Flags().BoolVar(&applyAll, "all", false, "apply to every jail of the project that has updates")
 	apply.Flags().BoolVar(&pkgs, "packages", false, "only package updates")
-	apply.Flags().BoolVar(&osOnly, "os", false, "only operating system (image generation) updates")
+	apply.Flags().BoolVar(&osOnly, "os", false, "only the FreeBSD base, upgraded in place (a global administrator)")
 
 	history := &cobra.Command{
 		Use:               "history JAIL",

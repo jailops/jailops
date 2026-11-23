@@ -12,8 +12,8 @@ $ jailops jail list -o yaml
     updated_at: "2026-03-01T09:00:00Z"
   spec:
     image: freebsd-15
+    os: freebsd
     storage: default
-    layout: thin
     hostname: web
     network:
       - network: lan
@@ -40,8 +40,8 @@ $ jailops jail list -o json
     },
     "spec": {
       "image": "freebsd-15",
+      "os": "freebsd",
       "storage": "default",
-      "layout": "thin",
       "hostname": "web",
       "update": {},
       "resources": {},
@@ -81,8 +81,8 @@ $ jailops jail show web
   },
   "spec": {
     "image": "freebsd-15",
+    "os": "freebsd",
     "storage": "default",
-    "layout": "thin",
     "hostname": "web",
     "update": {},
     "resources": {},
@@ -111,8 +111,8 @@ Labels:      env=prod
 SPEC                    STATUS
 ----                    ------
 image: freebsd-15       power: stopped
-storage: default        image_generation: g1
-layout: thin
+os: freebsd             image_generation: g1
+storage: default
 hostname: web
 network:
   - network: lan
@@ -132,8 +132,8 @@ $ jailops jail create x --image freebsd-15 --network lan --storage default -o js
   },
   "spec": {
     "image": "freebsd-15",
+    "os": "freebsd",
     "storage": "default",
-    "layout": "thin",
     "hostname": "x",
     "update": {},
     "resources": {},

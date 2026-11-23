@@ -147,13 +147,8 @@ func TestBackupTwiceUploadsOnlyChangedChunks(t *testing.T) {
 	if len(r.w.m.snaps) != 0 {
 		t.Fatalf("snapshot directories left: %v", r.w.m.snaps)
 	}
-	// the thin root is not captured: no stream for it
-	for _, st := range f.Result.Streams {
-		if st.Name == "root" {
-			t.Fatal("the thin root was captured")
-		}
-	}
-	if len(f.Result.Streams) != 4 { // ".", etc, local, db
+	// the root is captured with the other datasets
+	if len(f.Result.Streams) != 5 { // ".", root, etc, local, db
 		t.Fatalf("streams = %+v", f.Result.Streams)
 	}
 
@@ -225,14 +220,14 @@ func TestRestoreToNewNameWithNetworkMap(t *testing.T) {
 	if pl.Container != "tank/jailops/projects/alpha/jails/web2" {
 		t.Fatalf("placement = %+v", pl)
 	}
-	// datasets: container, thin root cloned from the generation, persistent, volume with its parent
+	// datasets: container, root, and the other datasets of the jail
 	for _, ds := range []string{"", "/root", "/etc", "/local", "/db"} {
 		if ok, _ := r.w.Exists(bg, pl.Container+ds); !ok {
 			t.Fatalf("dataset %s%s missing", pl.Container, ds)
 		}
 	}
-	if o, _ := r.w.Origin(bg, pl.Container+"/root"); o != "tank/jailops/images/fbsd/g1@ro" {
-		t.Fatalf("root origin = %q", o)
+	if o, _ := r.w.Origin(bg, pl.Container+"/root"); o != "" {
+		t.Fatalf("the restored root is a clone of %q", o)
 	}
 	props, _ := r.w.Get(bg, pl.Container+"/db", "mountpoint", "quota", "jailops:path", "jailops:id")
 	if props["mountpoint"].Value != "/jo2/alpha/web2/root/var/db/app" || props["quota"].Value != "1G" || props["jailops:id"].Value != jl.Metadata.UUID {
@@ -325,28 +320,27 @@ func TestRestoreRefusedWithoutTheKeyAndOnNewHost(t *testing.T) {
 	}
 }
 
-func TestRestoreRefusedWhenTheGenerationIsMissing(t *testing.T) {
+// A backup without a root (one of a jail with the root layout of 0.9.2 and before) is refused, and nothing is left.
+func TestRestoreRefusesABackupWithoutARoot(t *testing.T) {
 	_, nc := nodeServer(t)
 	r := newRig(t, rigOpts{node: &nc})
 	j := r.jail("web1", "uuid-web1", nil)
+	var kept []Dataset
+	for _, d := range j.Datasets {
+		if d.Kind != KindRoot {
+			kept = append(kept, d)
+		}
+	}
+	j.Datasets = kept
 	bk := r.backup(j).Targets[0].Backup
-	delete(r.imgs.gens, "fbsd#g1")
-	pf, err := r.svc.Preflight(bg, api.RestoreRequest{Backup: bk.Metadata.Name, As: "web2"})
-	if err != nil || pf.OK {
-		t.Fatalf("preflight = %+v, %v", pf, err)
+	_, err := r.svc.Restore(bg, api.RestoreRequest{Backup: bk.Metadata.Name, As: "web2"})
+	codeOf(t, err, api.CodeUnsupported)
+	if !strings.Contains(err.Error(), "root layout of JailOps 0.9.2") {
+		t.Fatalf("the refusal does not say why: %v", err)
 	}
-	if !strings.Contains(strings.Join(pf.Errors, " "), "image generation fbsd#g1 is not present") || len(pf.Missing) == 0 {
-		t.Fatalf("preflight = %+v", pf)
-	}
-	_, err = r.svc.Restore(bg, api.RestoreRequest{Backup: bk.Metadata.Name, As: "web2"})
-	codeOf(t, err, api.CodeInvalid)
 	if ds := r.w.datasets(t, "tank/jailops/projects/alpha/jails/web2"); len(ds) != 0 {
 		t.Fatalf("created %v", ds)
 	}
-	// existing name without replace is refused too
-	r.imgs.gens["fbsd#g1"] = testGen
-	pf, _ = r.svc.Preflight(bg, api.RestoreRequest{Backup: bk.Metadata.Name, As: "web1"})
-	_ = pf
 }
 
 func TestRestoreFilesAndSubtree(t *testing.T) {

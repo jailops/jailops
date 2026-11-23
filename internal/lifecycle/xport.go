@@ -15,8 +15,7 @@ import (
 )
 
 // The export and import of a jail (docs/export-import.md): the datasets that are unique to the jail leave as zfs
-// streams and come back as a new jail. What is the same on every jail of an image (the root of a thin jail) is not
-// sent: the target makes it from its own copy of the image.
+// streams and come back as a new jail.
 
 // ExportStream is one dataset of a jail that an export sends, with the parts (streams) it is sent in.
 type ExportStream struct {
@@ -34,7 +33,6 @@ type ExportStream struct {
 type ExportPlan struct {
 	Key      string
 	UUID     string
-	Layout   api.Layout
 	Image    string
 	Gen      int
 	Manifest string
@@ -52,7 +50,7 @@ func (s *Service) exportSnapName(stamp string) string { return ExportSnapName(s.
 // datasets of the project; a volume is always sent at a snapshot of its own, because a jail's snapshot does not hold
 // the volumes it attaches.
 func (s *Service) PlanExport(ctx context.Context, key, snapshot string, withVolumes bool) (ExportPlan, error) {
-	st, err := s.ready(ctx, key)
+	st, err := s.own(ctx, key)
 	if err != nil {
 		return ExportPlan{}, err
 	}
@@ -65,23 +63,9 @@ func (s *Service) PlanExport(ctx context.Context, key, snapshot string, withVolu
 			}
 		}
 	}
-	p := ExportPlan{Key: key, UUID: st.ID, Layout: st.Layout, Image: st.Image, Gen: st.Gen, Manifest: st.Manifest}
-	if st.Layout == api.LayoutThick {
-		p.Streams = append(p.Streams, ExportStream{Dataset: st.Root, Snapshot: snapshot, Parts: []api.ExportPart{
-			{Dataset: "root", Kind: api.PartRoot}}})
-	}
-	for _, d := range st.Persist {
-		rel := strings.TrimPrefix(d.DS, st.Container+"/")
-		props := map[string]string{PropPath: d.Path, PropClass: string(d.Class), PropMerge: onOff(d.Merge)}
-		parts := []api.ExportPart{{Dataset: rel, Kind: api.PartPersistent, Props: props}}
-		if ok, _ := s.ZFS.Exists(ctx, d.DS+"@"+BaselineSnap); ok {
-			// the baseline goes first, in full; the export snapshot then follows incrementally
-			parts = []api.ExportPart{
-				{Dataset: rel, Kind: api.PartPersistent, Snapshot: BaselineSnap, Props: props},
-				{Dataset: rel, Kind: api.PartPersistent, From: BaselineSnap, Props: props}}
-		}
-		p.Streams = append(p.Streams, ExportStream{Dataset: d.DS, Snapshot: snapshot, Parts: parts})
-	}
+	p := ExportPlan{Key: key, UUID: st.ID, Image: st.Image, Gen: st.Gen, Manifest: st.Manifest}
+	p.Streams = append(p.Streams, ExportStream{Dataset: st.Root, Snapshot: snapshot, Parts: []api.ExportPart{
+		{Dataset: "root", Kind: api.PartRoot}}})
 	if st.Delegated != "" {
 		p.Warnings = append(p.Warnings, "the dataset the jail manages itself (zfs_delegation) is not exported: the jail on the other host gets an empty one")
 	}
@@ -170,8 +154,7 @@ func (s *Service) ExportJail(ctx context.Context, p ExportPlan, stamp string, op
 type ImportInput struct {
 	// Jail is the jail as it will be: its name, project and new uuid, the spec with the addresses the service decided.
 	Jail api.Jail
-	// Image is the generation a thin jail's root is cloned from; for a thick jail it only names the image in the
-	// records (its Dataset may be empty).
+	// Image names the generation the root was copied from in the records (its Dataset may be empty).
 	Image api.ImageGeneration
 	// OS is the guest family ("freebsd", "linux").
 	OS string
@@ -199,24 +182,11 @@ func (s *Service) partTarget(in ImportInput, p api.ExportPart) (string, map[stri
 	}
 	switch p.Kind {
 	case api.PartRoot:
-		if in.Jail.Spec.Layout != api.LayoutThick || p.Dataset != "root" {
-			return "", nil, api.Errorf(api.CodeInvalid, "the file holds a root, and a thin jail is made from its image")
+		if p.Dataset != "root" {
+			return "", nil, api.Errorf(api.CodeInvalid, "the file holds a root part named %q", p.Dataset)
 		}
 		return c + "/root", base(KindRoot, map[string]string{"mountpoint": s.Cfg.at(name).rootMP(), "canmount": "on",
 			PropGen: strconv.Itoa(in.Image.Number), PropImage: imageOf(in.Image), PropManifest: in.Image.Manifest}), nil
-	case api.PartPersistent:
-		if in.Jail.Spec.Layout == api.LayoutThick {
-			return "", nil, api.Errorf(api.CodeInvalid, "a thick jail has no persistent datasets: the file does not match its layout")
-		}
-		// what a persistent dataset is on this host is decided here: the file names the dataset, not its place
-		for _, pp := range s.Cfg.persistent() {
-			if pp.Dataset == p.Dataset {
-				final := s.Cfg.at(name).rootMP() + path.Clean(pp.Path)
-				return c + "/" + pp.Dataset, base(KindPersistent, map[string]string{PropClass: string(pp.Class), PropPath: path.Clean(pp.Path),
-					PropMerge: onOff(pp.Merge), "mountpoint": final}), nil
-			}
-		}
-		return "", nil, api.Errorf(api.CodeInvalid, "this host has no persistent dataset %q: its configuration differs from the exporting host's", p.Dataset)
 	}
 	return "", nil, api.Errorf(api.CodeInvalid, "unknown kind %q of a part", p.Kind)
 }
@@ -261,10 +231,6 @@ func (s *Service) PlanImport(ctx context.Context, in ImportInput, rd func() (api
 	} else if !ok && !recovering {
 		return nil, res, api.Errorf(api.CodeNotFound, "dataset %s does not exist; the project must be set up on this storage first", s.Cfg.at(key).jailsDS())
 	}
-	layout := j.Spec.Layout
-	if layout == "" {
-		return nil, res, api.Errorf(api.CodeInvalid, "the jail has no layout")
-	}
 	id := j.Metadata.UUID
 	rootDS, rootMP, cMP := s.Cfg.at(key).rootDS(), s.Cfg.at(key).rootMP(), s.Cfg.at(key).containerMP()
 	imageName := imageOf(in.Image)
@@ -279,7 +245,7 @@ func (s *Service) PlanImport(ctx context.Context, in ImportInput, rd func() (api
 		return z.DestroyRecursive(ctx, c)
 	}
 	pl := plan.New("import-jail " + key)
-	contProps := map[string]string{"mountpoint": cMP, PropLayout: string(layout), PropImage: imageName, PropComplete: "off",
+	contProps := map[string]string{"mountpoint": cMP, PropImage: imageName, PropComplete: "off",
 		PropManaged: "on", PropID: id, PropKind: KindContainer, PropName: j.Metadata.Name, PropProject: j.Metadata.Project}
 	if q := j.Spec.Resources.Disk; q != "" {
 		contProps["quota"] = q
@@ -289,19 +255,7 @@ func (s *Service) PlanImport(ctx context.Context, in ImportInput, rd func() (api
 	}
 	pl.Add(plan.Step{Name: "create-container", Describe: fmt.Sprintf("zfs create -o mountpoint=%s %s", cMP, c),
 		Do: func(ctx context.Context) error { return z.Create(ctx, c, contProps) }, Undo: owned})
-	if layout == api.LayoutThin {
-		genRO := in.Image.Dataset + "@" + roSnap
-		rootProps := map[string]string{PropManaged: "on", PropID: id, PropKind: KindRoot, PropName: j.Metadata.Name, PropProject: j.Metadata.Project,
-			"mountpoint": rootMP, "canmount": "on", PropGen: strconv.Itoa(in.Image.Number), PropImage: imageName, PropManifest: in.Image.Manifest}
-		pl.Add(plan.Step{Name: "clone-root", Describe: fmt.Sprintf("zfs clone %s %s", genRO, rootDS),
-			Do: func(ctx context.Context) error {
-				if ok, _ := z.Exists(ctx, genRO); !ok {
-					return api.Errorf(api.CodeNotFound, "generation %s has no @ro snapshot", in.Image.Name)
-				}
-				return z.Clone(ctx, genRO, rootDS, rootProps)
-			}})
-	}
-	var received []string // snapshots the import received besides the baseline
+	var received []string // snapshots the import received
 	pl.Add(plan.Step{Name: "receive-streams", Describe: "zfs receive every part of the file into " + c,
 		Do: func(ctx context.Context) error {
 			seen := map[string]bool{}
@@ -336,31 +290,17 @@ func (s *Service) PlanImport(ctx context.Context, in ImportInput, rd func() (api
 					return fmt.Errorf("receiving %s: %w", part.Dataset, err)
 				}
 				seen[target] = true
-				if part.Snapshot != BaselineSnap {
-					received = append(received, target+"@"+part.Snapshot)
-				}
+				received = append(received, target+"@"+part.Snapshot)
 			}
 			return nil
 		}})
-	if layout == api.LayoutThin {
-		pl.Add(plan.Step{Name: "check-persistent", Describe: "every persistent dataset of this host is in the file",
-			Do: func(ctx context.Context) error {
-				for _, pp := range s.Cfg.persistent() {
-					if ok, _ := z.Exists(ctx, c+"/"+pp.Dataset); !ok {
-						return api.Errorf(api.CodeInvalid, "the file lacks the dataset %s of the jail", pp.Dataset)
-					}
-				}
-				return nil
-			}})
-	} else {
-		pl.Add(plan.Step{Name: "check-root", Describe: "the root of the thick jail is in the file",
-			Do: func(ctx context.Context) error {
-				if ok, _ := z.Exists(ctx, rootDS); !ok {
-					return api.Errorf(api.CodeInvalid, "the file holds no root for a thick jail")
-				}
-				return nil
-			}})
-	}
+	pl.Add(plan.Step{Name: "check-root", Describe: "the root of the jail is in the file",
+		Do: func(ctx context.Context) error {
+			if ok, _ := z.Exists(ctx, rootDS); !ok {
+				return api.Errorf(api.CodeInvalid, "the file holds no root of a jail")
+			}
+			return nil
+		}})
 	pl.Add(plan.Step{Name: "drop-received-snapshots", Describe: "zfs destroy the snapshots the export left on the new datasets",
 		Do: func(ctx context.Context) error {
 			if err := s.destroySnaps(received)(ctx); err != nil {

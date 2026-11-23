@@ -7,7 +7,7 @@ import (
 )
 
 // applyDiskLimits writes a changed disk limit or reservation of a jail to its container dataset, the one that carries
-// the quota of every dataset below it (root, persistent datasets) and of their snapshots. A volume is not below it: it
+// the quota of every dataset below it (the root, the delegated dataset) and of their snapshots. A volume is not below it: it
 // belongs to the project. An unset limit is
 // "none". It is done before the change is stored, so a quota ZFS refuses (below what the jail uses) refuses the
 // change.

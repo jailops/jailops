@@ -11,23 +11,23 @@ $ jailops volume attach db data /srv/data --read-only
 volume/data attached to jail db
 
 $ jailops jail list
-NAME   STATE     IMAGE        GEN   ADDRESSES    EXPOSED   AUTOSTART   USED   AGE
-db     stopped   freebsd-15   g1    10.20.0.11   -         -           -      3h
-web    stopped   freebsd-15   g1    10.20.0.10   -         yes         -      3h
+NAME   STATE     OS        IMAGE        GEN   ADDRESSES    EXPOSED   AUTOSTART   USED   AGE
+db     stopped   freebsd   freebsd-15   g1    10.20.0.11   -         -           -      3h
+web    stopped   freebsd   freebsd-15   g1    10.20.0.10   -         yes         -      3h
 
 $ jailops jail start web
 jail/web started
 
 $ jailops jail list
-NAME   STATE     IMAGE        GEN   ADDRESSES    EXPOSED   AUTOSTART   USED   AGE
-db     stopped   freebsd-15   g1    10.20.0.11   -         -           -      3h
-web    running   freebsd-15   g1    10.20.0.10   -         yes         -      3h
+NAME   STATE     OS        IMAGE        GEN   ADDRESSES    EXPOSED   AUTOSTART   USED   AGE
+db     stopped   freebsd   freebsd-15   g1    10.20.0.11   -         -           -      3h
+web    running   freebsd   freebsd-15   g1    10.20.0.10   -         yes         -      3h
 
 $ jailops jail list --state running -o name
 web
 
 $ jailops jail list -l env=prod --no-headers
-web    running   freebsd-15   g1    10.20.0.10   -         yes         -      3h
+web    running   freebsd   freebsd-15   g1    10.20.0.10   -         yes         -      3h
 
 $ jailops jail list --network other
 ! No jails in project main match.
@@ -42,8 +42,8 @@ Labels:      env=prod
 SPEC                    STATUS
 ----                    ------
 image: freebsd-15       power: running
-storage: default        jid: 1
-layout: thin            image_generation: g1
+os: freebsd             jid: 1
+storage: default        image_generation: g1
 hostname: web           addresses:
 resources:                - 10.20.0.10
   memory: 2G            started_at: "2026-03-01T09:00:00Z"

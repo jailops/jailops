@@ -56,20 +56,20 @@ Grant it to a project, with a quota for that project's datasets, and put jails o
 - **Storage may be shared between projects**; each project gets its own `projects/<project>/` subtree under the root and its
   own quota. (Networks are different: a network belongs to exactly one project.)
 - Layout below a root: `images/<image>/g<N>` (immutable image generations), `projects/<project>/jails/<name>` (the
-  jail's container dataset: `root` and the persistent datasets), `projects/<project>/volumes/<name>` (the volumes of the
-  project), `deleted/`. Image generations are built or
-  received **per pool**: the first jail of an image on a pool builds the generation there, so a jail on `bulk` keeps its own
-  copy of the generations it uses.
+  jail's container dataset: its `root`, and `delegated` when it manages a dataset of its own),
+  `projects/<project>/volumes/<name>` (the volumes of the project), `deleted/`. Image generations are built or received
+  **per pool**: the first jail of an image on a pool builds the generation there, so a jail is always copied from a
+  generation on its own pool, where block cloning works.
 - A jail's disk quota (`--disk 20G`, `resources.disk`) is checked against the project quota before anything is created.
 
-Putting jails on the big pool and keeping the system on the fast one is the usual split: the jail's root and `/usr/local`
-on spinning disks are fine for most services, and a database jail can sit on `default`.
+Putting jails on the big pool and keeping the system on the fast one is the usual split: the jail's root on spinning disks
+is fine for most services, and a database jail can sit on `default`.
 
 ## Volumes
 
 A **volume** is a dataset of a project that jails attach by name. It is an object of its own: it outlives the jails, one
-volume can be attached to several of them, and deleting a jail never deletes a volume. Where a jail's own datasets (its
-root and persistent paths) belong to that jail, a volume belongs to the project.
+volume can be attached to several of them, and deleting a jail never deletes a volume. Where a jail's root belongs to
+that jail, a volume belongs to the project.
 
 The example is a mail server and a desktop that share the mail of one user. The mail lives in a volume that both jails
 see; the user and the group that own it have the same numbers in both jails (FreeBSD has no uid mapping, so a number is a
@@ -91,8 +91,9 @@ The attachment is part of the jail's specification (`volumes: [{volume, mount, r
 attachment is in its record and its `fstab` from then on, so the next start makes it again. A detach is refused with `busy`
 while a process of the jail uses the mount (`jailops exec JAIL -- fstat PATH` shows which one); nothing is changed, and
 the detach works once the process is done. The volume is mounted on the host at its own place,
-`<storage mount>/projects/<project>/volumes/<name>`, and the jail's `fstab` binds it into the jail with `nullfs`; the jail
-stops the mount again when it stops, and the volume stays where it is for the other jails. `--copy-existing` (the files of
+`<storage mount>/projects/<project>/volumes/<name>`, and the jail's `fstab` binds it into the jail with `nullfs`. Every
+volume mount is `nosuid`, at the start and when a running jail gets it: a setuid file on a volume runs with the rights of
+the user who starts it. The jail stops the mount again when it stops, and the volume stays where it is for the other jails. `--copy-existing` (the files of
 the path go into the volume first) needs a stopped jail. Volumes that a profile of the project attaches (`volumes.<name>`)
 reach a running jail at its next start.
 
@@ -109,10 +110,10 @@ attached read-write to one jail and `--read-only` to the others. An encrypted vo
 `compat/linux`, because a Linux process reaches every path through that mirror first (see
 [linux-jails.md](linux-jails.md#what-a-linux-process-sees-and-what-it-does-not)). Attach and detach do both mounts.
 
-**Where a volume can go.** Not over a persistent directory of the jail or above one (`/etc`, `/usr/local`, `/var/db`,
-`/var/log`, `/var/mail`, `/var/spool`, `/home`, `/root`: a mount on `/var` would hide the datasets below it), not at or
-below `/dev`, `/proc`, `/sys` or `/compat`, where the jail's own file systems are, and not inside another volume. The
-request says so at once.
+**Where a volume can go.** Not exactly at a directory of the jail's system (`/bin`, `/etc`, `/lib`, `/libexec`, `/sbin`,
+`/usr`, `/usr/local`, `/var`, `/var/db`: it would hide the system below it); below them is fine (`/var/db/postgres`,
+`/usr/local/www/site`). Not at or below `/dev`, `/proc`, `/sys` or `/compat`, where the jail's own file systems are, and
+not over another volume. The request says so at once.
 
 **Attached over existing files.** What the jail has at the path is hidden while the volume is mounted over it.
 `jailops volume attach JAIL VOLUME PATH --copy-existing` copies the files of the path into the volume first (the volume
@@ -123,7 +124,7 @@ should be new); nothing is removed from the jail's own root.
 | | |
 |---|---|
 | `jail delete` | detaches; the volume and its files stay (`volume list` shows it). |
-| `jail snapshot`, `jail rollback`, `jail upgrade` | never touch a volume; a volume has snapshots of its own (below). |
+| `jail snapshot`, `jail rollback`, `jail upgrade` | never touch a volume; a volume has snapshots of its own (below). What must outlive a rollback of the root belongs in a volume. |
 | `jail copy` | the copy attaches no volume, with the data or without it (see [Copying a jail](#copying-a-jail)). |
 | `jail backup` | a jail's backup holds the attachments; the volume is a backup of its own, taken once however many jails attach it (see [What is backed up](#what-is-backed-up)). |
 | `app install` | the app's `data` paths become volumes named `<jail>-<name>`, made before the jail by visible steps of the plan; `app` jails keep them when deleted. |
@@ -161,8 +162,8 @@ passphrase after every boot of the host:
 `encrypted: true` in a file does the same for `jailops volume create -f` (the passphrase is asked for; a fleet repository
 cannot declare an encrypted volume, there is no place for a passphrase in a file). The volume becomes its own ZFS
 encryption root: `encryption=aes-256-gcm`, `keyformat=passphrase`, `keylocation=prompt`, the key derived from the
-passphrase with PBKDF2 (ZFS's default). Nothing else of a jail that attaches it is encrypted: its root, `/etc`,
-`/usr/local`, the `/var` datasets and `/home` stay as they are. Put what must be protected (a database directory, a key
+passphrase with PBKDF2 (ZFS's default). Nothing else of a jail that attaches it is encrypted: its root stays
+as it is. Put what must be protected (a database directory, a key
 store) on the encrypted volume.
 
 **The passphrase.** One passphrase per volume: 12 to 512 bytes, one line. `jailops` asks for it twice without echo and
@@ -240,7 +241,7 @@ any unattended unlock at boot, encrypted storages or whole jails.
 
 A jail can manage a ZFS dataset of its own: root in the jail creates datasets, snapshots and mounts below it with `zfs`
 (a database that keeps its own snapshots, a nested set of volumes). The dataset is `<container>/delegated`, a child of the
-jail's container next to `root` and `data`; it has `jailed=on` and `mountpoint=none`, so the host never mounts it, and
+jail's container next to `root`; it has `jailed=on` and `mountpoint=none`, so the host never mounts it, and
 `jail.conf` names it (`zfs.dataset`) so `jail(8)` attaches it at every start and detaches it at the stop.
 
     jailops create db --image freebsd-15-1 --zfs-delegation --disk 50GiB ...
@@ -255,8 +256,8 @@ jail's container next to `root` and `data`; it has `jailed=on` and `mountpoint=n
   gets `allow.mount`, `allow.mount.zfs` and `enforce_statfs=1`. Do not delegate to a jail you do not trust with that.
 - **Quota.** The jail's disk limit is a quota on the container, so it covers the delegated dataset. A quota set on the
   dataset itself can only be changed from the host.
-- **Snapshots and rollback** of the jail take the delegated dataset in the same atomic set, and a data rollback restores it
-  (the jail is stopped for it). `jailops jail copy` copies it and hands the copy its own.
+- **Snapshots and rollback** of the jail take the delegated dataset in the same atomic set: `jail rollback --scope data
+  --snapshot S` restores it alone, `--scope all` with the root (of a stopped jail: a rollback refuses a running one). `jailops jail copy` copies it and hands the copy its own.
 - **Backups leave it out.** A backup reads files from mounted datasets, and the host does not mount this one: the run
   says `skipped: delegated: ...`. Use `zfs send` of the dataset, or a backup inside the jail.
 - **Turning it off** (`zfs_delegation false`, the jail stopped) clears `jailed` and keeps the data; turning it on again
@@ -312,32 +313,31 @@ The example is a backup server in a jail that writes to a storage box the host h
 `jailops volume edit` changes the watch (a global administrator), the comment and the labels; the path is fixed, so make a
 new volume for another directory.
 
-## Changing the layout of a jail
+## The root of a jail
 
-`jailops jail convert NAME --layout thick|thin` changes how the root of a FreeBSD jail is stored. A Linux jail is thick and
-stays so.
+Every jail has one dataset (`<jail>/root`) with the whole system, made by copying a generation of the image into it
+(`copy_file_range`, so on ZFS 2.2 and later with block cloning the copy shares its blocks with the image and takes next to
+no space and about a second; on an older pool the files are copied for real). The root has no origin: the generation it
+was copied from, and its image, can be deleted without touching the jail. Everything in the jail, `/etc`, `/usr/local`,
+the packages and the data its services write, lives in that dataset, and data that must outlive it goes in a volume. A
+FreeBSD jail is upgraded in place (`jailops jail upgrade`, [lifecycle.md](lifecycle.md#35-a-freebsd-jail)) under a
+snapshot of the root, and a rollback of that upgrade restores the whole root, the services' data included; a volume is
+outside the root and is not rolled back. A base package the jail needs is added from the host (`jailops jail base add web
+FreeBSD-ssh`).
 
-    jailops jail convert web --layout thick --dry-run
-    jailops jail convert web --layout thick
-    jailops jail convert web --layout thin
-
-- **Thin to thick** copies the root (a full send and receive) into `root.new`, folds the persistent datasets (`/etc`,
-  `/usr/local`, `/var`, `/home`) into the copy, swaps it in and puts the datasets away below `root.old`. The jail no longer
-  depends on its image generation.
-- **Thick to thin** clones the generation the root was copied from (`--image gN` or `--image NAME#gN` names another generation
-  of the same image) as the new root and makes a persistent dataset of each persistent directory of the thick root. Only those
-  directories keep the jail's data: everything else comes from the image, so a package installed outside `/usr/local` or a
-  changed system file is replaced. `--dry-run` prints what is kept and what is replaced.
-- The jail is stopped for the conversion and started again when it ran, followed by the health check. A snapshot of every
-  dataset (`jo-pre-convert-...`) is taken first; a failure at any step, and a crash of the daemon, puts the old layout back. The
-  old root stays as `root.old` for the retention period of an upgrade. The disk limit of the jail counts both roots until the
-  conversion ends. The console's jail page has **Convert layout** with the same preview.
+Two things to know about the copy. ZFS charges the dataset for the whole size (a new minimal jail shows `USED` 73 MB, and a `--disk`
+quota counts it) although the pool stores about 3 MB more; `zpool list` shows what the pool really holds. And the sharing
+is only for the copy: every file that an upgrade changes is stored again for that jail (about 41 MB per jail over the life of
+a release, about 72 MB for a move to the next one). On a pool that has not enabled `block_cloning`, with
+`vfs.zfs.bclone_enabled=0`, and on an **encrypted storage** (ZFS shares no blocks between datasets that do not share a key)
+a new jail is a full copy, about 75 MB; the copy works the same, only the space and the time are larger, and `jailops
+doctor` says so (`zfs.block_cloning`).
 
 ## Copying a jail
 
 `jailops jail copy SOURCE NAME` makes a jail from the specification of another (the image, the limits, the policies, the labels),
-empty from its image. **`--data` copies the data too**: the root and the persistent directories (`/etc`, `/usr/local`, `/var`,
-`/home`) of the source, in the same project and on the same storage.
+fresh from its image. **`--data` copies the data too**: the root of the source (and its delegated dataset), in the same
+project and on the same storage.
 
     jailops jail copy web web2 --data --start
     jailops jail copy db db-test --data --snapshot before-upgrade
@@ -394,40 +394,10 @@ console's volume dialog has the same field, "Copy files from a directory of the 
   full, the daemon stops), the volume is removed again, so a half-filled one is never left. If the daemon itself dies in the
   middle, the volume may stay; delete it and run the copy again.
 
-## What is unique in a jail
-
-A thin jail is a clone of an image generation plus its persistent datasets (`etc`, `local`, `var-db`, `var-log`,
-`var-mail`, `var-spool`, `home`, `rootdir`). `jailops jail diff NAME` lists what the jail holds that the image does not:
-
-    $ jailops jail diff web
-    root /: since freebsd-15-1#g3
-      M /boot/loader.conf
-    etc /etc: since the jail was made
-      M /etc/rc.conf
-    local /usr/local: since the jail was made
-      + /usr/local/etc/web.conf
-    total: 3 changes (1 added, 2 modified)
-
-Each line is `+` added, `M` changed, `-` removed or `R old -> new`, under the dataset it belongs to. The root is compared
-with the `@ro` snapshot of the generation it was cloned from, a persistent dataset with the snapshot `jailops-base` taken
-right after the image's directory was copied into it. That snapshot is on the persistent dataset only: it does not show in
-`jailops jail snapshot list`, and a rollback or the retention of snapshots never touches it. A jail made before the snapshot
-existed is compared file by file with the same directory of the image instead (kind, mode, size and time; renames show as
-`-` and `+`), and the output says "compared with the image, not with a snapshot". `--summary` prints the counts, `--limit N`
-lists N lines per dataset (200 by default; the counts always cover all of them), `--dataset etc` keeps one dataset and
-`--packages` adds the packages installed on purpose, which needs a running jail. `-o json` prints the reply. The web console shows the same lists in the Changes tab of a jail.
-
-A jail that was just made holds nothing: the diff is empty until it runs. A running jail lists what the system writes
-(`/var/run`, `/tmp` in the root, the logs in `var-log`, the package database in `var-db`) and the files JailOps writes at
-a start (`/etc/resolv.conf`, the shell files in `/usr/local/etc`). A new generation changes the root and, through the `/etc`
-and `/var/db` merge of an upgrade, those two datasets: what the merge brought in shows as a change. A jail with a full copy of its
-image (a thick or Linux jail) has no snapshot of the image to compare with, and a jail with a locked encrypted volume is
-refused until it is unlocked. Reading needs the operator role for the project.
-
 ## What is backed up
 
-A JailOps backup of a jail contains its spec and restore bundle and its persistent datasets, read from an atomic snapshot.
-The root of a thin jail is **not** copied: it is rebuilt from the image generation on restore. **Not** in the backup: host
+A JailOps backup of a jail contains its spec and restore bundle and its root, read from an atomic snapshot. **Not** in
+the backup: host
 mounts, images (they are rebuilt from pkgbase) and the host's state unless the policy sets `--include-state`.
 
 A **volume** is a backup of its own: a policy backs up the volumes of the jails it selects and the volumes whose labels match

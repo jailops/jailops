@@ -76,7 +76,7 @@ else. The mount a running jail gets again when its directory is back is `mount -
 from below an approved directory only, through no link, onto a jail's own tree.
 
 **Files inside jails.** Root in a jail controls its tree, symlinks included. A file operation of the helper on a path
-below a jail's root (or its `root.new`, `root.old`, a volume of the project, or an image generation) opens that tree as
+below a jail's root (or a volume of the project, or an image generation) opens that tree as
 its root and walks to it one plain directory at a time: a relative symlink is followed only while it stays inside the
 tree, as the jail itself would see it, and an absolute symlink is refused (the helper does not resolve it as the jail
 would). So no symlink a jail makes turns an operator's `app allow`, an app draft or any other file operation into a read
@@ -226,12 +226,17 @@ is audited.
 
 ## Devices
 
-A FreeBSD jail that is given no device mounts `/dev` with the stock jail ruleset (4): the basic and login nodes and nothing
-else. A jail that is given devices (`devfs.NAME.device`), and every Linux jail, mounts it with a private ruleset. The
+A FreeBSD jail that is given no device mounts `/dev` with the stock jail ruleset (4): the basic and login nodes, and also
+`fuse` and `zfs` (so it has `/dev/zfs` and `/dev/fuse`: see `/etc/defaults/devfs.rules`). JailOps does not verify ruleset 4: an
+edit of `/etc/devfs.rules` changes every such jail. A jail that is given devices (`devfs.NAME.device`), and every Linux jail, mounts it with a private ruleset. The
 ruleset is made of the stock sets that hide everything and unhide the basic and login nodes, then the paths of the
 allow-listed devices (`bpf`, `dri`, `fuse`, `pf`, `tap`, `tun`) or, for a Linux jail, the nodes of a Linux userland.
 Nothing else can be named: the device list is an allow-list, and the helper's `devfs` grammar refuses a bare `unhide`, a
 path outside the list and a ruleset number below 100.
+
+A jail cannot send to the limited broadcast address (255.255.255.255): the anchor drops it, so a jail cannot reach a host
+service that listens on every address that way. Its neighbour discovery (NS and NA) goes only to link-local and
+solicited-node destinations, which are never forwarded off its link; ICMPv6 errors are passed.
 
 The kernel treats a ruleset number nobody loaded as an empty ruleset, and an empty ruleset hides nothing, so a jail
 started on it would see every device of the host, raw disks included. The helper therefore loads the ruleset in the
@@ -364,7 +369,9 @@ bounded, so that nobody can fill the disk or forge an entry by being refused:
 - `jailops cp` and the Files tab move data between the caller and the jail root through the daemon: the helper opens
   every path segment below the jail root without following a symlink (`os.Root`), refuses names with `..`, absolute
   names, devices and set-id bits, and bounds bytes, entries and depth; nothing runs inside the jail, so a jail cannot
-  steer the copy. It needs the role of exec and is audited with the paths and the size.
+  steer the copy. It needs the role of exec and is audited with the paths and the size. While an operation has the jail (an
+  upgrade, a stop) or a package update or app installation holds it, a copy into or out of it answers `busy`: it cannot add
+  a link to a root that an upgrade has checked.
 - `jailops exec` and `shell` put the terminal back on SIGINT, SIGTERM and SIGHUP; after a SIGKILL nothing can, and
   `reset` repairs the terminal.
 - The web console embedded in `jailopsd` has no demo mode: `?demo` changes nothing (only a demo build, made for the tests
@@ -409,53 +416,126 @@ the run, so the helper reads the whole directory itself (every entry, every file
 more than 32 entries), accepts exactly the one block JailOps writes with every key once, copies the bytes it checked into
 a directory of its own (root's, mode 0700) and runs `pkg` on that copy, which it removes afterwards.
 
+**Where `pkg -r` may run.** The helper runs `pkg -r TREE` (as root of the host) only on a tree no jail runs in, always with
+`-C` naming an empty configuration file of its own and plugins off, so nothing in the tree configures pkg, and on the root
+of a jail with no package scripts.
+That is the whole check, so what the tree holds matters: an image or app staging root is made by JailOps and holds nothing of
+a tenant's. The root of a jail that has run belongs to whoever holds the jail, and the package scripts `pkg -r` runs are
+host processes, as root, on paths of that root, which follow the links its tenant planted. JailOps
+therefore does not run `pkg -r` on such a root for its own convenience: the shell of a jail is set up after the start from
+inside the jail, confined like the jail itself. The one exception is the in-place upgrade of a jail
+([below](#the-in-place-upgrade-of-a-jail)): the base packages carry
+`schg` files, which a jail may not change, so the host upgrades them, a global administrator's operation with the bounds
+listed there.
+
 To build an image from a repository of your own, list its host in `fetch-host` and put its key directory below
 `pkg-keys-dir` yourself, as root. An app installation uses the host's own repository configuration (root's files), not
 one the daemon writes.
 
-## The package records of a thin jail
+## Who may widen what a jail or a project is allowed
 
-After a root swap the jail's own package database holds the base records of the old generation. At every start of a thin
-jail the daemon brings the base records in step with the generation through one helper command, `pkg-records`, which
-runs `pkg` against the jail's tree in four fixed forms and no other: `-r TREE info -a -q`, `-r TREE info --raw --raw-format
-ucl NAME`, `-r TREE unregister -f -y NAME...` (up to 64 names) and `-r TREE register -t -M MANIFEST`. A name is a package name,
-never a glob, a path or an option. The tree is a path below a storage root, and the manifest a `.ucl` file in the daemon's
-state or work area.
+Some changes cross the border of a project or of the jail, so they need a **global administrator**: making a host-directory
+volume writable or moving it (an existing mount that is only kept needs nothing), granting the `bpf` device (it sees the frames
+of the jail's link) or `dri` (the host's one GPU driver), and attaching a firewall policy that carries a raw PF fragment
+(writing one already needed it), also when a profile would give it to a jail: a profile change, or a jail made or
+edited with a profile, that newly attaches such a policy is refused for anyone else. A project administrator keeps the devices that stay inside the jail (`tun`, `tap`, `pf`,
+`fuse`).
 
-The helper opens the jail's package database as root, so it works only in a tree no jail runs in (the rule of `pkg -r`, above)
-and refuses a tree where `var`, `var/db`, `var/db/pkg` or the database is a symbolic link, which a jail that ran could have
-left to point at the host's own package database. The start makes the pass before the jail starts; the repair command
-refuses a running jail.
+Every volume mount is `nosuid`, the one in `fstab` at the start and the live one made while the jail runs alike: a
+setuid file a jail user put on a volume does not run with its owner's rights. A live volume mount is checked after it
+lands. The check reads the mount table with `getfsstat(2)` and removes a stray mount
+with `unmount(2)`, so it executes nothing from a path a tenant could have covered, and it **fails closed**: if the table cannot be
+read, the mount that was asked for is undone and the request is refused. What is not closed yet is the race itself, between the
+path check and the mount (a tenant swapping a directory for a symbolic link): the mount is made by path, so the way to close it
+is to mount onto an opened directory, a change in the lifecycle code that is on the list for 1.0.
 
-`unregister` deletes records only and `register -t` records a manifest without looking at files: neither removes or writes a
-file, and neither runs a script (`register -N`, which installs and runs scripts, is refused). A record can name scripts that
-`pkg` runs as root when the package is removed or upgraded later, so the manifest is not taken from the daemon: the helper
-finds the image generation of the jail's root through the origin of its dataset, asks that generation's own package
-database for the manifest of the name, and refuses a file that differs by one byte. `pkg` then reads a copy the helper made
-(root's, mode 0700, removed afterwards). What the daemon can bring about with this command is therefore a base record that is
-the generation's own, never one it wrote.
+## The in-place upgrade of a jail
 
-## Package scripts run as root, so never in a root that runs
+`jailops jail upgrade` of a FreeBSD jail, `jailops jail base add` and a jail's update policy with `update.os` run the host's `pkg -r` as
+root against the jail's root **while the jail runs**: JailOps never stops, starts or restarts a jail for an upgrade. This
+is how the FreeBSD Handbook upgrades a pkgbase jail. It is the one place where JailOps lets pkg work as root of the host on
+a tree a tenant controls.
 
-`pkg` runs the install scripts of a package in a chroot of the root it was given, as the user that started it, with the
-shell and the libraries it finds there. Started by the helper (root of the host) against the root of a jail, that is
-the jail's tree: a process of a running jail that replaced `/bin/sh` or a library, or put a symbolic link where `pkg`
-writes, would have root of the host at the next package operation. So the helper refuses `pkg -r ROOT` for the root of
-a running jail, however the path is spelled (a trailing slash, a symbolic link on the way, `..`); `-r` is for a root no
-jail runs in: an image being built, and the jail of an app installation before it has first run. A jail that ran once
-and is stopped again is not refused, so what its processes left in the root is the base of the next `pkg -r` there: the
-helper does not look through a stopped jail's tree. The helper takes a package name only as a name or a port origin
-(`category/name`), never a path or a file name that ends as a package or an archive.
+**Threat model.** The administrator trusts the jails whose base he upgrades from the host. A jail is not a boundary
+against a hostile root inside it for this operation: the jail runs while the host's pkg reads and writes its root, so
+root in the jail can change a path between JailOps' check and pkg's use of it (a link to a host file planted at that
+moment makes pkg read the host file into the jail when it merges a configuration file; shown on FreeBSD 16). The checks
+below catch what was planted before the run, not a race against it. Do not upgrade the base of a jail whose root you do
+not trust from the host: leave it on its release and patch level, or give the tenant a new jail and move the data. If FreeBSD gains a way to upgrade a
+pkgbase jail confined to the jail, JailOps will use it.
 
-- **`jailops app install`** makes the jail, mounts its datasets on the host and installs the packages with `pkg -r <jail
+What JailOps does:
+
+- **Who.** On demand, a global administrator, and no one else: the request is `forbidden` for anyone else, and the
+  operation checks it again; `jailops update apply` runs it only when a global administrator runs the apply. On a
+  schedule, the jail's own update policy (`update.mode=managed` with `update.os=true`), which only a global
+  administrator turns on: setting `update.os=true` on a managed jail, or `update.mode=managed` on a jail with
+  `update.os=true`, at create, update, patch, `config set`, copy, import or restore, is `forbidden` for a project
+  administrator, because it asks the host to run pkg against that jail's root at its schedule. The other update keys
+  (`update.packages`, `update.schedule`, `update.healthcheck`) stay the project's, and turning the pair off is allowed;
+  a jail that has it keeps it while other keys change. No image setting upgrades a jail.
+- **pkg reads nothing of the root's configuration.** Every `pkg -r` has `-C` naming an empty file of the helper, so the
+  root's `pkg.conf` is not read, and plugins off (`PKG_ENABLE_PLUGINS=false`). The repository configuration and the
+  package cache are outside the root: JailOps writes them, the helper checks them and runs pkg on its own copy.
+- **No package script runs on the host.** pkg runs with `RUN_SCRIPTS=false`. What the scripts of the base packages do
+  (`pwd_mkdb`, `services_mkdb`, `cap_mkdb -l /etc/login.conf`, `certctl rehash`) runs afterwards inside the jail, with the
+  jail's privileges. A script a later FreeBSD release adds to a base package is not run.
+- **A check for a prepared root.** Once per upgrade, before pkg works on the root, the helper checks the paths pkg will
+  write: every component of every file the jail's base packages own (read from a copy of the jail's package database)
+  and pkg's own trees (`var/db/pkg`, `var/cache/pkg`, `usr/local/etc/pkg`, `etc/pkg`). A link there that leads out of the
+  root (absolute, or climbing above it; except `etc/termcap` and `etc/motd`, which the base makes) is a finding, as is a
+  `pkg.conf` that turns plugins on. Links elsewhere (tzsetup's `/etc/localtime`, `/var/www -> /usr/local/www`, links in
+  a data directory or a volume) are the jail's business. The check never walks the whole root and never enters a mounted
+  volume. On every later `pkg -r` of the root pkg's own trees are checked again. A jail with a volume at a directory of its system
+  (`/usr/local`, `/var`, `/var/db`, `/var/db/pkg`) is refused before that: what pkg writes there would be outside the
+  root's snapshot. A jail with a
+  finding is refused, with what was found, and marked `suspected_compromised` (the update history, `jailops doctor`, the
+  condition `SuspectedCompromised`, the event `jail-suspected-compromised`); the other jails go on, and the next run
+  checks again. `jailops cp` and the files API answer `busy` while an operation has the jail.
+- **The release is JailOps's record** (`jailops:freebsd_version`), not `/bin/freebsd-version` or the package database: a
+  root that says another release is refused unless the administrator names one with `--release`.
+- **Nothing newer than the kernel.** `OSVERSION` is the host's `kern.osreldate`, held to the jail's major release; pkg
+  refuses a repository built for a newer kernel, before anything changes.
+- **Failures.** A snapshot taken while the jail runs is the point to return to; nothing rolls back on its own. A failure
+  is reported and the jail runs as pkg left it. `jail rollback` refuses a running jail (a root rolled back under running
+  services kills them with SIGBUS): the administrator stops the jail first.
+
+`pkg -c ROOT` (pkg's own chroot) was considered: it chroots before it reads its configuration, so `-C`, the repository
+directory, the keys and the cache would be read inside the jail's root (tenant files) unless JailOps mounted its own
+directory there; it is not used. `pkg -j` runs pkg confined to the jail but cannot set the `schg` flags of the base in a
+jail without `allow.chflags`, which JailOps gives to no jail.
+
+The work directory `.upgrade-<time>` in the jail's container (the repository configuration) may be removed recursively by
+the helper, like `.seed-` and `.merge-`.
+
+## Package scripts never run as root of the host in a jail's root
+
+`pkg -r ROOT` runs the scripts of a package on the host, as the user that started it, with `PKG_ROOTDIR` set to ROOT:
+the scripts of the base packages run the host's programs on paths below it (`pwd_mkdb -d ${PKG_ROOTDIR}/etc`). Started by
+the helper (root of the host), a script on the root of a jail would follow the links its tenant planted, as root of the
+host. So every `pkg -r` the helper runs on the root of a jail has `RUN_SCRIPTS=false`, next to `-C` naming an empty
+configuration and plugins off, with one exception: a jail that has never run. What the scripts of the base packages do
+runs inside the jail after the in-place upgrade, with the jail's rights.
+
+**The never-started marker.** When the daemon makes a jail it writes the file `never-started` into the jail's container
+(`<storage>/projects/P/jails/J/never-started`, next to `spec.json`, outside the root: root's, and not reachable from
+inside the jail). The start removes it before `jail -c` runs, and a start that cannot remove it does not start; it is
+never written again. While it exists the root is the copy of the image and nothing a tenant could have prepared, and
+the helper lets package scripts run for a `pkg -r` of that root, provided it is a regular file (not a link) and no jail
+runs in the root. The one operation that uses it is `jailops app install`, which installs the app's packages on the new
+jail before its first start. A tenant cannot make the marker appear: the container is not inside any jail, and the daemon
+writes it only when it makes a jail. The in-place upgrade is the one operation that
+runs `pkg -r` on the root of a running jail; it carries the bounds of [its section](#the-in-place-upgrade-of-a-jail). The
+helper takes a package name only as a name or a port origin (`category/name`), never a path or a file name that ends as a
+package or an archive.
+
+- **`jailops app install`** makes the jail, mounts its root on the host and installs the packages with `pkg -r <jail
   root> install` through the helper while the jail has never run, and only then starts it. What is in the root is the
-  base system of its image. An `operator` may install. A package from a repository the host trusts runs its scripts with
-  root's rights inside that chroot, as it would for an image build; the app installation uses the host's own repository
+  base system of its image. An `operator` may install. The app installation uses the host's own repository
   configuration (root's files), not one the daemon writes. For a package from the JailOps repository the host's
   configuration of that repository and its key are copied into the jail, so that its packages are updated from it later.
-- **The bash of a new jail** is installed with `pkg -r` before its first start (nothing runs in the root yet, and the
-  host's network fetches the package); a start never waits more than a minute for the shell setup.
-- **Package updates, the retry of the shell setup and the app draft of a running jail** run `pkg -j <jail>`: `pkg` attaches
+- **Package updates, the bash of a jail whose shell is bash, the ports packages of a jail's upgrade and the app
+  draft of a running jail** run `pkg -j <jail>`: `pkg` attaches
   to the jail before it does anything, so what it writes and the scripts it runs are the jail's own, with the jail's
   rights. The helper allows `-j` for a running jail JailOps manages, with none of the options that name a directory of
   the host. `pkg` then reads the repository configuration, the keys and the cache inside the jail, and fetches from the

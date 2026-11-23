@@ -221,7 +221,6 @@ jailops create
     --hostname string
     --image string
     --label stringArray
-    --layout string
     --memory string
     --network stringArray
     --pids int
@@ -465,7 +464,6 @@ jailops image create
     --repo string
     --source-type string =pkgbase
     --upgrade-at string =03:00
-    --upgrade-packages bool =true
 jailops image delete  (aliases: rm)
 jailops image edit
     --file/-f string
@@ -490,19 +488,17 @@ jailops image set
     --repo string
     --source-type string =pkgbase
     --upgrade-at string =03:00
-    --upgrade-packages bool =true
 jailops image show  (aliases: get)
 jailops image upgrade
-    --no-jails bool
-    --to string
 jailops info
 jailops jail  (aliases: jails)
+jailops jail audit
+jailops jail base
+jailops jail base add
+jailops jail base list
 jailops jail console
     --shell string
     --user/-u string
-jailops jail convert
-    --image string
-    --layout string
 jailops jail copy
     --data bool
     --keep-ip bool
@@ -529,7 +525,6 @@ jailops jail create
     --hostname string
     --image string
     --label stringArray
-    --layout string
     --memory string
     --network stringArray
     --pids int
@@ -546,11 +541,6 @@ jailops jail delete  (aliases: rm)
     --confirm-data-loss bool
     --selector/-l stringArray
     --stop bool
-jailops jail diff
-    --dataset string
-    --limit int =200
-    --packages bool
-    --summary bool
 jailops jail edit
     --file/-f string
 jailops jail exec
@@ -582,6 +572,7 @@ jailops jail list  (aliases: ls)
     --selector/-l stringArray
     --sort string
     --state string
+    --verbose/-v bool
 jailops jail logs
     --events bool
     --follow/-f bool
@@ -601,7 +592,6 @@ jailops jail pkg
 jailops jail provision
     --again bool
 jailops jail rename
-jailops jail repair-packages
 jailops jail restart
     --all bool
     --force bool
@@ -624,7 +614,6 @@ jailops jail set
     --hostname string
     --image string
     --label stringArray
-    --layout string
     --memory string
     --network stringArray
     --pids int
@@ -656,9 +645,11 @@ jailops jail stop
     --timeout string
 jailops jail upgrade
     --all bool
-    --generation string
-    --image string
+    --force bool
+    --no-packages bool
+    --release string
     --selector/-l stringArray
+    --stop-on-error bool
 jailops label
 jailops list  (aliases: ls)
     --columns/-c stringSlice
@@ -667,6 +658,7 @@ jailops list  (aliases: ls)
     --selector/-l stringArray
     --sort string
     --state string
+    --verbose/-v bool
 jailops logs
     --all-projects bool
     --app string
@@ -809,6 +801,7 @@ jailops project create
     --max-memory string
     --max-pids int
     --new-network bool
+    --shell string
 jailops project delete  (aliases: rm)
 jailops project edit
     --file/-f string
@@ -834,6 +827,7 @@ jailops project set
     --max-jails int
     --max-memory string
     --max-pids int
+    --shell string
 jailops project show  (aliases: get)
 jailops project switch
 jailops provision

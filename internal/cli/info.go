@@ -18,25 +18,22 @@ import (
 // its update history and the networks it is attached to, gathered into one
 // view. -o json and -o yaml print it as it is.
 type jailInfo struct {
-	Name          string         `json:"name"`
-	Project       string         `json:"project,omitempty"`
-	UUID          string         `json:"uuid,omitempty"`
-	Hostname      string         `json:"hostname,omitempty"`
-	Power         api.PowerState `json:"power"`
-	JID           int            `json:"jid,omitempty"`
-	OS            api.OS         `json:"os,omitempty"`
-	Layout        api.Layout     `json:"layout,omitempty"`
-	Image         string         `json:"image"`
-	Generation    string         `json:"generation,omitempty"`
-	Storage       string         `json:"storage,omitempty"`
-	Profiles      []string       `json:"profiles,omitempty"`
-	CreatedAt     time.Time      `json:"created_at,omitzero"`
-	StartedAt     time.Time      `json:"started_at,omitzero"`
-	ProvisionedAt time.Time      `json:"provisioned_at,omitzero"`
-	// RollbackExpiresAt is when the previous root of an upgraded jail is removed; absent when there is none.
-	RollbackExpiresAt time.Time       `json:"rollback_expires_at,omitzero"`
-	Resources         infoResources   `json:"resources"`
-	Interfaces        []infoInterface `json:"interfaces"`
+	Name          string          `json:"name"`
+	Project       string          `json:"project,omitempty"`
+	UUID          string          `json:"uuid,omitempty"`
+	Hostname      string          `json:"hostname,omitempty"`
+	Power         api.PowerState  `json:"power"`
+	JID           int             `json:"jid,omitempty"`
+	OS            api.OS          `json:"os,omitempty"`
+	Image         string          `json:"image"`
+	Generation    string          `json:"generation,omitempty"`
+	Storage       string          `json:"storage,omitempty"`
+	Profiles      []string        `json:"profiles,omitempty"`
+	CreatedAt     time.Time       `json:"created_at,omitzero"`
+	StartedAt     time.Time       `json:"started_at,omitzero"`
+	ProvisionedAt time.Time       `json:"provisioned_at,omitzero"`
+	Resources     infoResources   `json:"resources"`
+	Interfaces    []infoInterface `json:"interfaces"`
 	// FirewallPolicies are the policies the jail is rendered with, in the order they are rendered; empty when it has
 	// none and is open.
 	FirewallPolicies []infoPolicy `json:"firewall_policies,omitempty"`
@@ -213,9 +210,9 @@ func (a *app) gatherJailInfo(ctx context.Context, c *sdk.Client, j api.Jail) jai
 	m, s, st := j.Metadata, j.Spec, j.Status
 	info := jailInfo{
 		Name: m.Name, Project: m.Project, UUID: m.UUID, Hostname: s.Hostname,
-		Power: st.Power, JID: st.JID, OS: s.OS, Layout: s.Layout, Image: s.Image, Generation: st.ImageGeneration,
+		Power: st.Power, JID: st.JID, OS: s.OS, Image: s.Image, Generation: st.ImageGeneration,
 		Storage: s.Storage, Profiles: s.Profiles,
-		CreatedAt: m.CreatedAt, StartedAt: st.StartedAt, ProvisionedAt: st.ProvisionedAt, RollbackExpiresAt: st.RollbackExpiresAt,
+		CreatedAt: m.CreatedAt, StartedAt: st.StartedAt, ProvisionedAt: st.ProvisionedAt,
 		Resources: infoResources{Limits: s.Resources},
 		Volumes:   s.Volumes,
 		Update:    infoUpdate{Mode: s.Update.Mode, Schedule: s.Update.Schedule},
@@ -363,9 +360,6 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 	}
 	kv("State", state)
 	kind := []string{}
-	if info.Layout != "" {
-		kind = append(kind, string(info.Layout))
-	}
 	switch info.OS {
 	case api.OSFreeBSD:
 		kind = append(kind, "FreeBSD")
@@ -391,9 +385,6 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 	}
 	if !info.ProvisionedAt.IsZero() {
 		kv("Provisioned", when(info.ProvisionedAt))
-	}
-	if !info.RollbackExpiresAt.IsZero() {
-		kv("Rollback", "to the previous root until "+info.RollbackExpiresAt.UTC().Format("2006-01-02 15:04 MST"))
 	}
 	kv("UUID", dash(info.UUID))
 

@@ -181,18 +181,25 @@ func TestPerPoolGenerationResolution(t *testing.T) {
 	if j.Spec.Storage != "fast" {
 		t.Fatalf("%+v", j.Spec)
 	}
-	// The generation exists on the second pool, received from the first, and the root is a clone of it.
+	// The generation exists on the second pool, received from the first, and the root is a copy of it, not a clone.
 	if ok, _ := e.ZFS.Exists(context.Background(), "tank/fast/images/fb/g1@ro"); !ok {
 		t.Fatal("the generation was not received on the second pool")
 	}
 	origin, _ := e.ZFS.Origin(context.Background(), "tank/fast/projects/alpha/jails/quick/root")
-	if origin != "tank/fast/images/fb/g1@ro" {
+	if origin != "" {
 		t.Fatalf("origin %q", origin)
 	}
 	// A second jail there does not receive it again; the first pool's jail uses its own copy.
-	createJail(t, e.Admin, "plain")
+	plainSpec := webSpecIn(e.Admin.ProjectName())
+	pop, err := e.Admin.Jails().Create(c, sdk.NewJail("plain", plainSpec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pop.Wait(c); err != nil {
+		t.Fatal(err)
+	}
 	origin, _ = e.ZFS.Origin(context.Background(), "tank/jailops/projects/alpha/jails/plain/root")
-	if origin != "tank/jailops/images/fb/g1@ro" {
+	if origin != "" {
 		t.Fatalf("origin %q", origin)
 	}
 	// The image reports where its generations live.
@@ -204,7 +211,7 @@ func TestPerPoolGenerationResolution(t *testing.T) {
 	if ok, _ := e.ZFS.Exists(context.Background(), "tank/jailops/projects/alpha/jails/quick"); ok {
 		t.Fatal("the jail's datasets are on the wrong pool")
 	}
-	// An upgrade of a jail on the second pool builds on the first and receives on the second.
+	// A new generation is built on the first pool; a new jail on the second receives it there.
 	bop, err := e.Admin.Images().Build(c, "fb", api.ImageBuild{FromGeneration: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -213,11 +220,13 @@ func TestPerPoolGenerationResolution(t *testing.T) {
 	if err != nil || g2.Number != 2 {
 		t.Fatalf("%v %+v", err, g2)
 	}
-	uop, err := e.Admin.Jails().Upgrade(c, "quick", api.JailUpgrade{})
+	sp2 := webSpec()
+	sp2.Storage = "fast"
+	nop, err := e.Admin.Jails().Create(c, sdk.NewJail("quick2", sp2))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := uop.Wait(c); err != nil {
+	if _, err := nop.Wait(c); err != nil {
 		t.Fatalf("%v\n%s", err, e.Log())
 	}
 	if ok, _ := e.ZFS.Exists(context.Background(), "tank/fast/images/fb/g2@ro"); !ok {

@@ -96,6 +96,9 @@ func classify(e Entry) Class {
 		return ClassObject
 	case p == "/api/v1/backups/run", has("/api/v1/backup"):
 		return ClassGlobal
+	case p == "/api/v1/jails/{name}/upgrade":
+		// pkg runs as root of the host against the jail's own root: a global administrator's operation
+		return ClassGlobal
 	case has("/api/v1/backups"), has("/api/v1/restores"):
 		return ClassProject
 	case has("/api/v1/images"), has("/api/v1/networks"), has("/api/v1/storage"), has("/api/v1/projects"):
@@ -169,13 +172,11 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/updates/apply", op),
 	r("GET", "/api/v1/jails/{name}/updates", ro),
 	r("GET", "/api/v1/jails/{name}/reach", ro),
-	r("GET", "/api/v1/jails/{name}/diff", ro),
 	r("GET", "/api/v1/exposed", ro),
 	r("POST", "/api/v1/jails/{name}/provision", ad),
 	// installs one fixed package (bash) and writes JailOps' own prompt files: no more than an operator may do with exec
 	r("POST", "/api/v1/jails/{name}/shell-setup", op),
 	// only the package database of the jail changes (no file is touched, no script runs)
-	r("POST", "/api/v1/jails/{name}/repair-packages", op),
 	// changes what the Internet reaches of a jail: its firewall, and for an IPv4 forward a port of the host (the service
 	// asks a global administrator for that)
 	r("POST", "/api/v1/jails/{name}/expose", ad),
@@ -240,6 +241,10 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/jail-imports", ad),
 	r("GET", "/api/v1/jails/{name}/state", ro),
 	r("GET", "/api/v1/jails/{name}/usage", ro),
+	r("GET", "/api/v1/jails/{name}/base", ro),
+	// the audit of a jail: the helper reads the tenant's files as root of the host (master.passwd, the configuration,
+	// every set-id file) and the jail runs sockstat, so it is the role that may exec into the jail, not readonly
+	r("GET", "/api/v1/jails/{name}/audit", op),
 	r("PUT", "/api/v1/jails/{name}/state", op),
 	r("POST", "/api/v1/jails/{name}/exec", op),
 	r("POST", "/api/v1/jails/{name}/console", op),
@@ -271,9 +276,8 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/jails/{name}/access/deny", op),
 	r("GET", "/api/v1/jails/{name}/files/{path...}", op),
 	r("PUT", "/api/v1/jails/{name}/files/{path...}", op),
-	r("POST", "/api/v1/jails/{name}/upgrade", op),
+	r("POST", "/api/v1/jails/{name}/upgrade", ad),
 	r("POST", "/api/v1/jails/{name}/rollback", op),
-	r("POST", "/api/v1/jails/{name}/convert", ad), // the layout of the root: a storage decision, as a move is
 	r("GET", "/api/v1/jails/{name}/snapshots", ro),
 	r("POST", "/api/v1/jails/{name}/snapshots", op),
 	r("GET", "/api/v1/jails/{name}/snapshots/{snapshot}", ro),

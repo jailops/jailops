@@ -83,3 +83,52 @@ func TestInboundRulesInTheWayOfTheAnchor(t *testing.T) {
 		t.Errorf("rules after the anchor: %q %q", b2, p2)
 	}
 }
+
+// The host's pf.conf is the door for what the anchors do not open: a default block of everything inbound on the uplink
+// is ok, quick or not, on the uplink, on no interface or on all but another; no block, a block for one family or source,
+// or a pass in all after the block is open.
+func TestHostDefaultDenyOnTheUplink(t *testing.T) {
+	anchor := `anchor "jailops/*" all`
+	for rules, open := range map[string]bool{
+		"block drop all\npass out all flags S/SA keep state\n" + anchor: false,
+		"block return in log all\n" + anchor:                            false,
+		"block drop in on vtnet0 all\n" + anchor:                        false,
+		"block drop in on ! lo0 all\n" + anchor:                         false,
+		"block drop in quick on egress all\n" + anchor:                  false,
+		anchor + "\nblock drop in all":                                  false,
+		anchor:                                                          true,
+		"pass in quick on vtnet0 proto tcp from any to (vtnet0) port = 22 flags S/SA keep state\n" + anchor: true,
+		"block drop in on em1 all\n" + anchor:                          true,
+		"block drop in on ! vtnet0 all\n" + anchor:                     true,
+		"block drop in inet6 from fe80::/10 to any\n" + anchor:         true,
+		"block drop in proto tcp all\n" + anchor:                       true,
+		"block drop all\npass in all flags S/SA keep state\n" + anchor: true,
+		"pass in quick all\nblock drop all\n" + anchor:                 true,
+		"block drop out all\n" + anchor:                                true,
+		// each address family on its own: an IPv4-only block leaves the routed IPv6 open
+		"block drop in inet all\n" + anchor:                               true,
+		"block drop in inet6 all\nblock drop in inet all\n" + anchor:      false,
+		"block in all\npass in inet all\n" + anchor:                       true,
+		"block in all\npass in inet6 proto tcp to any port 22\n" + anchor: false,
+	} {
+		got := openUplinks(rules, []string{"vtnet0"})
+		if (len(got) == 1) != open {
+			t.Errorf("%q: open %v, want %v", rules, got, open)
+		}
+	}
+	if got := openUplinks("block drop in inet all\n", []string{"vtnet0"}); len(got) != 1 || got[0] != "vtnet0 (IPv6)" {
+		t.Errorf("the family that is open is named: %q", got)
+	}
+}
+
+func TestPFStatesLimitIsRead(t *testing.T) {
+	out := "states        hard limit   100000\nsrc-nodes     hard limit    10000\nframes hard limit 5000\n"
+	if n, ok := pfStatesLimit(out); !ok || n != 100000 {
+		t.Fatalf("%d %v", n, ok)
+	}
+	for _, bad := range []string{"", "states hard limit x", "No ALTQ support in kernel\n"} {
+		if _, ok := pfStatesLimit(bad); ok {
+			t.Errorf("%q read as a limit", bad)
+		}
+	}
+}

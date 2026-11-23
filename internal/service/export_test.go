@@ -58,12 +58,6 @@ func SetShellSetupDeadline(d time.Duration) func() {
 	return func() { shellSetupDeadline = old }
 }
 
-func SetBashBeforeStartDeadline(d time.Duration) func() {
-	old := bashBeforeStartDeadline
-	bashBeforeStartDeadline = d
-	return func() { bashBeforeStartDeadline = old }
-}
-
 // SetHostDirTimeouts shortens how long a read and a probe wait for a host directory that does not answer, and returns
 // what puts them back.
 func SetHostDirTimeouts(read, probe time.Duration) func() {
@@ -71,14 +65,6 @@ func SetHostDirTimeouts(read, probe time.Duration) func() {
 	hostDirReadTimeout.Store(int64(read))
 	hostDirProbeTimeout.Store(int64(probe))
 	return func() { hostDirReadTimeout.Store(r); hostDirProbeTimeout.Store(p) }
-}
-
-// SetShellRetryAfter changes how long a failed setup of bash waits before a start tries it again; the returned
-// function puts it back.
-func SetShellRetryAfter(d time.Duration) func() {
-	old := shellRetryAfter
-	shellRetryAfter = d
-	return func() { shellRetryAfter = old }
 }
 
 // HoldForTest holds a jail the way an app installation does and returns what lets it go.
@@ -113,4 +99,23 @@ func SetTopCallTimeout(d time.Duration) time.Duration {
 	old := topCallTimeout
 	topCallTimeout = d
 	return old
+}
+
+// LockJailForTest takes the lock of a jail the way an operation does and returns what lets it go.
+func LockJailForTest(s *Service, key string) (func(), error) {
+	return s.locks.tryLock("test operation", jailLock(key))
+}
+
+// ThickPorts is the ports part an in-place upgrade of the jail would plan: the pending packages, whether the jail has
+// no ports packages at all, and the warning.
+func ThickPorts(s *Service, ctx context.Context, key string, dryRun bool) (pending []string, none bool, warn string) {
+	j, err := s.getByKey(ctx, key)
+	if err != nil {
+		return nil, false, err.Error()
+	}
+	p, w := s.thickPorts(ctx, key, j, dryRun)
+	if p == nil {
+		return nil, false, w
+	}
+	return p.Pending, p.None, w
 }

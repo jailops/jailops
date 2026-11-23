@@ -90,6 +90,25 @@ func (j *JailClient) Usage(ctx context.Context, name string) (api.JailUsage, err
 	return u, err
 }
 
+// Base lists the base packages (FreeBSD-*) installed in a FreeBSD jail, running or stopped (extension jail_base).
+func (j *JailClient) Base(ctx context.Context, name string) (api.JailBase, error) {
+	if err := j.c.need("jail_base"); err != nil {
+		return api.JailBase{}, err
+	}
+	b, _, err := get[api.JailBase](ctx, j.c, j.r.item(name)+"/base", nil)
+	return b, err
+}
+
+// Audit runs the read-only audit of a FreeBSD jail, running or stopped: security checks and practice checks, each with
+// its result, what was found and the fix (extension jail_audit). Nothing in the jail is changed.
+func (j *JailClient) Audit(ctx context.Context, name string) (api.JailAudit, error) {
+	if err := j.c.need("jail_audit"); err != nil {
+		return api.JailAudit{}, err
+	}
+	a, _, err := get[api.JailAudit](ctx, j.c, j.r.item(name)+"/audit", nil)
+	return a, err
+}
+
 // Logs lists the log files below /var/log of a jail (extension jail_logs).
 func (j *JailClient) Logs(ctx context.Context, name string) ([]api.JailLogFile, error) {
 	if err := j.c.need("jail_logs"); err != nil {
@@ -226,15 +245,7 @@ func (j *JailClient) Copy(ctx context.Context, name string, req api.JailCopy) (*
 	return op, err
 }
 
-// Convert changes the layout of a jail's root (extension jail_convert): thin to thick, or thick to thin on an image
-// generation. With DryRun the result is the plan and nothing changes.
-func (j *JailClient) Convert(ctx context.Context, name string, req api.JailConvert) (*Operation[api.JailConvertResult], error) {
-	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/convert", body: req},
-		func(ctx context.Context) (api.JailConvertResult, error) { return api.JailConvertResult{}, nil })
-	return op, err
-}
-
-// Upgrade moves a jail to a newer image generation.
+// Upgrade upgrades a jail in place: its FreeBSD base from the host and its ports packages inside it.
 func (j *JailClient) Upgrade(ctx context.Context, name string, up api.JailUpgrade) (*Operation[api.Jail], error) {
 	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/upgrade", body: up},
 		func(ctx context.Context) (api.Jail, error) { return j.Get(ctx, name) })

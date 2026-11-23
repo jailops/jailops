@@ -19,8 +19,6 @@ type JailRef struct {
 // HostState is what Preflight needs to know about the target host. Gathering
 // it is the caller's job; Preflight itself is pure and changes nothing.
 type HostState struct {
-	// Generations maps a generation name ("freebsd-15.1#g3") to its manifest.
-	Generations map[string]string
 	Networks    map[string]api.NetworkSpec
 	Policies    map[string]api.FirewallPolicySpec
 	AddressSets map[string]api.AddressSetSpec
@@ -70,16 +68,6 @@ func Preflight(b api.Backup, req api.RestoreRequest, h HostState) api.RestorePre
 		chg("assign a new uuid to the restored jail")
 	} else {
 		chg("keep uuid %s", b.Spec.JailUUID)
-	}
-
-	// Image generation.
-	if bundle.ImageGeneration == "" {
-		fail("bundle names no image generation")
-	} else if m, ok := h.Generations[bundle.ImageGeneration]; !ok {
-		miss("image generation %s", bundle.ImageGeneration)
-		chg("import image generation %s (manifest %s)", bundle.ImageGeneration, bundle.ImageManifest)
-	} else if m != bundle.ImageManifest {
-		fail("image generation %s exists with manifest %s, the backup needs %s", bundle.ImageGeneration, m, bundle.ImageManifest)
 	}
 
 	// Bundle completeness.

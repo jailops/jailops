@@ -25,10 +25,10 @@ type ImageSpec struct {
 	Arch    string `json:"arch"`    // "amd64", "arm64"
 	// Source describes where the base comes from.
 	Source ImageSource `json:"source"`
-	// Retention keeps generations that no jail uses for a while.
+	// Retention says how many older generations are kept, and for how long.
 	Retention ImageRetention `json:"retention,omitempty"`
 	// AutoUpgrade upgrades the image every night: the next generation is built (the patch levels of the release),
-	// the thin jails of the image move to it, and the packages inside the jails are upgraded.
+	// for the jails created from it later. No jail is touched by it.
 	AutoUpgrade *ImageAutoUpgrade `json:"auto_upgrade,omitempty"`
 }
 
@@ -36,21 +36,18 @@ type ImageSpec struct {
 const DefaultAutoUpgradeAt = "03:00"
 
 // ImageAutoUpgrade is the nightly upgrade of one image (one release). It does what a person does by hand with
-// 'jailops image upgrade IMAGE' and an update of the packages of each jail: a jail whose update strategy is
-// manual or in place is left alone, a jail that fails stops the run, and the run is recorded in
-// ImageStatus.AutoUpgrade.
+// 'jailops image upgrade IMAGE'; the run is recorded in ImageStatus.AutoUpgrade. A jail takes its own patches by its
+// update policy (JailSpec.Update), never by its image.
 type ImageAutoUpgrade struct {
 	Enabled bool `json:"enabled"`
 	// At is the time of day, HH:MM in the host's time zone; empty means DefaultAutoUpgradeAt. A host that was off
 	// at that time runs the upgrade when it is back, within four hours; later it waits for the next night.
 	At string `json:"at,omitempty"`
-	// Packages also upgrades the packages inside the jails of the image (pkg upgrade, apk upgrade).
-	Packages bool `json:"packages,omitempty"`
 }
 
 // Outcomes of an automatic upgrade run.
 const (
-	ImageUpgradeRunOK        = "ok"        // a generation was built and every jail moved
+	ImageUpgradeRunOK        = "ok"        // a generation was built
 	ImageUpgradeRunUnchanged = "unchanged" // nothing new to install
 	ImageUpgradeRunFailed    = "failed"    // see Detail
 )
@@ -62,10 +59,6 @@ type ImageUpgradeRun struct {
 	Result     string    `json:"result"`
 	// Generation is the generation that was built; empty when nothing changed or the build failed.
 	Generation string `json:"generation,omitempty"`
-	// Jails counts the jails moved to the new generation and the jails whose packages were upgraded.
-	JailsMoved    int `json:"jails_moved,omitempty"`
-	JailsUpgraded int `json:"jails_upgraded,omitempty"`
-	JailsFailed   int `json:"jails_failed,omitempty"`
 	// Detail says what failed, in one line.
 	Detail string `json:"detail,omitempty"`
 }
@@ -90,7 +83,7 @@ type ImageSource struct {
 	Keys string `json:"keys,omitempty"`
 }
 
-// ImageRetention is how long unused generations are kept.
+// ImageRetention is how many generations older than the newest are kept, and for how long.
 type ImageRetention struct {
 	KeepLast int `json:"keep_last,omitempty"`
 	KeepDays int `json:"keep_days,omitempty"`
@@ -104,8 +97,7 @@ type ImageStatus struct {
 }
 
 // ImageGeneration is one immutable build of an image. Its dataset has an @ro
-// snapshot that never changes. A generation is deleted only when nothing
-// references it.
+// snapshot that never changes. A new jail is a copy of it; no jail depends on it afterwards.
 type ImageGeneration struct {
 	Number int `json:"number"`
 	// Name is "<image>#g<number>".
@@ -122,10 +114,8 @@ type ImageGeneration struct {
 	FreeBSDVersion string    `json:"freebsd_version,omitempty"`
 	Dataset        string    `json:"dataset,omitempty"`
 	CreatedAt      time.Time `json:"created_at,omitzero"`
-	// Refs lists jails that use this generation.
-	Refs []string `json:"refs,omitempty"`
-	// Storages lists the storage whose pool holds a copy. Clones need the
-	// generation on the jail's own pool, so each pool keeps its own copy.
+	// Storages lists the storage whose pool holds a copy. A jail is copied from the generation on its own pool, so
+	// each pool keeps its own copy.
 	Storages []string `json:"storages,omitempty"`
 }
 
@@ -141,47 +131,14 @@ type ImageBuild struct {
 	Storage string `json:"storage,omitempty"`
 }
 
-// ImageUpgrade is the body of POST /api/v1/images/{name}/upgrade: build the
-// next generation from the newest one, then move the thin jails that use the
-// image to it, one at a time, stopping at the first that fails.
+// ImageUpgrade is the body of POST /api/v1/images/{name}/upgrade: build the next generation from the newest one,
+// with the packages of its repository at their newest versions. No jail is touched: a jail is a copy of a generation
+// and is upgraded in place (`jail upgrade`); a new jail is copied from the new generation.
 type ImageUpgrade struct {
-	// NoJails builds the generation and moves no jail.
-	NoJails bool `json:"no_jails,omitempty"`
-	// Project restricts the jails moved to one project; empty means every
-	// project the caller may administer.
-	Project string `json:"project,omitempty"`
-	// DryRun plans the build and lists the jails that would move; nothing changes.
+	// DryRun plans the build; nothing changes.
 	DryRun bool `json:"dry_run,omitempty"`
 	// Storage names the storage whose pool is built on; see ImageBuild.Storage.
 	Storage string `json:"storage,omitempty"`
-	// To moves the thin jails of the image to the newest generation of another image of the same OS and
-	// architecture and the same or a newer release (a new release) instead of building a generation: nothing is
-	// built, the other image must have one. A dry run checks every jail and plans nothing else.
-	To string `json:"to,omitempty"`
-}
-
-// Jail outcomes of an image upgrade.
-const (
-	ImageUpgradeUpgraded     = "upgraded"
-	ImageUpgradeSkipped      = "skipped"
-	ImageUpgradeFailed       = "failed"
-	ImageUpgradeNotAttempted = "not_attempted"
-	// ImageUpgradePlanned is the outcome of a dry run: the jail would move.
-	ImageUpgradePlanned = "planned"
-)
-
-// ImageUpgradeJail is what an image upgrade did with one jail.
-type ImageUpgradeJail struct {
-	Jail    string `json:"jail"`
-	Project string `json:"project"`
-	// Status is upgraded, skipped, failed, not_attempted or planned.
-	Status string `json:"status"`
-	From   string `json:"from,omitempty"`
-	To     string `json:"to,omitempty"`
-	// Reason says why the jail was skipped, failed or not attempted.
-	Reason string `json:"reason,omitempty"`
-	// Record is the id of the update history record the move wrote.
-	Record string `json:"record,omitempty"`
 }
 
 // ImageUpgradeResult is the result of the image upgrade operation.
@@ -192,12 +149,10 @@ type ImageUpgradeResult struct {
 	// It is empty when the package set did not change.
 	Generation *ImageGeneration `json:"generation,omitempty"`
 	// Unchanged is true when the newest generation already holds the current
-	// package set: no generation was kept and no jail was touched.
+	// package set: no generation was kept.
 	Unchanged bool     `json:"unchanged,omitempty"`
 	Plan      []string `json:"plan,omitempty"`
 	DryRun    bool     `json:"dry_run,omitempty"`
-	// Jails lists every jail that uses the image, with its outcome.
-	Jails []ImageUpgradeJail `json:"jails"`
 }
 
 // BaseRelease is a FreeBSD release without its patch level: "15.1-RELEASE" for the kern.osrelease

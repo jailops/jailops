@@ -10,7 +10,6 @@ import (
 
 	"jailops.net/jailops/internal/repo/engine"
 	"jailops.net/jailops/internal/repo/format"
-	"jailops.net/jailops/internal/sys/zfs"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -373,18 +372,8 @@ func TestRestoreFailureAtEveryStepLeavesNothing(t *testing.T) {
 			r.assertNoRestoreDebris(fmt.Sprint("getchunk ", n), container)
 		}
 	})
-	t.Run("generation lost its @ro snapshot", func(t *testing.T) {
-		r, b, _ := mk()
-		if err := r.w.Fake.Destroy(bg, testGen.Dataset+"@ro", zfs.DestroyOpts{}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := r.svc.Restore(bg, req(b)); err == nil {
-			t.Fatal("swallowed")
-		}
-		r.assertNoRestoreDebris("no @ro", container)
-	})
 	t.Run("a failed replace puts the old jail back", func(t *testing.T) {
-		for _, p := range []string{"restore.container", "restore.root", "restore.extract", "restore.adopt", "restore.complete"} {
+		for _, p := range []string{"restore.container", "restore.extract", "restore.adopt", "restore.complete"} {
 			r, b, _ := mk()
 			pl, _ := r.host.Place(bg, "alpha", "web1", "")
 			mustCreate(t, r, pl.Container, map[string]string{"mountpoint": pl.Mountpoint, "jailops:managed": "on", "jailops:id": "uuid-web1"})
@@ -414,4 +403,18 @@ func TestRestoreFailureAtEveryStepLeavesNothing(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A jail with the root layout of JailOps 0.9.2 and before is not backed up, and says so: its backup fails as unsupported with the
+// reason, and the run is recorded like any failed one (so a scheduled run sends backup-failed and the doctor names it).
+func TestUnsupportedJailFailsItsBackupVisibly(t *testing.T) {
+	r := newRig(t, rigOpts{remote: mustMem(t)})
+	j := r.jail("old1", "uuid-old1", nil)
+	j.Unsupported = "jail old1 has a root layout this release does not back up"
+	_, err := r.svc.BackupJail(bg, j, CaptureOptions{Policy: "nightly"})
+	codeOf(t, err, api.CodeUnsupported)
+	runs, _ := r.svc.deps.Catalog.Runs(bg)
+	if len(runs) != 1 || runs[0].OK || !strings.Contains(runs[0].Error, "root layout") || runs[0].Jail != "old1" {
+		t.Fatalf("runs: %+v", runs)
+	}
 }

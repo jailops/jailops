@@ -154,9 +154,6 @@ type Client interface {
 	// Written returns bytes written to dataset since snapshot (a full
 	// snapshot name), or since its latest snapshot when since is "".
 	Written(ctx context.Context, dataset, since string) (uint64, error)
-	// Diff lists what changed between the snapshot from and to, a clone of it or a later snapshot of its dataset
-	// (`zfs diff -FH`), at most limit entries.
-	Diff(ctx context.Context, from, to string, limit int, skip []string) (DiffResult, error)
 	// GUID of a dataset, snapshot or bookmark.
 	GUID(ctx context.Context, name string) (uint64, error)
 	// Clones of a snapshot.

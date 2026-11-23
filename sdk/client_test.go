@@ -423,29 +423,20 @@ func TestSnapshotRollbackUpgrade(t *testing.T) {
 			t.Fatal(sn, err)
 		}
 	}
-	// Root rollback without a previous generation fails; upgrade makes one.
-	if _, err := c.Jails().Rollback(ctx, "web", api.JailRollback{}); !api.IsCode(err, api.CodeInvalid) {
-		t.Fatalf("got %v", err)
-	}
-	srv.SeedGeneration("freebsd-15")
+	// An upgrade with nothing newer takes no snapshot, so a root rollback has nothing to go back to.
 	uop, _ := c.Jails().Upgrade(ctx, "web", api.JailUpgrade{})
-	j, err := uop.Wait(ctx)
-	if err != nil || j.Status.ImageGeneration != "g2" {
-		t.Fatalf("%+v %v", j.Status, err)
-	}
-	rop, err := c.Jails().Rollback(ctx, "web", api.JailRollback{Scope: api.RollbackRoot})
-	if err != nil {
+	if _, err := uop.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if j, err = rop.Wait(ctx); err != nil || j.Status.ImageGeneration != "g1" {
-		t.Fatalf("%+v %v", j.Status, err)
+	if _, err := c.Jails().Rollback(ctx, "web", api.JailRollback{}); !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("got %v", err)
 	}
 	// Data loss must be confirmed.
 	_, err = c.Jails().Rollback(ctx, "web", api.JailRollback{Scope: api.RollbackAll, Snapshot: "before"})
 	if !api.IsCode(err, api.CodeDataLoss) {
 		t.Fatalf("got %v", err)
 	}
-	rop, err = c.Jails().Rollback(ctx, "web", api.JailRollback{Scope: api.RollbackData, Snapshot: "before", ConfirmDataLoss: true})
+	rop, err := c.Jails().Rollback(ctx, "web", api.JailRollback{Scope: api.RollbackData, Snapshot: "before", ConfirmDataLoss: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,9 +517,6 @@ func TestImagesBackupsAndAccess(t *testing.T) {
 		t.Fatal(n)
 	}
 	mustJail(t, c, "web", webSpec())
-	if err := c.Images().Delete(ctx, "freebsd-15"); !api.IsCode(err, api.CodeImageInUse) {
-		t.Fatal(err)
-	}
 
 	// Backup restore with preflight.
 	spec := webSpec()
@@ -555,6 +543,13 @@ func TestImagesBackupsAndAccess(t *testing.T) {
 	j, err := rop.Wait(ctx)
 	if err != nil || j.Metadata.Name != "web2" || j.Spec.Network[0].IPv4 == "" || j.Spec.Network[0].IPv4 == "auto" {
 		t.Fatalf("%+v %v", j, err)
+	}
+	// a jail is an independent copy: its image is deleted while it exists, and the jail stays
+	if err := c.Images().Delete(ctx, "freebsd-15"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Jails().Get(ctx, "web"); err != nil {
+		t.Fatal(err)
 	}
 
 	// Secrets are shown once.

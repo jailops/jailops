@@ -127,6 +127,8 @@ type Reconciler struct {
 	// pendingKills holds, per anchor, the labels of removed rules whose states could not be ended yet: every pass
 	// tries them again until pf has ended them.
 	pendingKills map[string]map[string]bool
+	// staleSince is when each anchor below jailops/ that belongs to no object was first seen so (guarded by mu).
+	staleSince map[string]time.Time
 	// fwSince is the time each jail's FirewallApplied condition last changed its reason.
 	fwSince map[string]fwState
 }
@@ -204,7 +206,14 @@ func (r *Reconciler) watchPF(ctx context.Context) {
 			continue
 		}
 		if live, err := r.env.PF.Read(ctx, an); err == nil && len(pfctl.RuleLines(live)) == 0 {
-			r.log.Warn("reconcile: the firewall anchor of a running jail is empty (pf was flushed): loading the anchors again", "anchor", an)
+			// once per sentinel: the pass the kick asks for picks a new one. An operation that holds the jail (a stop,
+			// an upgrade) empties its anchor and keeps the pass from it; it was no flush, and is not said every 5 s.
+			r.mu.Lock()
+			if r.sentinel == an {
+				r.sentinel = ""
+			}
+			r.mu.Unlock()
+			r.log.Warn("reconcile: the firewall anchor of a running jail is empty (pf was flushed, or an operation stopped the jail): loading the anchors again", "anchor", an)
 			r.Kick()
 		}
 		// pf disabled, or its main ruleset without the line that makes it evaluate the anchors, leaves the anchors
@@ -361,6 +370,7 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 		}
 	}
 	r.sweepKills(ctx, handled)
+	r.staleAnchorPass(ctx, des, obs, &rep)
 	for _, j := range des.Jails {
 		if _, up := obs.Running[j.Name]; !up {
 			continue

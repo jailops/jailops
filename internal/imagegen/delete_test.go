@@ -24,25 +24,10 @@ func buildN(t *testing.T, w *world, image string, n int) {
 	}
 }
 
-func TestDeleteRefused(t *testing.T) {
-	w := newWorld(t)
-	buildN(t, w, "fb", 2)
-	jails := []JailRef{{Name: "web", Image: "fb", Current: "fb#g1"}, {Name: "db", Image: "fb#g2"}}
-	if _, err := w.M.Delete(bg, "fb", 1, jails, false); !api.IsCode(err, api.CodeImageInUse) {
-		t.Fatalf("current generation of a jail must block: %v", err)
-	}
-	if _, err := w.M.Delete(bg, "fb", 1, []JailRef{{Name: "x", Image: "fb", Previous: "fb#g1"}}, false); !api.IsCode(err, api.CodeImageInUse) {
-		t.Fatalf("rollback target must block: %v", err)
-	}
-	if _, err := w.M.Delete(bg, "fb", 9, nil, false); !api.IsCode(err, api.CodeNotFound) {
-		t.Fatal(err)
-	}
-}
-
 func TestDeleteDestroysWhenNoClones(t *testing.T) {
 	w := newWorld(t)
 	buildN(t, w, "fb", 1)
-	res, err := w.M.Delete(bg, "fb", 1, nil, false)
+	res, err := w.M.Delete(bg, "fb", 1, false)
 	if err != nil || res.Parked {
 		t.Fatal(res, err)
 	}
@@ -59,11 +44,11 @@ func TestDeleteParksThenCollects(t *testing.T) {
 	if err := w.Z.Clone(bg, "tank/jailops/images/fb/g2@ro", "tank/jailops/jails/j/root", nil); err != nil {
 		t.Fatal(err)
 	}
-	r, err := w.M.Delete(bg, "fb", 1, nil, false)
+	r, err := w.M.Delete(bg, "fb", 1, false)
 	if err != nil || !r.Parked {
 		t.Fatal(r, err)
 	}
-	r, err = w.M.Delete(bg, "fb", 2, nil, false)
+	r, err = w.M.Delete(bg, "fb", 2, false)
 	if err != nil || !r.Parked || len(r.Collected) != 0 {
 		t.Fatal(r, err)
 	}
@@ -128,7 +113,7 @@ func TestDeleteFailureSweep(t *testing.T) {
 			if !withClone {
 				n = 2
 			}
-			r, err := w.M.Delete(bg, "fb", n, nil, false)
+			r, err := w.M.Delete(bg, "fb", n, false)
 			if err == nil && r.CollectErr != nil {
 				return nil
 			}
@@ -142,7 +127,7 @@ func TestDeleteDryRun(t *testing.T) {
 	buildN(t, w, "fb", 2)
 	before := w.state()
 	w.F.Reset(0)
-	r, err := w.M.Delete(bg, "fb", 1, nil, true)
+	r, err := w.M.Delete(bg, "fb", 1, true)
 	if err != nil || !r.Parked || len(r.Plan) == 0 || w.F.Count() != 0 || w.state() != before {
 		t.Fatal(r, err)
 	}
@@ -152,28 +137,8 @@ func TestDeleteInjectedErrorIsReported(t *testing.T) {
 	w := newWorld(t)
 	buildN(t, w, "fb", 1)
 	w.F.Reset(1)
-	if _, err := w.M.Delete(bg, "fb", 1, nil, false); !errors.Is(err, fault.ErrInjected) {
+	if _, err := w.M.Delete(bg, "fb", 1, false); !errors.Is(err, fault.ErrInjected) {
 		t.Fatal(err)
-	}
-}
-
-func TestRefs(t *testing.T) {
-	st := api.ImageStatus{Generations: []api.ImageGeneration{{Number: 1}, {Number: 2}, {Number: 3}}}
-	jails := []JailRef{
-		{Name: "a", Image: "fb"},
-		{Name: "b", Image: "fb#g1"},
-		{Name: "c", Image: "fb", Current: "fb#g2", Previous: "other#g1"},
-		{Name: "d", Image: "other", Current: "other#g2"},
-		{Name: "e", Image: "garbage!"},
-	}
-	got := Refs("fb", st, jails)
-	want := map[int][]string{1: {"b"}, 2: {"c"}, 3: {"a", "c"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("%v", got)
-	}
-	ApplyRefs("fb", &st, jails)
-	if !reflect.DeepEqual(st.Generations[2].Refs, []string{"a", "c"}) {
-		t.Fatal(st.Generations)
 	}
 }
 
@@ -184,20 +149,18 @@ func TestCandidates(t *testing.T) {
 	}
 	st := api.ImageStatus{Generations: []api.ImageGeneration{mk(1, 100), mk(2, 80), mk(3, 60), mk(4, 40), mk(5, 5), mk(6, 1)}}
 	tests := []struct {
-		name  string
-		ret   api.ImageRetention
-		jails []JailRef
-		want  []int
+		name string
+		ret  api.ImageRetention
+		want []int
 	}{
-		{"no policy keeps all", api.ImageRetention{}, nil, nil},
-		{"keep last 2", api.ImageRetention{KeepLast: 2}, nil, []int{1, 2, 3, 4}},
-		{"keep days 30", api.ImageRetention{KeepDays: 30}, nil, []int{1, 2, 3, 4}},
-		{"both", api.ImageRetention{KeepLast: 4, KeepDays: 30}, nil, []int{1, 2}},
-		{"referenced kept", api.ImageRetention{KeepLast: 1}, []JailRef{{Name: "j", Image: "fb#g4"}}, []int{1, 2, 3, 5}},
+		{"no policy keeps all", api.ImageRetention{}, nil},
+		{"keep last 2", api.ImageRetention{KeepLast: 2}, []int{1, 2, 3, 4}},
+		{"keep days 30", api.ImageRetention{KeepDays: 30}, []int{1, 2, 3, 4}},
+		{"both", api.ImageRetention{KeepLast: 4, KeepDays: 30}, []int{1, 2}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := Candidates(tc.ret, "fb", st, tc.jails, now)
+			got := Candidates(tc.ret, st, now)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("%v want %v", got, tc.want)
 			}
@@ -208,33 +171,24 @@ func TestCandidates(t *testing.T) {
 func TestPrune(t *testing.T) {
 	w := newWorld(t)
 	buildN(t, w, "fb", 4)
-	got, err := w.M.Prune(bg, "fb", api.ImageRetention{KeepLast: 1}, []JailRef{{Name: "j", Image: "fb#g2"}})
+	got, err := w.M.Prune(bg, "fb", api.ImageRetention{KeepLast: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// g1 and g3 are candidates; both have clones (g2, g4) so they are parked
-	if !reflect.DeepEqual(got, []int{1, 3}) {
+	// g1, g2 and g3 are candidates; each has a clone (the next generation) so they are parked
+	if !reflect.DeepEqual(got, []int{1, 2, 3}) {
 		t.Fatal(got)
 	}
 	o, _ := w.M.Observe(bg, "fb")
-	if len(o.Status.Generations) != 2 || len(o.Deleted) != 2 {
+	if len(o.Status.Generations) != 1 || len(o.Deleted) != 3 {
 		t.Fatalf("%+v", o)
-	}
-}
-
-func TestDeleteGenerationUsedByJailIsRefused(t *testing.T) {
-	w := newWorld(t)
-	buildN(t, w, "fb", 2)
-	_, err := w.M.Delete(bg, "fb", 2, []JailRef{{Name: "web", Image: "fb"}}, false)
-	if !api.IsCode(err, api.CodeImageInUse) {
-		t.Fatal(err)
 	}
 }
 
 func TestDeleteImage(t *testing.T) {
 	w := newWorld(t)
 	buildN(t, w, "fb", 1)
-	if _, err := w.M.Delete(bg, "fb", 1, nil, false); err != nil {
+	if _, err := w.M.Delete(bg, "fb", 1, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.M.DeleteImage(bg, "fb"); err != nil {

@@ -18,7 +18,7 @@ App valkey: Valkey (ours)
   Category:   database
   License:    -
   Homepage:   -
-  Image:      FreeBSD 15.1 or later, thin jail
+  Image:      FreeBSD 15.1 or later
   File:       valkey.yaml (sha256:<sha256>)
   Source:     local (the host's apps.local_dir); it overrides the catalog's definition of the same name
 

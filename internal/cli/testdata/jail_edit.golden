@@ -39,8 +39,8 @@ metadata:
   name: web
 spec:
   image: freebsd-15
+  os: freebsd
   storage: default
-  layout: thin
   hostname: edited
   network:
     - network: lan

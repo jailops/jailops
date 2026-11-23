@@ -38,12 +38,16 @@ func TestPkgRefusesTheRootOfARunningJail(t *testing.T) {
 	if err := runPkg("-r", stopped, "install", "-y", "nginx"); err != nil {
 		t.Errorf("a stopped jail's root: %v", err)
 	}
-	// the root of a running jail, spelled in every way
+	// the root of a running managed jail itself is upgraded while it runs; a path below it, or the root spelled through
+	// a link, is refused
+	if err := runPkg("-o", "ABI=FreeBSD:15:amd64", "-r", running, "update", "-q"); err != nil {
+		t.Errorf("the root of a running jail: %v", err)
+	}
 	link := filepath.Join(e.cfg.MountBase, "projects", "alpha", "jails", "alias")
 	if err := os.Symlink(filepath.Dir(running), link); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{running, running + "/", running + "/usr/local", running + "/./usr", filepath.Join(link, "root")} {
+	for _, p := range []string{running + "/usr/local", running + "/./usr", filepath.Join(link, "root")} {
 		err := runPkg("-r", p, "install", "-y", "nginx")
 		if !api.IsCode(err, api.CodeForbidden) {
 			t.Errorf("pkg -r %s: %v (want forbidden)", p, err)
@@ -53,7 +57,7 @@ func TestPkgRefusesTheRootOfARunningJail(t *testing.T) {
 		t.Errorf("with ..: %v", err)
 	}
 	// -o first does not hide the root from the check
-	if err := runPkg("-o", "ABI=FreeBSD:15:amd64", "-r", running, "update", "-q"); !api.IsCode(err, api.CodeForbidden) {
+	if err := runPkg("-o", "ABI=FreeBSD:15:amd64", "-r", running+"/usr", "update", "-q"); !api.IsCode(err, api.CodeForbidden) {
 		t.Errorf("-o before -r: %v", err)
 	}
 

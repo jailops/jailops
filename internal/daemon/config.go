@@ -57,7 +57,6 @@ type Config struct {
 	ZFS       ZFSConf   `yaml:"zfs"`
 	Limits    Limits    `yaml:"limits"`
 	Projects  Projects  `yaml:"projects"`
-	Lifecycle Lifecycle `yaml:"lifecycle"`
 	// Backup, when present, enables host-side backups (design 9): the key,
 	// capture, the schedule, restore and restore tests, against one backup
 	// node. Absent, every backup call answers unsupported.
@@ -161,10 +160,11 @@ const DefaultMaxStates = 10000
 // prompt keys empty. They apply to jails created from now on; an existing jail gets them only through
 // `jailops jail shell-setup`.
 type JailsConf struct {
-	// Shell is bash (the default: installed at the jail's first start and started by `jailops shell` and the
-	// console) or sh (FreeBSD's own shell; nothing is installed).
+	// Shell is sh (the default: FreeBSD's own shell, nothing is installed) or bash (installed at the jail's first
+	// start and started by `jailops shell` and the console). A project can say bash for its jails (project set --shell).
 	Shell string `yaml:"shell"`
-	// Prompt is the bash prompt of a jail whose shell is bash: default (the default), short, none, or a PS1 text.
+	// Prompt is the prompt of a new jail: default (the default), short, none, or a PS1 text. bash shows it to every user;
+	// sh shows it to root (the block at the end of /root/.shrc).
 	Prompt string `yaml:"prompt"`
 	// PromptColor is the 256-colour number of the default prompt, 1 to 255 (default 39, a light blue).
 	PromptColor *int `yaml:"prompt_color"`
@@ -201,24 +201,6 @@ type BackupNode struct {
 	Fingerprint string `yaml:"fingerprint"` // hex SHA-256 of the node certificate
 	CertFile    string `yaml:"cert_file"`   // this host's client certificate
 	KeyFile     string `yaml:"key_file"`
-}
-
-// Lifecycle configures thin jails.
-type Lifecycle struct {
-	// Persistent replaces the list of paths of a thin jail that survive a
-	// generation switch (each in its own dataset). Empty keeps the default:
-	// /etc, /usr/local, /var/db (UNVERIFIED: pkg database persistence),
-	// /var/log, /var/mail, /var/spool, /home and /root.
-	Persistent []PersistentPath `yaml:"persistent"`
-}
-
-// PersistentPath is one entry of Lifecycle.Persistent.
-type PersistentPath struct {
-	Dataset string `yaml:"dataset"`
-	Path    string `yaml:"path"`
-	Class   string `yaml:"class"` // system or data
-	Merge   bool   `yaml:"merge"`
-	NoSeed  bool   `yaml:"no_seed"`
 }
 
 // Projects configures project creation. NetworkPool is the pool of subnets
@@ -471,7 +453,7 @@ func (c Config) finish() (Config, error) {
 	}
 	switch c.Jails.Shell {
 	case "":
-		c.Jails.Shell = api.ShellBash
+		c.Jails.Shell = api.ShellSh
 	case api.ShellBash, api.ShellSh:
 	default:
 		return c, fmt.Errorf("config: jails.shell %q must be bash or sh", c.Jails.Shell)
@@ -558,19 +540,6 @@ func (c Config) finish() (Config, error) {
 		}
 		if b.Concurrency < 0 || b.Concurrency > 32 {
 			return c, fmt.Errorf("config: backup.concurrency must be between 0 and 32")
-		}
-	}
-	seenDS := map[string]bool{}
-	for i, p := range c.Lifecycle.Persistent {
-		if p.Dataset == "" || strings.ContainsAny(p.Dataset, "/@ ") || seenDS[p.Dataset] {
-			return c, fmt.Errorf("config: lifecycle.persistent[%d].dataset %q must be a unique single dataset name", i, p.Dataset)
-		}
-		seenDS[p.Dataset] = true
-		if !filepath.IsAbs(p.Path) || filepath.Clean(p.Path) != p.Path || p.Path == "/" {
-			return c, fmt.Errorf("config: lifecycle.persistent[%d].path %q must be a clean absolute path below /", i, p.Path)
-		}
-		if p.Class != "system" && p.Class != "data" {
-			return c, fmt.Errorf("config: lifecycle.persistent[%d].class must be system or data", i)
 		}
 	}
 	var seenMod []string
@@ -695,23 +664,36 @@ var hostnameRE = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])
 func validHostname(h string) bool { return len(h) <= 253 && hostnameRE.MatchString(h) }
 
 // UpgradeConfig rewrites a configuration written by an earlier release to the current keys: the line "role: host" that
-// jailopsd.yaml shipped is dropped (the value of the key is host, or empty). Any other role stays and is refused as an
-// unknown key. The file on disk is not changed.
+// jailopsd.yaml shipped is dropped (the value of the key is host, or empty; any other role stays and is refused as an
+// unknown key), and so is the section lifecycle (the datasets of the root layout of 0.9.2 and before, which this
+// release does not make). The file on disk is not changed.
 func UpgradeConfig(raw []byte) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
 		return raw, nil
 	}
 	m := doc.Content[0]
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		if m.Content[i].Value != "role" {
+	changed := false
+	for i := 0; i+1 < len(m.Content); {
+		drop := false
+		switch m.Content[i].Value {
+		case "role":
+			switch m.Content[i+1].Value {
+			case "host", "", "null", "~":
+				drop = true
+			}
+		case "lifecycle":
+			drop = true
+		}
+		if !drop {
+			i += 2
 			continue
 		}
-		switch m.Content[i+1].Value {
-		case "host", "", "null", "~":
-			m.Content = append(m.Content[:i], m.Content[i+2:]...)
-			return yaml.Marshal(&doc)
-		}
+		m.Content = append(m.Content[:i], m.Content[i+2:]...)
+		changed = true
 	}
-	return raw, nil
+	if !changed {
+		return raw, nil
+	}
+	return yaml.Marshal(&doc)
 }

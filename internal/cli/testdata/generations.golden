@@ -17,14 +17,3 @@ $ jailops image generation delete -y freebsd-15 three
 ! hint: run 'jailops image generation delete --help' for usage
 [exit 2]
 
-$ jailops jail create web --image freebsd-15#g1 --network lan --storage default
-jail/web created
-
-$ jailops jail upgrade web --generation 2
-jail/web upgraded to g2
-
-$ jailops jail upgrade web --generation x
-! usage: --generation must be a generation such as g2, not "x"
-! hint: run 'jailops jail upgrade --help' for usage
-[exit 2]
-

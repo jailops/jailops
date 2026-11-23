@@ -19,7 +19,6 @@ metadata:
 spec:
   image: freebsd-15
   storage: default
-  layout: thin
   hostname: web
   network:
     - network: lan
@@ -43,7 +42,7 @@ image/alpine-3 created
 
 $ jailops apply -f <dir>/site.yaml
 network/dmz unchanged
-jail/web unchanged
+jail/web updated
 image/alpine-3 unchanged
 
 $ jailops apply -f <dir>/site2.yaml

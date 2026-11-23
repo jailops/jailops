@@ -93,17 +93,16 @@ export interface ImageForm {
   /** The keyring that checks a Debian release (source.keys), a path on the host. */
   keys: string
   build: boolean
-  /** The nightly upgrade (spec.auto_upgrade): on, its time of day, and the packages inside the jails too. */
+  /** The nightly upgrade (spec.auto_upgrade): on, and its time of day. */
   auto: boolean
   at: string
-  packages: boolean
 }
 
 /** The form a new image starts with: the image of this host's release, upgraded every night (a FreeBSD image).
  *  `release` proposes another release (the new release notice). */
 export function initialImageForm(info: ServerInfo | null | undefined, kind: ImageKind = 'freebsd', release = ''): ImageForm {
   const r = release || (kind === 'freebsd' && hostRelease(info)) || DEFAULT_RELEASE[kind]
-  return { kind, name: imageNameFor(kind, r), release: r, arch: hostArch(info), keys: '', build: true, auto: false, at: DEFAULT_AUTO_AT, packages: true }
+  return { kind, name: imageNameFor(kind, r), release: r, arch: hostArch(info), keys: '', build: true, auto: false, at: DEFAULT_AUTO_AT }
 }
 
 /** The problem of the time of day of the nightly upgrade, or '': HH:MM, as the server reads it. */
@@ -137,13 +136,13 @@ export function imageBody(f: ImageForm): Pick<Image, 'metadata' | 'spec'> {
   const src = SOURCE[f.kind]
   return {
     metadata: { name: f.name },
-    spec: { os: src.os, release: f.release.trim(), arch: f.arch, source: { type: src.type, ...(f.kind === 'debian' ? { keys: f.keys.trim() } : {}) }, ...(f.auto ? { auto_upgrade: autoUpgradeSpec(true, f.at, f.packages) } : {}) },
+    spec: { os: src.os, release: f.release.trim(), arch: f.arch, source: { type: src.type, ...(f.kind === 'debian' ? { keys: f.keys.trim() } : {}) }, ...(f.auto ? { auto_upgrade: autoUpgradeSpec(true, f.at) } : {}) },
   }
 }
 
 /** spec.auto_upgrade as it is sent: the time only when it is not the default. */
-export function autoUpgradeSpec(enabled: boolean, at: string, packages: boolean): ImageAutoUpgrade {
-  return { enabled, ...(at && at !== DEFAULT_AUTO_AT ? { at } : {}), packages }
+export function autoUpgradeSpec(enabled: boolean, at: string): ImageAutoUpgrade {
+  return { enabled, ...(at && at !== DEFAULT_AUTO_AT ? { at } : {}) }
 }
 
 /** Whether apps have their default image: 'none' when there is no FreeBSD image at all (the base image is

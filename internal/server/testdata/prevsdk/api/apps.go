@@ -45,7 +45,7 @@ type App struct {
 	Services []AppService `json:"services,omitempty" yaml:"services"`
 	Ports    []AppPort    `json:"ports,omitempty" yaml:"ports"`
 	// Data lists the paths that hold the application's state; each becomes
-	// a persistent dataset of the jail.
+	// a volume of the project attached to the jail.
 	Data   []AppPath   `json:"data,omitempty" yaml:"data"`
 	Config []AppConfig `json:"config,omitempty" yaml:"config"`
 	Logs   []AppLog    `json:"logs,omitempty" yaml:"logs"`

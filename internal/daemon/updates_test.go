@@ -28,6 +28,7 @@ type scriptedJails struct {
 	failUp   bool   // pkg upgrade -y fails
 	failHC   bool   // the health check fails
 	upgraded bool
+	procs    bool       // after the upgrade, procstat shows a process that still maps a replaced file
 	env      *dtest.Env // the host-side pkg -j commands of FreeBSD jails run on its command fake
 }
 
@@ -49,6 +50,11 @@ func (s *scriptedJails) fn(name string, o jailos.ExecOpts) (run.Result, error) {
 		s.upgraded = true
 	case line == "/bin/true" && s.failHC:
 		return run.Result{Stderr: []byte("not healthy")}, errors.New("exit status 1")
+	case line == "procstat -a -v" && s.procs:
+		return run.Result{Stdout: []byte("  PID              START                END PRT  RES PRES REF SHD FLAG  TP PATH\n" +
+			"  812           0x200000           0x2a0000 r--   40   42   3   1 CN--- vn\n")}, nil
+	case line == "ps -ax -o pid= -o comm=" && s.procs:
+		return run.Result{Stdout: []byte("  812 nginx\n  900 sh\n")}, nil
 	}
 	return run.Result{}, nil
 }
@@ -115,6 +121,53 @@ func runningWeb(t *testing.T, e *dtest.Env) {
 	waitShellSetup(t, e, "web") // the bash of a new jail is installed in the background and holds the jail until it is done
 }
 
+// update.reboot=auto is kept in the API but reports, as manual does: JailOps never stops or restarts a running jail for
+// an update. The jail keeps its jid and start time, and the record names what still runs replaced files.
+func TestPackageUpdateNeverRestarts(t *testing.T) {
+	e := dtest.New(t, dtest.Options{})
+	e.Seed()
+	sj := &scriptedJails{pkgs: pkgDryRun, env: e, procs: true}
+	e.SetPkgUpgrades(pkgDryRun)
+	e.Jails.SetExecFn(sj.fn)
+	ctx := context.Background()
+	j := dtest.WebJail("web")
+	j.Spec.Update.Reboot = api.RebootAuto
+	op, err := e.Admin.Jails().Create(ctx, j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := op.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	so, err := e.Admin.Jails().Start(ctx, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := so.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitShellSetup(t, e, "web")
+	before, err := e.Admin.Jails().Get(ctx, "web")
+	if err != nil || before.Spec.Update.Reboot != api.RebootAuto || before.Status.JID == 0 {
+		t.Fatalf("%+v %v", before, err)
+	}
+	aop, err := e.Admin.Updates().Apply(ctx, api.UpdateApplyRequest{Jails: []string{"web"}, Packages: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recs, err := aop.Wait(ctx)
+	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateSuccess || len(recs[0].Packages) != 2 {
+		t.Fatalf("%+v %v", recs, err)
+	}
+	if !strings.Contains(recs[0].Note, "restart pending: nginx (pid 812)") || !strings.Contains(recs[0].Note, "does not restart") {
+		t.Fatalf("note %q", recs[0].Note)
+	}
+	after, _ := e.Admin.Jails().Get(ctx, "web")
+	if after.Status.Power != api.PowerRunning || after.Status.JID != before.Status.JID || !after.Status.StartedAt.Equal(before.Status.StartedAt) {
+		t.Fatalf("the update restarted the jail: %+v -> %+v", before.Status, after.Status)
+	}
+}
+
 func TestPackageUpdatePipeline(t *testing.T) {
 	e := dtest.New(t, dtest.Options{})
 	e.Seed()
@@ -149,8 +202,8 @@ func TestPackageUpdatePipeline(t *testing.T) {
 	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateSuccess || recs[0].Kind != api.UpdateKindPackages || recs[0].Snapshot == "" || len(recs[0].Packages) != 2 {
 		t.Fatalf("%+v %v", recs, err)
 	}
-	if !strings.Contains(recs[0].Note, "restart the jail") {
-		t.Fatalf("reboot manual must say so: %q", recs[0].Note)
+	if !strings.Contains(recs[0].Note, "does not restart the jail") {
+		t.Fatalf("the record must say the jail was not restarted: %q", recs[0].Note)
 	}
 	// The snapshot exists on the jail.
 	found := false
@@ -223,49 +276,6 @@ loop:
 	}
 	if _, err := e.Admin.Updates().Check(ctx, "ghost"); !api.IsCode(err, api.CodeNotFound) {
 		t.Fatal(err)
-	}
-}
-
-func TestOSUpdateRootSwapAndAutomaticRollback(t *testing.T) {
-	e := dtest.New(t, dtest.Options{})
-	e.Seed()
-	e.Jails.SetExecFn((&scriptedJails{}).fn)
-	runningWeb(t, e)
-	ctx := context.Background()
-	// Build a newer generation of the image.
-	bop, err := e.Admin.Images().Build(ctx, "fb", api.ImageBuild{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := bop.Wait(ctx); err != nil {
-		t.Fatal(err)
-	}
-	cop, _ := e.Admin.Updates().Check(ctx, "web")
-	reps, err := cop.Wait(ctx)
-	if err != nil || len(reps) != 1 || reps[0].OS == nil || !strings.HasSuffix(reps[0].OS.To, "#g2") {
-		t.Fatalf("%+v %v", reps, err)
-	}
-	aop, _ := e.Admin.Updates().Apply(ctx, api.UpdateApplyRequest{Jails: []string{"web"}, OS: true})
-	recs, err := aop.Wait(ctx)
-	if err != nil || len(recs) != 1 || recs[0].Kind != api.UpdateKindOS || recs[0].Result != api.UpdateSuccess {
-		t.Fatalf("%+v %v", recs, err)
-	}
-	j, _ := e.Admin.Jails().Get(ctx, "web")
-	if !strings.HasSuffix(j.Status.ImageGeneration, "g2") {
-		t.Fatalf("%+v", j.Status)
-	}
-	// A third generation whose health check fails: the root is swapped back by the plan.
-	bop, _ = e.Admin.Images().Build(ctx, "fb", api.ImageBuild{})
-	_, _ = bop.Wait(ctx)
-	e.Jails.SetExecFn((&scriptedJails{failHC: true}).fn)
-	aop, _ = e.Admin.Updates().Apply(ctx, api.UpdateApplyRequest{Jails: []string{"web"}, OS: true})
-	recs, err = aop.Wait(ctx)
-	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateRolledBack || !recs[0].RootRolledBack || !strings.Contains(recs[0].Note, "application data was not touched") {
-		t.Fatalf("%+v %v", recs, err)
-	}
-	j, _ = e.Admin.Jails().Get(ctx, "web")
-	if !strings.HasSuffix(j.Status.ImageGeneration, "g2") {
-		t.Fatalf("the failed update left the jail on %s", j.Status.ImageGeneration)
 	}
 }
 
@@ -389,7 +399,7 @@ func TestProvisioningRunsOnceAndAgainOnRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"pkg install -y bash nginx", "chown root:wheel /usr/local/etc/nginx/nginx.conf", "chmod 0644 /usr/local/etc/nginx/nginx.conf",
-		"sysrc nginx_enable=YES", "jailops-start nginx", "/usr/bin/touch /var/db/done"}
+		"jailops-start nginx", "/usr/bin/touch /var/db/done"}
 	for _, w := range want {
 		if !sj.ran(w) {
 			t.Errorf("provisioning did not run %q: %v", w, sj.cmds)
@@ -403,8 +413,12 @@ func TestProvisioningRunsOnceAndAgainOnRequest(t *testing.T) {
 		}
 		return -1
 	}
-	if !(ord("pkg install") < ord("chown") && ord("chown") < ord("sysrc") && ord("sysrc") < ord("jailops-start nginx") && ord("jailops-start nginx") < ord("/usr/bin/touch")) {
+	if !(ord("pkg install") < ord("chown") && ord("chown") < ord("jailops-start nginx") && ord("jailops-start nginx") < ord("/usr/bin/touch")) {
 		t.Errorf("steps out of order: %v", sj.cmds)
+	}
+	// the service is enabled in the jail's rc.conf by the host (the minimal base set has no sysrc)
+	if rc := string(e.Files.Data["/jailops/projects/alpha/jails/web/root/etc/rc.conf"]); !strings.Contains(rc, `nginx_enable="YES"`) {
+		t.Errorf("nginx is not enabled in rc.conf: %q", rc)
 	}
 	if data, ok := e.Files.Data["/jailops/projects/alpha/jails/web/root/usr/local/etc/nginx/nginx.conf"]; !ok || string(data) != "worker_processes 1;\n" {
 		t.Errorf("the template was not copied: %v", e.Files.Paths())
@@ -510,4 +524,46 @@ func TestPackageUpdateHoldsTheJailAgainstSessions(t *testing.T) {
 	if _, err := e.Admin.Jails().Exec(ctx, "web", []string{"echo", "y"}, sdk.ExecOptions{}); err != nil {
 		t.Fatalf("exec after the update: %v", err)
 	}
+}
+
+// The per-jail update policy is what upgrades a jail's base in place on its schedule (update.mode managed with
+// update.os); nothing else does at night. The fake host has no package database in the root, so the upgrade fails its
+// check and says so in a scheduled OS record.
+func TestScheduledPolicyUpgradesTheBaseInPlace(t *testing.T) {
+	var now = struct {
+		sync.Mutex
+		t time.Time
+	}{t: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)}
+	clock := func() time.Time { now.Lock(); defer now.Unlock(); return now.t }
+	e := dtest.New(t, dtest.Options{Now: clock, Mutate: func(c *daemon.Config) { c.Updates.Tick = daemon.Duration(20 * time.Millisecond) }})
+	e.Seed()
+	sj := &scriptedJails{pkgs: pkgDryRun, env: e}
+	e.SetPkgUpgrades(pkgDryRun)
+	e.Jails.SetExecFn(sj.fn)
+	ctx := context.Background()
+	j := dtest.WebJail("web")
+	// set at create: managed, os and packages, a schedule
+	j.Spec.Update = api.UpdatePolicy{Mode: api.UpdateModeManaged, OS: true, Packages: true, Schedule: "0 3 * * *", Healthcheck: "/bin/true"}
+	op, err := e.Admin.Jails().Create(ctx, j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := op.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	so, err := e.Admin.Jails().Start(ctx, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := so.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitShellSetup(t, e, "web")
+	now.Lock()
+	now.t = now.t.Add(30 * time.Hour)
+	now.Unlock()
+	waitFor(t, func() bool {
+		h, _ := e.Admin.Jails().UpdateHistory(ctx, "web")
+		return len(h) > 0 && h[0].Scheduled && h[0].Kind == api.UpdateKindOS
+	})
 }

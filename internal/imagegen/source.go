@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -64,8 +65,24 @@ func quote(argv []string) string {
 	return strings.Join(parts, " ")
 }
 
+// reTerm matches the escape sequences a program writes to a terminal (colours, erase line, cursor moves).
+var reTerm = regexp.MustCompile("\x1b\\[[0-9;?]*[ -/]*[@-~]")
+
+// CleanOutput makes the output of a program fit for an error or a record: escape sequences are removed and a line that
+// was redrawn with carriage returns (a progress bar) keeps its last state.
+func CleanOutput(s string) string {
+	s = reTerm.ReplaceAllString(s, "")
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for i, l := range lines {
+		if j := strings.LastIndex(l, "\r"); j >= 0 {
+			lines[i] = l[j+1:]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func tail(b []byte) string {
-	s := strings.TrimSpace(string(b))
+	s := strings.TrimSpace(CleanOutput(string(b)))
 	if len(s) > 400 {
 		s = "..." + s[len(s)-400:]
 	}
@@ -155,12 +172,15 @@ func (PkgBase) sets(s api.ImageSpec) []string {
 	if len(s.Source.Sets) > 0 {
 		return s.Source.Sets
 	}
-	// The minimal jail set (35 packages) is not enough for software from the FreeBSD ports: a package is built against
-	// a complete base system and does not name the base libraries it needs (PostgreSQL stopped at "libexecinfo.so.1 not
-	// found"), and administrators expect sysrc(8), ssh, ee, ntp, ftp and bmake in a jail. The optional jail set
-	// (about 105 packages, 160 MiB) brings them; the development set (compiler and headers, 570 MiB) is left out: an
-	// image that builds software names FreeBSD-set-devel in source.sets.
-	return []string{"FreeBSD-set-minimal-jail", "FreeBSD-set-optional-jail"}
+	// The smallest base of a working jail: the minimal jail set, as in the pkgbase jail recipe. The FreeBSD-base
+	// repository stays disabled inside a jail, as FreeBSD ships it, so pkg there sees the ports only and no
+	// FreeBSD-* package (clibs-lib32 for llvm, which cannot be installed in a jail, FreeBSD bug 293817) is ever pulled in.
+	// The base is updated from the host. No sshd: a jail that is entered with ssh names FreeBSD-ssh, and anything else a
+	// program needs is a base package away (jailops jail base add; the base of a jail is the jail's own). The apps of the
+	// catalogue (PostgreSQL, Valkey) run on this set; an image whose software needs more of the base names the optional
+	// jail set (about 105 packages, 160 MiB) in source.sets, and the development set (compiler and headers, 570 MiB) when
+	// the image builds software.
+	return []string{"FreeBSD-set-minimal-jail"}
 }
 
 // pkgArgv builds a `pkg -r <root>` argv with a private repository
@@ -171,9 +191,21 @@ func (p PkgBase) pkgArgv(b *Build, abi string, args ...string) []string {
 	if abi == "" {
 		abi, _ = p.abi(b.Spec)
 	}
-	base := []string{"pkg", "-r", b.Root, "-o", "ABI=" + abi, "-o", "REPOS_DIR=" + path.Join(b.Work, "repos"), "-o", "IGNORE_OSVERSION=yes", "-o", "PKG_CACHEDIR=" + b.M.Layout.PkgCache()}
+	return PkgBaseArgv(b.Root, path.Join(b.Work, "repos"), b.M.Layout.PkgCache(), abi, args...)
+}
+
+// PkgBaseArgv is `pkg -r <root>` with a private repository directory and package cache: the form the helper's pkg
+// rule accepts for a root no jail runs in. abi is the one the release names (PkgBaseABI).
+func PkgBaseArgv(root, reposDir, cacheDir, abi string, args ...string) []string {
+	base := []string{"pkg", "-r", root, "-o", "ABI=" + abi, "-o", "REPOS_DIR=" + reposDir, "-o", "IGNORE_OSVERSION=yes", "-o", "PKG_CACHEDIR=" + cacheDir}
 	return append(base, args...)
 }
+
+// PkgBaseABI is the pkg ABI of a FreeBSD release and architecture: "FreeBSD:15:amd64".
+func PkgBaseABI(spec api.ImageSpec) (string, error) { return PkgBase{}.abi(spec) }
+
+// PkgBaseRepoName is the name of the repository block PkgBaseRepoConf writes.
+const PkgBaseRepoName = "jailops"
 
 // pkgRun is the handle the steps of one plan share: the ABI learned from
 // the host.
@@ -188,25 +220,28 @@ func (r *pkgRun) step(name string, args ...string) plan.Step {
 		Name: name, Describe: quote(r.p.pkgArgv(r.b, r.abi, args...)),
 		Do: func(ctx context.Context) error {
 			argv := r.p.pkgArgv(r.b, r.abi, args...)
-			var out []byte
-			var err error
-			// A mirror that does not answer for a moment must not fail an image build: pkg keeps what it already
-			// fetched in its cache, so a second try only asks for what is missing.
-			for try := 0; ; try++ {
-				if out, err = r.b.M.Exec.Run(ctx, argv); err == nil {
-					return nil
-				}
-				if try >= fetchRetries || !transientFetch(out) {
-					break
-				}
-				select {
-				case <-ctx.Done():
-					return fmt.Errorf("%s: %w: %s", quote(argv), err, tail(out))
-				case <-time.After(fetchBackoff << try):
-				}
-			}
-			return fmt.Errorf("%s: %w: %s", quote(argv), err, tail(out))
+			return RunPkg(ctx, r.b.M.Exec.Run, argv)
 		},
+	}
+}
+
+// RunPkg runs a pkg argv. A mirror that does not answer for a moment must not fail an image build or an upgrade: pkg
+// keeps what it already fetched in its cache, so a second try only asks for what is missing. The error carries the
+// tail of the output.
+func RunPkg(ctx context.Context, run func(context.Context, []string) ([]byte, error), argv []string) error {
+	for try := 0; ; try++ {
+		out, err := run(ctx, argv)
+		if err == nil {
+			return nil
+		}
+		if try >= fetchRetries || !transientFetch(out) {
+			return fmt.Errorf("%s: %w: %s", quote(argv), err, tail(out))
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%s: %w: %s", quote(argv), err, tail(out))
+		case <-time.After(fetchBackoff << try):
+		}
 	}
 }
 
@@ -312,14 +347,34 @@ func isRelease(rel string) bool {
 func (p PkgBase) repoConf(b *Build) plan.Step {
 	m := b.M
 	file := path.Join(b.Work, "repos", "jailops.conf")
-	url := b.Spec.Source.Repo
-	keys := b.Spec.Source.Keys
+	url, keys, body, err := PkgBaseRepoConf(b.Spec)
+	if err != nil {
+		return plan.Step{Name: "write-repo-conf", Describe: "write the repository file",
+			Do: func(context.Context) error { return err }}
+	}
+	return plan.Step{
+		Name: "write-repo-conf", Describe: "write " + file + " (url " + url + ", fingerprints " + keys + ")",
+		// Found on FreeBSD: the helper's atomic write does not create parent directories.
+		Do: func(ctx context.Context) error {
+			if err := m.Files.MkdirAll(ctx, path.Dir(file)); err != nil {
+				return err
+			}
+			return m.Files.WriteAtomic(ctx, file, []byte(body))
+		},
+		Undo: func(ctx context.Context) error { return m.Files.RemoveAll(ctx, b.Work) },
+	}
+}
+
+// PkgBaseRepoConf is the repository file of a pkgbase image: its url, its fingerprints directory and the file body.
+// The file is the only form the helper accepts (internal/priv/pkgrepo.go).
+func PkgBaseRepoConf(spec api.ImageSpec) (url, keys, body string, err error) {
+	url = spec.Source.Repo
+	keys = spec.Source.Keys
 	if url == "" {
-		if isRelease(b.Spec.Release) {
-			_, minor, err := parseRelease(b.Spec.Release)
-			if err != nil {
-				return plan.Step{Name: "write-repo-conf", Describe: "write the repository file",
-					Do: func(context.Context) error { return api.Errorf(api.CodeInvalid, "%v", err) }}
+		if isRelease(spec.Release) {
+			_, minor, perr := parseRelease(spec.Release)
+			if perr != nil {
+				return "", "", "", api.Errorf(api.CodeInvalid, "%v", perr)
 			}
 			url = fmt.Sprintf("pkg+https://pkg.FreeBSD.org/${ABI}/base_release_%d", minor)
 		} else {
@@ -338,18 +393,12 @@ func (p PkgBase) repoConf(b *Build) plan.Step {
 	if strings.HasPrefix(url, "pkg+") {
 		mirror = "  mirror_type: \"srv\",\n"
 	}
-	body := fmt.Sprintf("jailops: {\n  url: \"%s\",\n%s  signature_type: \"fingerprints\",\n  fingerprints: \"%s\",\n  enabled: yes\n}\n", url, mirror, keys)
-	return plan.Step{
-		Name: "write-repo-conf", Describe: "write " + file + " (url " + url + ", fingerprints " + keys + ")",
-		// Found on FreeBSD: the helper's atomic write does not create parent directories.
-		Do: func(ctx context.Context) error {
-			if err := m.Files.MkdirAll(ctx, path.Dir(file)); err != nil {
-				return err
-			}
-			return m.Files.WriteAtomic(ctx, file, []byte(body))
-		},
-		Undo: func(ctx context.Context) error { return m.Files.RemoveAll(ctx, b.Work) },
-	}
+	body = repoBlock(PkgBaseRepoName, url, mirror, keys)
+	return url, keys, body, nil
+}
+
+func repoBlock(name, url, mirror, keys string) string {
+	return fmt.Sprintf("%s: {\n  url: \"%s\",\n%s  signature_type: \"fingerprints\",\n  fingerprints: \"%s\",\n  enabled: yes\n}\n", name, url, mirror, keys)
 }
 
 func (p PkgBase) Install(b *Build) ([]plan.Step, error) {
@@ -360,7 +409,7 @@ func (p PkgBase) Install(b *Build) ([]plan.Step, error) {
 		r.step("pkg-install", append([]string{"install", "-y", "-r", "jailops"}, p.sets(b.Spec)...)...),
 		r.verifyReleaseStep(),
 		r.step("pkg-clean", "clean", "-y"),
-		p.rcConfStep(b), p.periodicConfStep(b), p.lockRootStep(b))
+		p.rcConfStep(b), p.periodicConfStep(b), p.pkgReposStep(b), p.baseRepoOffStep(b), p.lockRootStep(b))
 	return steps, nil
 }
 
@@ -443,6 +492,55 @@ func (PkgBase) lockRootStep(b *Build) plan.Step {
 	return b.M.execStep("lock-root-password", []string{"pw-lock-root", "-R", b.Root, "usermod", "root", "-w", "no"})
 }
 
+// jailPkgRepos is /usr/local/etc/pkg/repos/FreeBSD.conf of a new generation: the kernel modules repository is of no use
+// in a jail (the kernel is the host's) and costs a catalogue fetch in every pkg update.
+const jailPkgRepos = `# Defaults for a JailOps jail: the kernel is the host's, so no kernel modules from the ports.
+FreeBSD-ports-kmods: { enabled: no }
+`
+
+// BaseRepoOffPath and BaseRepoOff are the file that keeps the FreeBSD-base repository disabled inside a jail, as FreeBSD
+// 15 ships it (contract rule 2): FreeBSD 16 ships it enabled in /etc/pkg/FreeBSD.conf (verified on 16.0-CURRENT), and a
+// file of /usr/local/etc/pkg/repos overrides that. The base of a jail is upgraded from the host; inside the jail
+// pkg handles the ports packages only. Every new generation has it, and a jail gets it at its creation when its
+// image is older.
+const (
+	BaseRepoOffPath = "usr/local/etc/pkg/repos/FreeBSD-base.conf"
+	BaseRepoOff     = `# Written by JailOps: the base of this jail is upgraded from the host (jailops jail upgrade, jailops jail base add);
+# pkg inside the jail handles the ports packages only.
+FreeBSD-base: { enabled: no }
+`
+)
+
+// pkgReposStep writes jailPkgRepos, unless the image already has the file.
+func (PkgBase) pkgReposStep(b *Build) plan.Step {
+	m, dst := b.M, path.Join(b.Root, "usr/local/etc/pkg/repos/FreeBSD.conf")
+	return plan.Step{Name: "write-pkg-repos", Describe: "write " + dst + " (no kernel modules repository: the kernel is the host's) unless it exists",
+		Do: func(ctx context.Context) error {
+			if ok, err := m.Files.Exists(ctx, dst); err != nil || ok {
+				return err
+			}
+			if err := m.Files.MkdirAll(ctx, path.Dir(dst)); err != nil {
+				return err
+			}
+			return m.Files.WriteAtomic(ctx, dst, []byte(jailPkgRepos))
+		}}
+}
+
+// baseRepoOffStep writes BaseRepoOff into the root, unless it has the file.
+func (PkgBase) baseRepoOffStep(b *Build) plan.Step {
+	m, dst := b.M, path.Join(b.Root, BaseRepoOffPath)
+	return plan.Step{Name: "write-base-repo-off", Describe: "write " + dst + " (FreeBSD-base stays disabled inside the jail: its base is upgraded from the host) unless it exists",
+		Do: func(ctx context.Context) error {
+			if ok, err := m.Files.Exists(ctx, dst); err != nil || ok {
+				return err
+			}
+			if err := m.Files.MkdirAll(ctx, path.Dir(dst)); err != nil {
+				return err
+			}
+			return m.Files.WriteAtomic(ctx, dst, []byte(BaseRepoOff))
+		}}
+}
+
 func (p PkgBase) Upgrade(b *Build) ([]plan.Step, error) {
 	r := &pkgRun{p: p, b: b}
 	steps := append([]plan.Step{p.cacheStep(b), p.repoConf(b), r.abiStep()}, p.keysSteps(b)...)
@@ -451,7 +549,9 @@ func (p PkgBase) Upgrade(b *Build) ([]plan.Step, error) {
 		r.step("pkg-upgrade", "upgrade", "-y", "-r", "jailops"),
 		r.step("pkg-install", append([]string{"install", "-y", "-r", "jailops"}, p.sets(b.Spec)...)...),
 		r.verifyReleaseStep(),
-		r.step("pkg-clean", "clean", "-y")), nil
+		r.step("pkg-clean", "clean", "-y"),
+		// a generation of an image made before JailOps wrote the file gets it with its next generation
+		p.baseRepoOffStep(b)), nil
 }
 
 func (p PkgBase) Check(b *Build) []plan.Step {

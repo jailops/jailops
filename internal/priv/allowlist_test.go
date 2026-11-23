@@ -14,7 +14,6 @@ import (
 func TestCommandAllowList(t *testing.T) {
 	e := newEnv(t)
 	root := filepath.Join(e.cfg.MountBase, "jails", "web", "root")
-	other := filepath.Join(e.cfg.MountBase, "jails", "web", "new")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -31,10 +30,6 @@ func TestCommandAllowList(t *testing.T) {
 		{"pkg update -f", []string{"pkg", "-r", root, "update", "-f"}, true},
 		{"pkg delete", []string{"pkg", "-r", root, "delete", "-y", "curl"}, true},
 		{"pkg info", []string{"pkg", "-r", root, "info"}, true},
-		{"etcupdate", []string{"etcupdate", "-D", root, "-d", other}, true},
-		{"etcupdate -s", []string{"etcupdate", "-D", root, "-s", other}, false},
-		{"etcupdate build", []string{"etcupdate", "-D", root, "build", other}, false},
-		{"etcupdate resolve", []string{"etcupdate", "-D", root, "resolve"}, true},
 
 		// hostile
 		{"no command", nil, false},
@@ -59,10 +54,6 @@ func TestCommandAllowList(t *testing.T) {
 		{"pkg name with space", []string{"pkg", "-r", root, "install", "a b"}, false},
 		{"pkg leading dash name", []string{"pkg", "-r", root, "install", "-evil"}, false},
 		{"pkg NUL", []string{"pkg", "-r", root, "install", "a\x00b"}, false},
-		{"etcupdate no -D", []string{"etcupdate", "-d", other}, false},
-		{"etcupdate -D outside", []string{"etcupdate", "-D", "/etc", "-d", other}, false},
-		{"etcupdate unknown flag", []string{"etcupdate", "-D", root, "-p"}, false},
-		{"etcupdate -d outside", []string{"etcupdate", "-D", root, "-d", "/tmp/x"}, false},
 	}
 	for _, k := range cases {
 		rule, argv, err := c.CheckCommand(k.argv)
@@ -106,7 +97,7 @@ func TestRunnerGuard(t *testing.T) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	e.runner.On("/usr/sbin/pkg", []string{"-r", root, "info"}, "ok\n")
+	e.runner.On("/usr/sbin/pkg", []string{"-C", run.AnyArg, "-o", "PKG_ENABLE_PLUGINS=false", "-r", root, "info"}, "ok\n")
 	r := e.local.Runner()
 	res, err := r.Run(ctx, run.Cmd{Name: "pkg", Args: []string{"-r", root, "info"}})
 	if err != nil || string(res.Stdout) != "ok\n" {

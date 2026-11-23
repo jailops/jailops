@@ -61,7 +61,7 @@ describe('JailCreateForm', () => {
     const w = mount(JailCreateForm, { props: { open: false, project: undefined, images: [image as never, alpine as never], storage: [storage as never], networks: [] }, global: { stubs: { Teleport: true } } })
     await w.setProps({ open: true })
     const opts = w.get('#jc-shell').findAll('option').map((o) => [o.attributes('value'), o.text()])
-    expect(opts).toEqual([['', 'Host default (bash with a coloured prompt)'], ['bash', 'bash, with a coloured prompt'], ['sh', "sh, FreeBSD's own shell"]])
+    expect(opts).toEqual([['', 'Host default (sh with the JailOps prompt)'], ['bash', 'bash, with a coloured prompt'], ['sh', "sh, FreeBSD's own shell"]])
     expect(w.get('#jc-shell').attributes('aria-describedby')).toBe('jc-shell-hint')
     await w.get('#jc-name').setValue('web')
     await w.get('form').trigger('submit')

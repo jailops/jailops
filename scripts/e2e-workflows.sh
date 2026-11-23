@@ -27,28 +27,24 @@ run_workflows() {
 	expect "the image is listed" "$img" $J image list
 	expect "it has a first generation" 'g1' $J image show "$img"
 
-	row create-thin-thick "a thin and a thick jail"
-	check "a thin jail" $J create wft $P --image "$img" --network lan --storage default --layout thin --start
-	check "a thick jail" $J create wfk $P --image "$img" --network lan --storage default --layout thick --start
+	row create "two jails from an image"
+	check "a jail" $J create wft $P --image "$img" --network lan --storage default --start
+	check "a second jail" $J create wfk $P --image "$img" --network lan --storage default --start
 	wf_up wft
 	wf_up wfk
-	expect "the thin jail says thin" 'thin' $J jail show wft $P -o yaml
-	expect "the thick jail says thick" 'thick' $J jail show wfk $P -o yaml
 	expect "both run" 'FreeBSD' wf_exec wfk uname -s
+	expect "the root is the jail's own, no clone of the image" '^-$' zfs get -H -o value origin "$pool/jailops/projects/demo/jails/wft/root"
 
 	row patch-one "patch the operating system of one jail"
 	check "a file in the jail's data" wf_exec wft sh -c 'echo wf-keep > /var/db/wf-keep'
-	check "the next generation of the image" $J image build "$img" --from-generation g1
-	expect "a dry run names the move" 'g1 to g2' $J jail upgrade wft $P --dry-run
-	check "the jail moves to g2" $J jail upgrade wft $P --generation g2
-	wf_up wft
+	expect "a dry run says what it would do" 'would upgrade jail wft|nothing to upgrade' $J jail upgrade wft $P --dry-run
+	check "the jail is upgraded in place" $J jail upgrade wft $P
 	expect "the data is where it was" 'wf-keep' wf_exec wft cat /var/db/wf-keep
-	expect "the jail runs on g2" 'g2' $J list $P
 
-	row patch-all "patch every jail of an image"
-	expect "a dry run of the image upgrade names the jails it would move" 'wft|wfk' $J image upgrade "$img" --dry-run
+	row patch-all "patch every jail of a project"
+	expect "a dry run of the bulk upgrade names the jails" 'wfk' $J jail upgrade --all $P --dry-run
 
-	row_elsewhere upgrade-minor "the jail upgrade block of ci-freebsd-e2e.sh (shard 3: jail upgrade --image to a second image, data kept, rollback across images)"
+	row_elsewhere upgrade-minor "the in-place upgrade block of ci-freebsd-e2e.sh (shard 3: jail upgrade, --release checked against the installed release)"
 	row_pending upgrade-major "the same command across a major release also reinstalls the packages of the jail for the new ABI"
 
 	row copy-spec "a jail with the configuration of another"
@@ -65,8 +61,6 @@ run_workflows() {
 	check "rename the copy" $J rename wfc wfr $P -y
 	waitfor "the new name is listed" 30 wf_listed wfr
 	waitfor "the old name is gone" 30 wf_gone wfc
-
-	row_elsewhere convert-layout "the copy and conversion block of ci-freebsd-e2e.sh (thin to thick and back, data kept)"
 
 	row shell-and-command "a command in a jail, and a shell"
 	expect "a command runs and prints" 'FreeBSD' wf_exec wft uname -s
@@ -120,7 +114,7 @@ run_workflows() {
 	row snapshot-rollback "snapshot a jail, roll it back"
 	check "a snapshot" $J jail snapshot create wft wfs1 $P
 	check "data written after it" wf_exec wft sh -c 'echo after > /var/db/wf-after'
-	check "roll the data back" $J jail rollback wft $P --scope data --snapshot wfs1 --confirm-data-loss
+	check "roll the jail back to it" $J jail rollback wft $P --scope all --snapshot wfs1 --confirm-data-loss
 	wf_up wft
 	expect_refused "what was written after the snapshot is gone" wf_exec wft test -e /var/db/wf-after
 	expect "what was written before it stays" 'wf-keep' wf_exec wft cat /var/db/wf-keep

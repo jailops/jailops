@@ -212,6 +212,20 @@ func redactQuery(q url.Values) string {
 
 // wrap builds the handler of a route: authenticate, authorise (role, then
 // scope), CSRF, hub forwarding, deadline, handler, audit.
+// layoutGuarded says whether a request may change a jail and so is refused for a jail with an unsupported root layout:
+// every mutating route below /api/v1/jails/{name}, but the power actions (PUT .../state, where the service refuses a
+// start and a restart) and the delete.
+func layoutGuarded(rt route, method string) bool {
+	if !isMutation(method) || !strings.HasPrefix(rt.pattern, "/api/v1/jails/{name}") {
+		return false
+	}
+	switch rt.method + " " + rt.pattern {
+	case "PUT /api/v1/jails/{name}/state", "DELETE /api/v1/jails/{name}":
+		return false
+	}
+	return true
+}
+
 func (s *Server) wrap(rt route) http.HandlerFunc {
 	ent, _ := s.authz.Reg.Lookup(rt.method, rt.pattern)
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -293,6 +307,14 @@ func (s *Server) wrap(rt route) http.HandlerFunc {
 				if isMutation(r.Method) {
 					s.audit(c, "error")
 				}
+				return
+			}
+		}
+		if layoutGuarded(rt, r.Method) {
+			// a jail with the root layout of JailOps 0.9.2 and before: only stop, delete and reads (docs/upgrade.md)
+			if err := s.svc.RefuseUnsupportedLayout(service.WithActor(r.Context(), c.actor), r.PathValue("name")); err != nil {
+				c.fail(err)
+				s.audit(c, "denied")
 				return
 			}
 		}

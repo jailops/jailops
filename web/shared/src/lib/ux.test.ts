@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nameProblem, validName, nameHint, validSize, DATASET_MAX } from './names'
 import { stamp, snapshotLabel, sentence, plural, bytes, day } from './format'
-import { actionText, objectOf, codeText, type KindMap } from './describe'
+import { actionText, objectOf, codeText, conditionFault, conditionProblem, type KindMap } from './describe'
 import { nextTab } from '../composables/tabs'
 import { tierOf, confirmAction, confirmState, closeConfirm } from '../composables/confirm'
 import { toasts, runOp, holdToast, releaseToast, TOAST_MS, POLL_MS } from '../composables/ops'
@@ -88,6 +88,15 @@ describe('describe', () => {
     expect(codeText('busy')).toMatch(/Another operation/)
     expect(codeText('ApplyFailed')).toBe('Apply failed')
     expect(codeText('something_new')).toBe('something_new')
+  })
+  it('a condition is a fault when it is False, or True for one that names a fault', () => {
+    expect(conditionProblem({ type: 'Ready', status: 'False', reason: 'Stopped' })).toBe(false)
+    expect(conditionProblem({ type: 'Reconciled', status: 'False', reason: 'ApplyFailed' })).toBe(true)
+    expect(conditionProblem({ type: 'Reconciled', status: 'True' })).toBe(false)
+    expect(conditionProblem({ type: 'UnsupportedLayout', status: 'True', reason: 'EarlierRelease' })).toBe(true)
+    expect(conditionProblem({ type: 'UnsupportedLayout', status: 'False' })).toBe(false)
+    expect(conditionFault({ type: 'Reconciled', status: 'Unknown' })).toBe(false)
+    expect(codeText('EarlierRelease')).toBe('Unsupported root layout')
   })
 })
 

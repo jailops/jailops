@@ -3,13 +3,13 @@
 import { getClient } from '@jailops/shared/api/client'
 import { core } from '@jailops/shared/api/core'
 import type {
-  Jail, JailAction, JailRollback, JailUpgrade, JailCopy, JailConvert, JailConvertResult, JailSnapshot, Image, ImageAutoUpgrade, ImageBuild, ImageUpgrade, Network, Lease,
+  Jail, JailAction, JailRollback, JailUpgrade, JailCopy, JailSnapshot, Image, ImageAutoUpgrade, ImageBuild, ImageUpgrade, Network, Lease,
   FirewallPolicy, AddressSet, FirewallTestRequest, FirewallTestResult, BackupTarget, BackupPolicy, Backup, RestoreRequest, RestorePreflight,
   Certificate, User, UserCreate, UserCreated, PasswordSet, Remote, Operation, AuditEntry, MutationResult, PoolUsage, DoctorReport, NDPStatus, Token,
-  Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, RepairPackagesResult, ProvisionResult, ShellSetupResult,
+  Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult, ShellSetupResult,
   BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, BackupKeyImport, BackupKeyImported, ExecRequest,
   Project, ProjectAggregate, Storage, TrustTokenRequest, TrustToken, Session, Identity,
-  JailReach, JailDiff, JailImportPreflight, JailImportRequest, JailImported, Exposed, ExposeRequest, ExposeResult, UnexposeRequest, AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
+  JailReach, JailImportPreflight, JailImportRequest, JailImported, Exposed, ExposeRequest, ExposeResult, UnexposeRequest, AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
   HostIdentity, HostIdentityApply, HostChange, HostSnapshot, HostRestore,
   HostFirewall, HostFirewallApply, HostPending,
   WireGuard, WireGuardJoin, WireGuardKeys, WireGuardPeerAdd, WireGuardPeerCreated,
@@ -82,8 +82,6 @@ export const api = {
     rollback: (n: string, r: JailRollback) => c().mutate('POST', `/jails/${e(n)}/rollback`, r),
     upgrade: (n: string, r: JailUpgrade) => c().mutate('POST', `/jails/${e(n)}/upgrade`, r),
     /** Extension jail_copy: a copy with the data of the source, which may run (async, result the new jail). */
-    /** Extension jail_convert: the layout of the root changes; with dry_run the result is the plan (async, result JailConvertResult). */
-    convert: (n: string, b: JailConvert) => c().mutate<JailConvertResult>('POST', `/jails/${e(n)}/convert`, b),
     copy: (n: string, b: JailCopy) => c().mutate<Jail>('POST', `/jails/${e(n)}/copy`, b),
   },
   /** Extension volumes: the volumes of the current project; jails attach them by name. */
@@ -149,16 +147,6 @@ export const api = {
     expose: (n: string, b: ExposeRequest) => c().mutate<ExposeResult>('POST', `/jails/${e(n)}/expose`, b),
     /** Without ports it removes the whole exposure of the protocol; with ports it takes those out. */
     unexpose: (n: string, b: UnexposeRequest) => c().mutate<ExposeResult>('POST', `/jails/${e(n)}/unexpose`, b),
-  },
-  diff: {
-    /** Extension jail_diff: what a thin jail holds on top of its image (reads only). `limit` caps the entries of each dataset. */
-    jail: (n: string, o: { limit?: number; packages?: boolean } = {}) => {
-      const q = new URLSearchParams()
-      if (o.limit) q.set('limit', String(o.limit))
-      if (o.packages) q.set('packages', 'true')
-      const qs = q.toString()
-      return c().get<JailDiff>(`/jails/${e(n)}/diff${qs ? '?' + qs : ''}`)
-    },
   },
   xport: {
     /** Extension jail_export: the export file of a jail as a stream (operator in the project). The jail keeps running. */
@@ -333,10 +321,6 @@ export const api = {
   /** bash and the JailOps prompt for a running FreeBSD jail, as a new jail gets them (extension jail_shell_setup). */
   shellSetup: {
     run: (n: string) => c().mutate<ShellSetupResult>('POST', `/jails/${e(n)}/shell-setup`, {}),
-  },
-  /** The base package records of a thin jail brought in step with its image (extension jail_repair_packages). */
-  repairPackages: {
-    run: (n: string) => c().mutate<RepairPackagesResult>('POST', `/jails/${e(n)}/repair-packages`, {}),
   },
   /** The project filter lives with the client: composables use this and never touch the network. */
   setProjectFilter: (fn: ((path: string) => string) | null) => c().setRequestFilter(fn),

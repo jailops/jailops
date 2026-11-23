@@ -71,6 +71,7 @@ Project web
   Storage:     fast (quota 500G)
   Firewall:    none
   Images:      any
+  Shell:       the host's default
   Age:         3h
 
 Usage
@@ -108,8 +109,8 @@ $ jailops create nginx --project web --image freebsd-15 --memory 1G --cpu 1 --ne
 jail/nginx created
 
 $ jailops list --project web
-NAME    STATE     IMAGE        GEN   ADDRESSES           EXPOSED   AUTOSTART   USED   AGE
-nginx   stopped   freebsd-15   g1    10.50.0.2,fd50::1   -         -           -      3h
+NAME    STATE     OS        IMAGE        GEN   ADDRESSES           EXPOSED   AUTOSTART   USED   AGE
+nginx   stopped   freebsd   freebsd-15   g1    10.50.0.2,fd50::1   -         -           -      3h
 
 $ jailops list
 ! No jails in project main. Create one with: jailops jail create NAME --image IMAGE --network NETWORK --storage STORAGE

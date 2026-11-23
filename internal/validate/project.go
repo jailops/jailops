@@ -90,6 +90,9 @@ func ProjectSpec(name string, s api.ProjectSpec) error {
 	if err := api.ValidNotes(s.Notes); err != nil {
 		return err
 	}
+	if s.Shell != "" && s.Shell != api.ShellBash && s.Shell != api.ShellSh {
+		return Invalid("shell", "shell %q is not sh or bash", s.Shell)
+	}
 	seen := map[string]bool{}
 	for i, n := range s.Networks {
 		f := fmt.Sprintf("networks[%d]", i)

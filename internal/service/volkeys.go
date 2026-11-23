@@ -209,7 +209,6 @@ func (s *Service) UnlockVolume(ctx context.Context, name string, req api.VolumeU
 				_, jail := validate.SplitQualified(k)
 				s.markStartDue(k, false)
 				_ = h.Bind("start/"+k, &opRequest{Kind: "start", Jail: k})
-				s.installBashFromTheHost(ctx, k)
 				if err := s.life.StartJail(ctx, k); err != nil {
 					return nil, fmt.Errorf("unlocked, but the start of %s failed: %w", jail, err)
 				}

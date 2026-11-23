@@ -4,66 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"jailops.net/jailops/internal/plan"
 	"jailops.net/jailops/sdk/api"
 )
-
-// JailRef is what the image manager needs to know about a jail to count
-// references. References come from jail specs, never from ZFS clone origins.
-type JailRef struct {
-	Name string
-	// Image is the spec reference: "<image>#g<N>" or "<image>".
-	Image string
-	// Current and Previous are generation names ("<image>#g<N>") of the root
-	// in use and of the root a rollback would return to. Either may be empty.
-	Current  string
-	Previous string
-}
-
-// Refs maps generation number to the sorted jail names that reference it.
-func Refs(image string, st api.ImageStatus, jails []JailRef) map[int][]string {
-	set := map[int]map[string]bool{}
-	add := func(n int, jail string) {
-		if set[n] == nil {
-			set[n] = map[string]bool{}
-		}
-		set[n][jail] = true
-	}
-	for _, j := range jails {
-		if r, err := ParseRef(j.Image); err == nil && r.Image == image {
-			if n, err := resolveNumber(r, st); err == nil {
-				add(n, j.Name)
-			}
-		}
-		for _, g := range []string{j.Current, j.Previous} {
-			if g == "" {
-				continue
-			}
-			if r, err := ParseRef(g); err == nil && r.Image == image && r.Gen > 0 {
-				add(r.Gen, j.Name)
-			}
-		}
-	}
-	out := map[int][]string{}
-	for n, s := range set {
-		for j := range s {
-			out[n] = append(out[n], j)
-		}
-		sort.Strings(out[n])
-	}
-	return out
-}
-
-// ApplyRefs fills ImageGeneration.Refs in a status.
-func ApplyRefs(image string, st *api.ImageStatus, jails []JailRef) {
-	refs := Refs(image, *st, jails)
-	for i := range st.Generations {
-		st.Generations[i].Refs = refs[st.Generations[i].Number]
-	}
-}
 
 // DeleteResult describes what Delete did.
 type DeleteResult struct {
@@ -76,10 +21,9 @@ type DeleteResult struct {
 	Plan       []string
 }
 
-// Delete implements design 4.3 step 9: a generation is destroyed only when no
-// jail references it. While clones exist it is renamed into deleted/ and its
-// origin is garbage-collected when the last clone is destroyed (Collect).
-func (m *Manager) Delete(ctx context.Context, image string, n int, jails []JailRef, dryRun bool) (DeleteResult, error) {
+// Delete destroys a generation. No jail depends on one (a jail is a copy), but while ZFS clones of it exist it is
+// renamed into deleted/ and garbage-collected when the last clone is destroyed (Collect).
+func (m *Manager) Delete(ctx context.Context, image string, n int, dryRun bool) (DeleteResult, error) {
 	var res DeleteResult
 	o, err := m.Observe(ctx, image)
 	if err != nil {
@@ -87,10 +31,6 @@ func (m *Manager) Delete(ctx context.Context, image string, n int, jails []JailR
 	}
 	if _, ok := o.gen(n); !ok {
 		return res, api.Errorf(api.CodeNotFound, "generation %s does not exist", GenerationName(image, n))
-	}
-	if refs := Refs(image, o.Status, jails)[n]; len(refs) > 0 {
-		return res, api.Errorf(api.CodeImageInUse, "generation %s is used by %s", GenerationName(image, n), strings.Join(refs, ", ")).
-			WithDetail("jails", strings.Join(refs, ",")).WithHint("upgrade or destroy those jails first")
 	}
 	ds := m.Layout.GenDS(image, n)
 	ro := ds + "@" + ROSnap
@@ -262,19 +202,17 @@ func (m *Manager) Collect(ctx context.Context) ([]string, error) {
 }
 
 // Candidates returns the generations the retention policy allows deleting:
-// never the newest, never referenced by a jail, outside
-// the KeepLast newest and older than KeepDays. A policy with both values zero
+// never the newest, outside the KeepLast newest and older than KeepDays. A policy with both values zero
 // keeps everything.
-func Candidates(r api.ImageRetention, image string, st api.ImageStatus, jails []JailRef, now time.Time) []int {
+func Candidates(r api.ImageRetention, st api.ImageStatus, now time.Time) []int {
 	if r.KeepLast <= 0 && r.KeepDays <= 0 {
 		return nil
 	}
 	gens := append([]api.ImageGeneration(nil), st.Generations...)
 	sort.Slice(gens, func(i, j int) bool { return gens[i].Number > gens[j].Number })
-	refs := Refs(image, st, jails)
 	var out []int
 	for i, g := range gens {
-		if i == 0 || i < r.KeepLast || len(refs[g.Number]) > 0 {
+		if i == 0 || i < r.KeepLast {
 			continue
 		}
 		if r.KeepDays > 0 && !g.CreatedAt.IsZero() && now.Sub(g.CreatedAt) < time.Duration(r.KeepDays)*24*time.Hour {
@@ -287,15 +225,15 @@ func Candidates(r api.ImageRetention, image string, st api.ImageStatus, jails []
 }
 
 // Prune deletes the generations Candidates selects and returns their numbers.
-func (m *Manager) Prune(ctx context.Context, image string, r api.ImageRetention, jails []JailRef) ([]int, error) {
+func (m *Manager) Prune(ctx context.Context, image string, r api.ImageRetention) ([]int, error) {
 	o, err := m.Observe(ctx, image)
 	if err != nil {
 		return nil, err
 	}
 	var done []int
 	var errs []error
-	for _, n := range Candidates(r, image, o.Status, jails, m.now()) {
-		if _, err := m.Delete(ctx, image, n, jails, false); err != nil {
+	for _, n := range Candidates(r, o.Status, m.now()) {
+		if _, err := m.Delete(ctx, image, n, false); err != nil {
 			errs = append(errs, err)
 			continue
 		}

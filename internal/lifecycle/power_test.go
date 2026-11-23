@@ -30,11 +30,10 @@ func TestStartStopOrdering(t *testing.T) {
 	}
 	log := w.F.Log
 	root := indexOf(log, "zfs mount tank/jailops/projects/alpha/jails/web/root")
-	etc := indexOf(log, "zfs mount tank/jailops/projects/alpha/jails/web/etc")
 	vol := indexOf(log, "zfs mount tank/jailops/projects/alpha/volumes/db")
 	hook := indexOf(log, "prestart alpha_web")
 	jail := indexOf(log, "jail start alpha_web")
-	if !(root >= 0 && root < etc && etc < vol && vol < hook && hook < jail) {
+	if !(root >= 0 && root < vol && vol < hook && hook < jail) {
 		t.Fatalf("order wrong: %v", log)
 	}
 	if indexOf(log, "mkdir /jailops/projects/alpha/jails/web/root/srv/db") < 0 || indexOf(log, "mkdir /jailops/projects/alpha/jails/web/root/srv/db") > hook {
@@ -53,8 +52,7 @@ func TestStartStopOrdering(t *testing.T) {
 		t.Fatal(err)
 	}
 	log = w.F.Log
-	if !(indexOf(log, "jail stop alpha_web") < indexOf(log, "poststop alpha_web") && indexOf(log, "poststop alpha_web") < indexOf(log, "zfs unmount tank/jailops/projects/alpha/jails/web/etc") &&
-		indexOf(log, "zfs unmount tank/jailops/projects/alpha/jails/web/etc") < indexOf(log, "zfs unmount tank/jailops/projects/alpha/jails/web/root")) {
+	if !(indexOf(log, "jail stop alpha_web") < indexOf(log, "poststop alpha_web") && indexOf(log, "poststop alpha_web") < indexOf(log, "zfs unmount tank/jailops/projects/alpha/jails/web/root")) {
 		t.Fatalf("stop order wrong: %v", log)
 	}
 	if indexOf(log, "zfs unmount "+dbVol) >= 0 {
@@ -69,8 +67,33 @@ func TestStartStopOrdering(t *testing.T) {
 }
 
 func TestStartFailureSweep(t *testing.T) {
-	setup := func(t *testing.T) *world { w := newWorld(t); w.created("web"); return w }
+	// a jail that has run before: the never-started marker goes before jail(8) runs and never comes back
+	setup := func(t *testing.T) *world {
+		w := newWorld(t)
+		w.created("web")
+		delete(w.Files.Data, jroot+"/"+NeverStartedFile)
+		return w
+	}
 	sweep(t, setup, func(w *world) error { return w.S.StartJail(bg, "alpha_web") })
+}
+
+// The marker that lets an app's package scripts run goes before jail(8) runs: a start that fails after rc ran in the
+// root does not leave it.
+func TestStartRemovesTheNeverStartedMarkerFirst(t *testing.T) {
+	w := newWorld(t)
+	w.created("web")
+	if _, ok := w.Files.Data[jroot+"/"+NeverStartedFile]; !ok {
+		t.Fatal("a new jail has no marker")
+	}
+	w.Jails.Never = true
+	w.S.Cfg.ReadyTimeout, w.S.Cfg.PollInterval = 3*time.Second, time.Second
+	w.S.Cfg.Sleep = func(_ context.Context, d time.Duration) error { w.now = w.now.Add(d); return nil }
+	if err := w.S.StartJail(bg, "alpha_web"); err == nil {
+		t.Fatal("the start did not fail")
+	}
+	if _, ok := w.Files.Data[jroot+"/"+NeverStartedFile]; ok {
+		t.Fatal("a failed start left the marker")
+	}
 }
 
 func TestStartNotReady(t *testing.T) {
@@ -79,6 +102,7 @@ func TestStartNotReady(t *testing.T) {
 	w.Jails.Never = true
 	w.S.Cfg.ReadyTimeout, w.S.Cfg.PollInterval = 3*time.Second, time.Second
 	w.S.Cfg.Sleep = func(_ context.Context, d time.Duration) error { w.now = w.now.Add(d); return nil }
+	delete(w.Files.Data, jroot+"/"+NeverStartedFile) // the start removes it for good (TestStartRemovesTheNeverStartedMarkerFirst)
 	before := w.state()
 	err := w.S.StartJail(bg, "alpha_web")
 	if err == nil || !strings.Contains(err.Error(), "not running after 3s") {
@@ -127,7 +151,7 @@ func TestDestroyRefusesForeignClone(t *testing.T) {
 	if _, err := w.S.SnapshotJail(bg, "alpha_web", "keep", ""); err != nil {
 		t.Fatal(err)
 	}
-	w.Z.Clone(bg, "tank/jailops/projects/alpha/jails/web/home@keep", "tank/jailops/projects/alpha/jails/scratch", nil)
+	w.Z.Clone(bg, "tank/jailops/projects/alpha/jails/web/root@keep", "tank/jailops/projects/alpha/jails/scratch", nil)
 	if _, err := w.S.DestroyJail(bg, "alpha_web", false, false); !api.IsCode(err, api.CodeBusy) {
 		t.Fatal(err)
 	}

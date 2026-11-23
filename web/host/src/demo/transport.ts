@@ -17,7 +17,7 @@ import { demoForward, unifiedRead, type DemoReply } from './logs'
 import { demoAccess } from './access'
 import { volumeName } from '@/lib/apps'
 import { defaultImage } from '@/lib/images'
-import { releaseOlder } from '@/lib/moves'
+import { releaseOlder } from '@/lib/upgrade'
 import { lookupKey, setValue, expandedSources, flatten } from '@/lib/configKeys'
 import { loadChoice, saveChoice } from '@/lib/projectScope'
 import { SET_NAME, setUsers, validateSet, type SetMsgs } from '@/lib/firewall'
@@ -25,7 +25,6 @@ import { nameProblem, type NameRule } from '@jailops/shared/lib/names'
 import { labelKeyProblem, labelValueProblem, labelsProblem, MAX_LABELS } from '@/lib/labels'
 import { demoRename, renameKindOf } from './rename'
 import { demoFirewallTest, DemoFwError } from './fwtest'
-import { demoDiff } from './diff'
 import { exportFile, importPreflight, importedJail } from './xport'
 import { readManifest, scanFile, ExportFileError } from '@/lib/exportfile'
 import { demoExposed, demoReach } from './reach'
@@ -359,7 +358,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           if (seg[1].startsWith('flaky')) flaky.add(seg[1])
           const op = startOp(`Build image ${seg[1]}`, { images: [`/api/v1/images/${seg[1]}`] }, 3000, () => {
             if (fails) return
-            gens.push({ number: n, name: `${seg[1]}#g${n}`, parent: n > 1 ? n - 1 : undefined, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: n === 1 ? 212 : 222, freebsd_version: img.spec.os === 'freebsd' ? '15.1-RELEASE-p6' : undefined, created_at: new Date().toISOString(), refs: [] })
+            gens.push({ number: n, name: `${seg[1]}#g${n}`, parent: n > 1 ? n - 1 : undefined, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: n === 1 ? 212 : 222, freebsd_version: img.spec.os === 'freebsd' ? '15.1-RELEASE-p6' : undefined, created_at: new Date().toISOString() })
             emit('image-generation-created', `/api/v1/images/${seg[1]}/generations/${n}`)
           })
           if (fails) {
@@ -373,7 +372,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           if (!img) return fail(404, { code: 'not_found', message: `Image ${seg[1]} not found` })
           return startOp(`Upgrade image ${seg[1]}`, { images: [`/api/v1/images/${seg[1]}`] }, 6000, () => {
             const n = Math.max(...(img.status.generations ?? []).map((g) => g.number)) + 1
-            img.status.generations!.push({ number: n, name: `${seg[1]}#g${n}`, parent: n - 1, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: 222, freebsd_version: img.spec.os === 'freebsd' ? '15.1-RELEASE-p6' : undefined, created_at: new Date().toISOString(), refs: [] })
+            img.status.generations!.push({ number: n, name: `${seg[1]}#g${n}`, parent: n - 1, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: 222, freebsd_version: img.spec.os === 'freebsd' ? '15.1-RELEASE-p6' : undefined, created_at: new Date().toISOString() })
           })
         }
         break
@@ -651,74 +650,41 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       }
       case 'rollback': {
         const r = body as JailRollback
+        if ((r.scope ?? 'root') !== 'data' && j.status.power === 'running') return fail(409, { code: 'busy', message: `jail "${name}" is running: the root is rolled back while the jail is stopped`, hint: `stop it first: jailops stop ${name}` })
         if ((r.scope === 'data' || r.scope === 'all') && !r.confirm_data_loss) return fail(400, { code: 'data_loss_unconfirmed', message: 'This rollback discards data and was not confirmed.', hint: 'Set confirm_data_loss after showing the bytes to the operator.' })
         return startOp(`Rollback ${name} (${r.scope ?? 'root'})`, { jails: [src] }, 2200, () => {
           if (r.scope === 'data' || r.scope === 'all') (db.snaps[name] ?? []).forEach((s) => (s.status.written_bytes = 0))
-          if (r.scope !== 'data') j.status.image_generation = 'freebsd-15-1#g3'
           emit('jail-rolled-back', src)
         })
       }
-      case 'convert': {
-        // the layout of the root (extension jail_convert): a dry run answers the plan; the data is not modelled
-        if (m !== 'POST') break
-        const to = String(body.layout ?? '')
-        if (to !== 'thin' && to !== 'thick') return fail(400, { code: 'invalid', message: `bad layout "${to}": thin or thick` })
-        if (j.spec.os === 'linux') return fail(422, { code: 'unsupported', message: 'a Linux jail is thick and stays so: only FreeBSD jails change layout' })
-        const from = j.spec.layout || 'thin'
-        const changed = from !== to
-        const image = to === 'thin' && body.image ? String(body.image) : (j.status.image_generation ?? '')
-        const keep = ['/etc', '/usr/local', '/var/db', '/var/log', '/var/mail', '/var/spool', '/home', '/root']
-        const res = {
-          jail: name, from, to, image, changed, ...(body.dry_run ? { dry_run: true } : {}),
-          ...(changed ? {
-            steps: to === 'thick'
-              ? ['Snapshot all datasets (rollback point)', 'Stop the jail', 'Mount the root and the persistent datasets', 'Copy the root to root.new', 'Fold the persistent datasets into root.new', 'Swap root and root.new', 'Put the persistent datasets away below root.old', 'Start and run the health check']
-              : ['Snapshot all datasets (rollback point)', 'Stop the jail', 'Clone the generation to root.new', 'Make a dataset of each persistent directory', 'Swap root and root.new', 'Start and run the health check'],
-            kept: keep,
-            ...(to === 'thin' ? { replaced: `everything outside ${keep.join(', ')}: the system comes from ${image}` } : {}),
-            warnings: j.spec.resources?.disk ? [`the disk limit of the jail (${j.spec.resources.disk}) counts the new root next to the old one until the conversion ends`] : [],
-          } : {}),
-        }
-        if (body.dry_run || !changed) return startOp(`Convert jail ${name} to ${to}`, { jails: [src] }, 300, () => {}, res, false)
-        return startOp(`Convert jail ${name} to ${to}`, { jails: [src] }, 3000, () => {
-          j.spec.layout = to
-          j.metadata.generation = (j.metadata.generation ?? 1) + 1
-          emit('jail-converted', src)
-        }, res, false)
-      }
       case 'upgrade': {
+        // an in-place upgrade (global admin): the base from the host and the packages inside the jail, while it runs;
+        // nothing stops or restarts it, and a snapshot taken first is for a manual rollback
         const u = body as JailUpgrade
-        const cur = String(j.spec.image).split(/[@#]/)[0]
-        // another image: a move to a new release, checked as the server checks it
-        const move = u.image && u.image !== cur ? u.image : ''
-        const to = move ? db.images.find((i) => i.metadata.name === move) : undefined
-        const from = db.images.find((i) => i.metadata.name === cur)
-        if (move) {
-          if (!to) return fail(404, { code: 'not_found', message: `image "${move}" not found` })
-          if (j.spec.layout === 'thick' || j.spec.os === 'linux') return fail(400, { code: 'unsupported', message: `a ${j.spec.layout === 'thick' ? 'thick' : 'Linux'} jail does not move to another image: it is updated through managed updates` })
-          if (from && to.spec.os !== from.spec.os) return fail(400, { code: 'invalid', message: `jail ${name} runs ${from.spec.os} and image ${move} is ${to.spec.os}: a jail moves between releases of one OS`, hint: 'create a new jail from the image instead' })
-          if (from && releaseOlder(to.spec.release, from.spec.release)) return fail(400, { code: 'invalid', message: `image ${move} is ${to.spec.release} and jail ${name} runs ${from.spec.release}: a jail does not move to an older release`, hint: 'create a new jail from the older image instead' })
+        const installed = j.status.freebsd_version ?? '15.1-RELEASE-p6'
+        const fromRel = installed.replace(/-p\d+$/, '')
+        const toRel = u.release || fromRel
+        if (u.release) {
           const hostRel = (newRelease ? '15.2-RELEASE-p1' : String(d.server().environment.kernel_version ?? '')).replace(/-p\d+$/, '')
-          if (releaseOlder(hostRel, to.spec.release)) return fail(409, { code: 'version_skew', message: `image ${move} is ${to.spec.release} but the host kernel is ${hostRel}`, hint: 'upgrade the host first' })
-          if (!(to.status.generations ?? []).length) return fail(404, { code: 'not_found', message: `image "${move}" has no generation`, hint: `build one with 'jailops image build ${move}'` })
+          if (releaseOlder(toRel, fromRel)) return fail(400, { code: 'invalid', message: `jail ${name} runs ${fromRel}: a jail is not upgraded to an older release (${toRel})` })
+          if (releaseOlder(hostRel, toRel)) return fail(409, { code: 'version_skew', message: `release ${toRel} is newer than the host kernel ${hostRel}`, hint: 'upgrade the host first' })
         }
-        const newest = to ? Math.max(...(to.status.generations ?? []).map((g) => g.number)) : 0
-        const target = u.generation || (move ? `${move}#g${newest}` : 'freebsd-15-1#g5')
-        const preview = {
-          from_generation: j.status.image_generation ?? '', to_generation: target,
-          steps: ['Preflight: no dependent clones, replication idle', 'Snapshot all datasets (rollback point)', 'Stop the jail', 'Clone the target generation to root.new', 'Merge /etc with etcupdate', 'Swap root and root.new', ...(move ? [`Set the image of the jail to ${move}`, 'Write spec.json (the new image)'] : []), 'Start and run the health check'],
-          etc_conflicts: name === 'web' ? ['/etc/ssl/openssl.cnf'] : [], warnings: j.status.power === 'running' ? ['The jail will be stopped for about 20 seconds.'] : [],
-          ...(move ? { upgrade: { from: j.status.image_generation ?? '', to: target, from_release: from?.spec.release, to_release: to?.spec.release, image: move, snapshot: 'jo-pre-upgrade-1767268800', kept: ['etc', 'local', 'var-db', 'var-log', 'home'] } } : {}),
+        const patch = Number(/-p(\d+)$/.exec(installed)?.[1] ?? 0)
+        const target = toRel === fromRel ? `${fromRel}-p${patch + 1}` : `${toRel}-p0`
+        const snapshot = 'jo-pre-upgrade-1767268800'
+        const info = {
+          from: installed, to: target, from_release: fromRel, to_release: toRel, installed, snapshot,
+          base_changes: [`FreeBSD-runtime ${installed} -> ${target}`, `FreeBSD-utilities ${installed} -> ${target}`],
+          ...(u.no_packages ? {} : { ports_packages: ['nginx-1.28.1 -> 1.28.2', 'curl-8.17.0 -> 8.17.1'] }),
+          checks: ['the root holds no link out of it', 'enough free space for the new files'],
+          health_check: 'service -e',
         }
-        if (u.dry_run) return ok(preview)
-        return startOp(`Upgrade ${name} to ${target}`, { jails: [src] }, 3500, () => {
-          j.status.image_generation = target
-          if (move) {
-            j.spec.image = move
-            j.metadata.generation = (j.metadata.generation ?? 1) + 1
-          }
+        const plan = [`Snapshot the root (${snapshot}), for a manual rollback`, `pkg -r ROOT upgrade the FreeBSD base to ${target}`, ...(u.no_packages ? [] : ['pkg -j JAIL upgrade the packages']), 'Run the health check', 'Name the processes that still run replaced files (nothing is restarted)']
+        if (u.dry_run) return ok({ ...j, plan, warnings: [], dry_run: true, upgrade: info })
+        return startOp(`Upgrade jail ${name}`, { jails: [src] }, 3500, () => {
+          j.status.freebsd_version = target
           emit('jail-upgraded', src)
-        })
+        }, { ...j, plan, upgrade: info })
       }
     }
     return fail(404, { code: 'not_found', message: 'No such route' })
@@ -1454,7 +1420,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (!j || !seg[2]) return undefined
         const src = `/api/v1/jails/${name}`
         if (seg[2] === 'updates' && m === 'GET') return ok(db.history[name] ?? [])
-        if (seg[2] === 'diff' && m === 'GET') return ok(demoDiff(j, url.searchParams))
         if (seg[2] === 'reach' && m === 'GET') return ok(demoReach(j, fwState(project)))
         if ((seg[2] === 'expose' || seg[2] === 'unexpose') && m === 'POST') {
           const r = seg[2] === 'expose' ? demoExpose(j, body as never) : demoUnexpose(j, body as never)
@@ -1482,13 +1447,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (seg[2] === 'provision' && m === 'POST') {
           if (j.status.provisioned_at && !body.again) return fail(409, { code: 'already_exists', message: 'Provisioning has run before.', hint: 'Use again to run it again.' })
           return startOp(`Provision ${name}`, { jails: [src] }, 1500, () => { j.status.provisioned_at = new Date().toISOString() }, { jail: name, provisioned_at: new Date().toISOString(), steps: ['packages', 'files', 'services'] })
-        }
-        if (seg[2] === 'repair-packages' && m === 'POST') {
-          if (j.spec.os === 'linux') return fail(400, { code: 'invalid', message: `jail "${name}" is a linux jail: the base package records are those of a FreeBSD jail` })
-          if (j.status.power === 'running') return fail(409, { code: 'busy', message: `jail "${name}" is running; its base package records are repaired while it is stopped, and by every start`, hint: `restart it: jailops restart ${name}` })
-          return startOp(`Repair the base package records of jail ${name}`, { jails: [src] }, 800, () => {
-            j.status.conditions = (j.status.conditions ?? []).filter((c) => c.type !== 'BasePackages')
-          }, { jail: name, base: 187, replaced: 187, added: 0 })
         }
         if (seg[2] === 'shell-setup' && m === 'POST') {
           if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `jail "${name}" is not running; the shell is set up inside it`, hint: 'start it first' })
@@ -1583,7 +1541,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (taken) return fail(409, { code: 'already_exists', message: `volume "${taken.name}" already exists`, hint: `an earlier jail of this name left it: delete it with jailops volume delete ${taken.name}` })
     const j: Jail = {
       metadata: { name: jail, scope: 'host', project, generation: 1, created_at: new Date().toISOString(), labels: { [da.LABEL]: a.name, [`${da.LABEL}.hash`]: det.hash, [`${da.LABEL}.version`]: version } },
-      spec: { image, storage: sto, layout: 'thin', network: [{ network: net, ipv4: addr }], volumes: appVolumes.map((x) => ({ volume: x.name, mount: x.mount })), resources: limits, boot: { autostart: true }, shell: BASH, prompt: 'default' },
+      spec: { image, storage: sto, network: [{ network: net, ipv4: addr }], volumes: appVolumes.map((x) => ({ volume: x.name, mount: x.mount })), resources: limits, boot: { autostart: true }, shell: BASH, prompt: 'default' },
       status: { power: 'running', jid: 120 + db.jails.length, image_generation: 'freebsd-15-1#g4', addresses: [`${addr}/${subnet.split('/')[1] ?? '24'}`], started_at: new Date().toISOString(), conditions: [d.readyCond('running')] },
     }
     bashReady.add(jail)

@@ -13,11 +13,10 @@ import (
 // the datasets, but this package never reads that property: the record it is
 // given says what each dataset is.
 const (
-	KindContainer  = "container"  // holds spec.json and bundle.json
-	KindRoot       = "root"       // the OS root (cloned from a generation when thin)
-	KindPersistent = "persistent" // a persistent path of a thin jail
-	KindVolume     = "volume"     // a volume: the only dataset of a volume record
-	KindState      = "state"      // the host state dataset (include_state)
+	KindContainer = "container" // holds spec.json and bundle.json
+	KindRoot      = "root"      // the root of the jail
+	KindVolume    = "volume"    // a volume: the only dataset of a volume record
+	KindState     = "state"     // the host state dataset (include_state)
 )
 
 // Dataset is one ZFS dataset of a jail as the daemon knows it.
@@ -55,9 +54,7 @@ type JailRecord struct {
 	Spec    api.JailSpec
 	// Container is the jail's container dataset.
 	Container string
-	// Datasets lists every dataset of the jail including the container. The
-	// thin root is listed but never captured (design 9.7); the root of a thick
-	// jail is captured.
+	// Datasets lists every dataset of the jail including the container.
 	Datasets []Dataset
 	// Image is the generation the root was built from.
 	Image api.ImageGeneration
@@ -65,6 +62,8 @@ type JailRecord struct {
 	SecretRefs []string
 	// VolumeIDs maps the name of each volume the jail attaches to its UUID (the bundle records it).
 	VolumeIDs map[string]string
+	// Unsupported says why the jail cannot be backed up: its backup fails with that, recorded as any failed run.
+	Unsupported string
 	// IsState marks the host state record (include_state): its datasets are
 	// all captured and it has no restore bundle.
 	IsState bool
@@ -170,7 +169,7 @@ type AdoptInput struct {
 	Placement Placement
 	Backup    api.Backup
 	Replace   bool
-	// Generation is the image generation the root was cloned from (thin).
+	// Generation is the image generation the root was copied from.
 	Generation api.ImageGeneration
 }
 
@@ -178,8 +177,8 @@ type AdoptInput struct {
 // (registry, networks, jail records) and not ZFS data.
 type Host interface {
 	// State gathers the facts of the target host for the preflight: networks,
-	// policies, address sets, jails, leases and sealed secrets. KeyDomains and
-	// Generations are filled in by this package.
+	// policies, address sets, jails, leases and sealed secrets. KeyDomains are
+	// filled in by this package.
 	State(ctx context.Context, storage string) (backup.HostState, error)
 	// Place decides the datasets of the jail to restore.
 	Place(ctx context.Context, project, name, storage string) (Placement, error)

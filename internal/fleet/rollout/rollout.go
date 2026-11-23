@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -205,13 +204,8 @@ func (e *Executor) begin(ctx context.Context, r *config.Rollout, hash string) (*
 				e.printf("skip %s/%s: not owned by this fleet\n", h, j.Metadata.Name)
 				continue
 			}
-			to := r.Spec.Generation
-			if to == "" {
-				if to, err = newest(ctx, c, config.ImageName(j.Spec.Image)); err != nil {
-					return nil, fmt.Errorf("host %s jail %s: %w", h, j.Metadata.Name, err)
-				}
-			}
-			st.Items = append(st.Items, &Item{Host: h, Jail: j.Metadata.Name, From: j.Status.ImageGeneration, To: to, State: ItemPending})
+			// a jail is upgraded in place (its release stays the one installed in it), in batches behind the health gate
+			st.Items = append(st.Items, &Item{Host: h, Jail: j.Metadata.Name, From: j.Status.ImageGeneration, State: ItemPending})
 		}
 	}
 	if len(st.Items) == 0 {
@@ -228,20 +222,6 @@ func (e *Executor) begin(ctx context.Context, r *config.Rollout, hash string) (*
 		i = end
 	}
 	return st, nil
-}
-
-func newest(ctx context.Context, c *sdk.Client, image string) (string, error) {
-	best := 0
-	for g, err := range c.Images().Generations(ctx, image) {
-		if err != nil {
-			return "", err
-		}
-		best = max(best, g.Number)
-	}
-	if best == 0 {
-		return "", fmt.Errorf("image %q has no generation", image)
-	}
-	return "g" + strconv.Itoa(best), nil
 }
 
 func (e *Executor) execute(ctx context.Context, r *config.Rollout, st *State) error {
@@ -325,21 +305,17 @@ func (e *Executor) upgrade(ctx context.Context, st *State, it *Item) error {
 		return nil
 	}
 	it.Error = ""
-	status, err := c.Jails().State(ctx, it.Jail)
-	if err != nil {
-		return e.fail(st, it, err)
-	}
-	if status.ImageGeneration == it.To {
-		it.State, it.Note = ItemVerifying, "already on "+it.To
+	if it.Upgraded {
+		it.State = ItemVerifying
 		return e.save(st)
 	}
-	op, err := c.Jails().Upgrade(ctx, it.Jail, api.JailUpgrade{Generation: it.To})
+	op, err := c.Jails().Upgrade(ctx, it.Jail, api.JailUpgrade{})
 	if err != nil {
 		return e.fail(st, it, err)
 	}
 	it.State, it.Op, it.Note = ItemUpgrading, op.ID(), ""
-	e.printf("  upgrade %s/%s %s -> %s (operation %s)\n", it.Host, it.Jail, it.From, it.To, it.Op)
-	e.logf(st, "upgrade_started", map[string]any{"host": it.Host, "jail": it.Jail, "op": it.Op, "to": it.To})
+	e.printf("  upgrade %s/%s in place (operation %s)\n", it.Host, it.Jail, it.Op)
+	e.logf(st, "upgrade_started", map[string]any{"host": it.Host, "jail": it.Jail, "op": it.Op})
 	return e.save(st)
 }
 
@@ -351,15 +327,9 @@ func (e *Executor) await(ctx context.Context, st *State, it *Item) error {
 	if it.Op != "" {
 		if _, err := c.Operations().Wait(ctx, it.Op); err != nil {
 			if api.IsCode(err, api.CodeNotFound) {
-				// The daemon no longer knows the operation: judge by the jail.
-				it.Op = ""
-				status, serr := c.Jails().State(ctx, it.Jail)
-				if serr == nil && status.ImageGeneration == it.To {
-					it.State = ItemVerifying
-					return e.save(st)
-				}
-				it.State = ItemPending
-				return e.fail(st, it, fmt.Errorf("lost the upgrade operation and the jail is not on %s", it.To))
+				// The daemon no longer knows the operation: the health gate judges the jail.
+				it.Op, it.State, it.Upgraded = "", ItemVerifying, true
+				return e.save(st)
 			}
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -368,7 +338,7 @@ func (e *Executor) await(ctx context.Context, st *State, it *Item) error {
 			return e.fail(st, it, err)
 		}
 	}
-	it.Op, it.State = "", ItemVerifying
+	it.Op, it.State, it.Upgraded = "", ItemVerifying, true
 	return e.save(st)
 }
 
@@ -393,7 +363,7 @@ func (e *Executor) gate(ctx context.Context, st *State, items []*Item, timeout, 
 			if err != nil {
 				return e.fail(st, it, err)
 			}
-			if ok, why := healthy(status, it.To); ok {
+			if ok, why := healthy(status); ok {
 				it.State, it.Error = ItemDone, ""
 				e.printf("  healthy %s/%s\n", it.Host, it.Jail)
 				e.logf(st, "item_done", map[string]any{"host": it.Host, "jail": it.Jail})
@@ -427,14 +397,10 @@ func (e *Executor) gate(ctx context.Context, st *State, items []*Item, timeout, 
 	}
 }
 
-// healthy is the health gate: the jail runs on the target generation and no
-// Ready or Healthy condition is False.
-func healthy(s api.JailStatus, to string) (bool, string) {
+// healthy is the health gate: the jail runs and no Ready or Healthy condition is False.
+func healthy(s api.JailStatus) (bool, string) {
 	if s.Power != api.PowerRunning {
 		return false, "power is " + string(s.Power)
-	}
-	if to != "" && s.ImageGeneration != to {
-		return false, fmt.Sprintf("generation is %s, want %s", s.ImageGeneration, to)
 	}
 	for _, c := range s.Conditions {
 		if (c.Type == "Ready" || c.Type == "Healthy") && c.Status != api.ConditionTrue {

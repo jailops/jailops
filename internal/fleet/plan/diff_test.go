@@ -19,7 +19,7 @@ func diff(t *testing.T, want, have any) []string {
 
 func TestServerDefaultsAreNotDrift(t *testing.T) {
 	want := api.JailSpec{Image: "i", Network: []api.NetworkAttach{{Network: "n", IPv4: "auto"}}}
-	have := api.JailSpec{Image: "i", Layout: api.LayoutThin, Hostname: "x", OS: api.OSFreeBSD,
+	have := api.JailSpec{Image: "i", Hostname: "x", OS: api.OSFreeBSD,
 		Network: []api.NetworkAttach{{Network: "n", IPv4: "10.0.0.5", MAC: "02:00:00:00:00:01"}}}
 	if d := diff(t, want, have); len(d) != 0 {
 		t.Fatalf("defaults reported as drift: %v", d)

@@ -79,6 +79,12 @@ Three things, and only these:
    the network's `dns` changes), with the first line `# written by JailOps`. Edit the file and delete that line, or put a
    file of your own there before the first start, and JailOps never writes it again.
 
+A FreeBSD jail's own name also resolves inside it without a nameserver: its `/etc/hosts` has a block between two marker
+lines, owned by JailOps and rewritten at each start, that maps the jail's hostname to its own addresses (what `sudo` and
+many daemons look up when they start). The lines around the block are yours and stay as they are. A `/etc/hosts` that
+cannot be read (a symbolic link out of the root, a file larger than the helper reads) is the jail's own and is left
+alone: the daemon logs a warning and writes no block.
+
 ## What happens
 
 The names follow what runs. The helper rewrites the file when a jail starts, stops, is created, deleted or renamed or a

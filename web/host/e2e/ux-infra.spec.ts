@@ -13,18 +13,17 @@ async function open(page: Page, path: string): Promise<void> {
   await page.waitForLoadState('networkidle')
 }
 
-test('upgrading an image asks first and lists the jails on it', async ({ page }) => {
+test('upgrading an image asks first and says no jail is touched', async ({ page }) => {
   await open(page, '/images')
   await page.getByTestId('upgrade-freebsd-15-1').click()
   const dlg = page.getByTestId('confirm-dialog')
   await expect(dlg).toHaveAttribute('data-tier', '2')
-  await expect(dlg.getByTestId('confirm-items')).toContainText('web')
-  await expect(dlg.getByTestId('confirm-items')).toContainText('mail')
+  await expect(dlg).toContainText('the jails that exist are not touched')
+  await expect(dlg.getByTestId('confirm-items')).toHaveCount(0)
   await page.getByRole('button', { name: 'Cancel' }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
   // building is asked too, and runs after the confirmation
   await page.getByTestId('build-alpine-3-22').click()
-  await expect(page.getByTestId('confirm-items')).toContainText('alpine-app')
   await page.getByTestId('confirm').click()
   await expect(page.locator('.toast').first()).toBeVisible()
 })

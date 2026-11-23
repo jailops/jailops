@@ -93,6 +93,20 @@ func (s *Service) fileJail(ctx context.Context, name string) (p project, key str
 	return p, key, nil
 }
 
+// fileGuard keeps a copy into or out of a jail's root apart from the operations on the jail: it takes the jail's lock
+// for the copy (busy, without waiting, while an upgrade, a stop or any other operation has the jail) and refuses while a
+// package operation holds the jail. An in-place upgrade checks the root's links before pkg runs on it as root of the
+// host; a copy in the middle of it could add one after the check (a link out of the root that pkg then follows).
+func (s *Service) fileGuard(key, what string) (func(), error) {
+	s.execMu.Lock()
+	h, held := s.holds[key], s.installing[key]
+	s.execMu.Unlock()
+	if held {
+		return nil, api.Errorf(api.CodeBusy, "%s is working on this jail", holdWords(h, s.now())).WithHint("copy files when it has ended; `jailops op list` shows it")
+	}
+	return s.locks.tryLock(what+" "+key, jailLock(key))
+}
+
 // fileErr maps what the helper answered: a root that is not mounted is a jail that is not running (its root dataset is
 // mounted while it runs), a missing path is not_found in the jail's terms.
 func (s *Service) fileErr(err error, name, key, p string) error {
@@ -140,6 +154,11 @@ func (s *Service) JailFileGet(ctx context.Context, name, p string, o JailFileGet
 	if err != nil {
 		return "", tarcopy.Stats{}, err
 	}
+	unlock, err := s.fileGuard(key, "copy files of jail")
+	if err != nil {
+		return pr.Meta.Name, tarcopy.Stats{}, err
+	}
+	defer unlock()
 	st, err := s.d.JailFiles.JailGet(ctx, JailGetReq{Jail: key, Root: s.rootMount(key), Path: p, As: o.As,
 		Recursive: o.Recursive, Preserve: o.Preserve, MaxBytes: s.FileCopyMaxBytes()}, out)
 	if err != nil {
@@ -158,6 +177,11 @@ func (s *Service) JailFilePut(ctx context.Context, name, p string, o JailFilePut
 	if err != nil {
 		return "", tarcopy.Stats{}, err
 	}
+	unlock, err := s.fileGuard(key, "copy files of jail")
+	if err != nil {
+		return pr.Meta.Name, tarcopy.Stats{}, err
+	}
+	defer unlock()
 	st, err := s.d.JailFiles.JailPut(ctx, JailPutReq{Jail: key, Root: s.rootMount(key), Path: p, Mkdir: o.Mkdir,
 		Preserve: o.Preserve, MaxBytes: s.FileCopyMaxBytes()}, in)
 	if err != nil {

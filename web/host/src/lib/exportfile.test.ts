@@ -17,7 +17,7 @@ function cat(...a: Uint8Array[]): U8 {
   for (const x of a) { out.set(x, o); o += x.length }
   return out
 }
-const manifest = { format: 1, name: 'web', project: 'alpha', layout: 'thin', image: { name: 'fb' }, parts: [], bundle: { spec: {} } }
+const manifest = { format: 1, name: 'web', project: 'alpha', parts: [], bundle: { spec: {} } }
 function file(parts = 1): U8 {
   const body: Uint8Array[] = []
   for (let i = 0; i < parts; i++) body.push(rec('D', '{"dataset":"etc"}'), rec('B', new Uint8Array(100)), rec('E', '{}'))

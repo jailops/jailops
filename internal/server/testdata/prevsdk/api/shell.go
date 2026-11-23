@@ -51,6 +51,9 @@ const (
 	EnvFile     = "/usr/local/etc/profile.d/jailops-env.sh"
 	ProfilePath = "/usr/local/etc/profile"
 	BashrcPath  = "/usr/local/etc/bash.bashrc"
+	// ShrcPath is the file FreeBSD's sh reads in every interactive shell of root (ENV in /root/.profile); it sets PS1 itself, after
+	// the files of profile.d, so JailOps keeps a marked block that sources PromptFile at its end.
+	ShrcPath = "/root/.shrc"
 )
 
 // ShellPath turns the names bash and sh into their paths; anything else is returned as it is.

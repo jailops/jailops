@@ -25,11 +25,11 @@ becomes a real one and its entry leaves the roadmap section, all in the change t
 | ID | A jail admin expects to | Command | Rating | Ref | Step |
 |---|---|---|---|---|---|
 | bootstrap-release | get the image of a new FreeBSD release ready | `jailops image create freebsd-15-2 --release 15.2-RELEASE --build` | OK | - | bootstrap-release |
-| create-thin-thick | create a thin and a thick jail from an image | `jailops create NAME --image IMG --layout thin\|thick --start` | OK | - | create-thin-thick |
+| create | create a jail from an image | `jailops create NAME --image IMG --start` | OK | - | create |
 | patch-one | patch the operating system of one jail | `jailops jail upgrade NAME` | OK | - | patch-one |
-| patch-all | patch every jail of an image | `jailops image upgrade IMG` (the nightly `--auto-upgrade` does it unattended) | OK | - | patch-all |
-| upgrade-minor | move a jail to the next minor release (15.1 to 15.2) | `jailops jail upgrade NAME --image freebsd-15-2` (also `-l KEY=VALUE`, `--all`; `jailops image upgrade IMG --to IMG2`) | OK | - | upgrade-minor |
-| upgrade-major | move a jail to the next major release (15 to 16) | `jailops jail upgrade NAME --image IMG` moves the root; the packages are reinstalled by hand (`jailops update apply NAME --packages`, `pkg upgrade -f`) | MORE STEPS | W-upgrade-major | - |
+| patch-all | patch every jail | `jailops jail upgrade --all` (also `-l KEY=VALUE`; the nightly run with `image set IMG --auto-upgrade` does it unattended) | OK | - | patch-all |
+| upgrade-minor | move a jail to the next minor release (15.1 to 15.2) | `jailops jail upgrade NAME --release 15.2-RELEASE` (also `-l KEY=VALUE`, `--all`) | OK | - | upgrade-minor |
+| upgrade-major | move a jail to the next major release (15 to 16) | `jailops jail upgrade NAME --release 16.0-RELEASE` upgrades the base in place; the ports packages are reinstalled by hand (`pkg upgrade -f` inside the jail) | MORE STEPS | W-upgrade-major | - |
 | copy-spec | create a jail with the configuration of another | `jailops jail copy SOURCE NAME` | OK | - | copy-spec |
 | clone-data | clone a jail with its data | `jailops jail copy SOURCE NAME --data [--start]` | OK | - | clone-data |
 | clone-snapshot | create a jail from a snapshot of another | `jailops jail copy SOURCE NAME --data --snapshot S` | OK | - | clone-snapshot |
@@ -37,7 +37,6 @@ becomes a real one and its entry leaves the roadmap section, all in the change t
 | export-import | export a jail to a file and import it on another host | `jailops jail export NAME --to FILE`, `jailops jail import FILE [--as NAME]` | OK | - | export-import |
 | move-project | move a jail to another project | `jailops jail export NAME --to FILE`, then `jailops jail import FILE --project P` | OK | - | move-project |
 | rename | rename a jail | `jailops rename OLD NEW` | OK | - | rename |
-| convert-layout | convert a thin jail to thick and back | `jailops jail convert NAME --layout thick\|thin` | OK | - | convert-layout |
 | shell-and-command | open a shell in a jail and run one command | `jailops shell NAME`, `jailops exec NAME -- CMD` | OK | - | shell-and-command |
 | exec-many | run a command, or install a package, in many jails at once | `jailops exec (NAME... \| -l KEY=VALUE \| --all) -- CMD`, `jailops pkg install -l KEY=VALUE -- PKG` | OK | - | exec-many |
 | profiles | apply the same settings to several jails | `jailops profile create`, `jailops create --profile` | OK | - | profiles |

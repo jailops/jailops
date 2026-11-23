@@ -211,6 +211,7 @@ var DefaultSysctls = []string{
 	"kern.features.vimage",
 	"net.inet.ip.forwarding", "net.inet6.ip6.forwarding", "net.inet6.icmp6.nd6_onlink_ns_rfc4861", "net.inet6.ip6.use_stableaddr", "security.jail.jailed",
 	"security.jail.vnet", "kern.racct.enable", "hw.ncpu", "hw.physmem",
+	"vfs.zfs.bclone_enabled", // read only: doctor zfs.block_cloning
 }
 
 // Normalize fills defaults and cleans paths. It returns an error when the

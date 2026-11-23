@@ -20,6 +20,9 @@ type Recovered struct {
 	FromBundle bool
 	// Locked names the encrypted volumes whose key is not loaded.
 	Locked []string
+	// UnsupportedLayout marks a jail with the root layout of JailOps 0.9.2 and before: a running one can be stopped,
+	// it can be deleted and read, and every other operation, a start too, is refused (UnsupportedLayoutError).
+	UnsupportedLayout bool
 }
 
 // Rebuild reconstructs the registry entry of one jail from its datasets and
@@ -67,24 +70,14 @@ func (s *Service) Rebuild(ctx context.Context, name string) (Recovered, error) {
 	if ok, _ := s.ZFS.Exists(ctx, st.Root); !ok {
 		out.Problems = append(out.Problems, "root dataset is missing")
 	}
-	if st.Layout == api.LayoutThin {
-		have := map[string]bool{}
-		for _, d := range st.Persist {
-			have[d.DS] = true
-		}
-		for _, pp := range s.Cfg.persistent() {
-			if ds := st.Container + "/" + pp.Dataset; !have[ds] {
-				out.Problems = append(out.Problems, "persistent dataset is missing: "+ds)
-			}
-		}
-	}
+	out.UnsupportedLayout = st.Unsupported
 	for _, v := range st.Volumes {
 		if ok, _ := s.ZFS.Exists(ctx, v.DS); !ok {
 			out.Problems = append(out.Problems, "volume dataset is missing: "+volumeName(v.DS))
 		}
 	}
-	for _, e := range st.Extra {
-		out.Notes = append(out.Notes, "leftover "+e[strings.LastIndex(e, "/")+1:])
+	if st.RootOld != "" {
+		out.Notes = append(out.Notes, "leftover root.old")
 	}
 	if l, err := s.lockedVolumes(ctx, st); err != nil {
 		out.Problems = append(out.Problems, "key status: "+err.Error())
@@ -101,8 +94,9 @@ func (s *Service) Rebuild(ctx context.Context, name string) (Recovered, error) {
 	if st.Gen > 0 {
 		out.Jail.Status.ImageGeneration = genName(st.Image, st.Gen)
 	}
-	if layout := st.Layout; layout != "" && out.Jail.Spec.Layout == "" {
-		out.Jail.Spec.Layout = layout
+	if !st.Unsupported {
+		// the release installed in the jail; its generation is only where it came from
+		out.Jail.Status.FreeBSDVersion = s.prop(ctx, st.Root, PropFreeBSDVersion)
 	}
 	return out, nil
 }

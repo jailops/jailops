@@ -17,23 +17,20 @@ func TestLayoutListsEveryDatasetWithItsKind(t *testing.T) {
 	for _, d := range lay.Datasets {
 		kinds[strings.TrimPrefix(d.Name, lay.Container)] = d.Kind
 	}
-	for rel, kind := range map[string]string{"": KindContainer, "/root": KindBackupRoot, "/etc": KindPersistent} {
+	for rel, kind := range map[string]string{"": KindContainer, "/root": KindBackupRoot} {
 		if kinds[rel] != kind {
 			t.Errorf("%q is %q, want %q (%v)", rel, kinds[rel], kind, kinds)
 		}
 	}
-	if lay.Layout != api.LayoutThin || lay.Image != "fb" || lay.Generation != 1 {
+	if len(lay.Datasets) != 2 || lay.UnsupportedLayout || lay.Image != "fb" || lay.Generation != 1 {
 		t.Fatalf("%+v", lay)
 	}
 	for _, d := range lay.Datasets {
 		if d.Kind == KindVolume || d.Kind == KindVolumes {
 			t.Errorf("a jail's layout lists a volume: %v", d)
 		}
-		if d.Kind == KindContainer && (d.Props[PropLayout] != string(api.LayoutThin) || d.Props[PropImage] != "fb") {
-			t.Errorf("the container must record layout and image, or a restored jail cannot be observed: %v", d.Props)
-		}
-		if d.Kind == KindPersistent && d.Props[PropPath] == "" {
-			t.Errorf("%s has no recorded path", d.Name)
+		if d.Kind == KindContainer && d.Props[PropImage] != "fb" {
+			t.Errorf("the container must record the image, or a restored jail cannot be observed: %v", d.Props)
 		}
 	}
 	if _, err := w.S.Layout(bg, "alpha_ghost"); !api.IsCode(err, api.CodeNotFound) {

@@ -11,9 +11,9 @@ func TestImageAutoUpgradePatch(t *testing.T) {
 	srv, c := newEnv(t)
 	seedBasics(srv)
 	ctx := ctxT(t)
-	patch := map[string]any{"spec": map[string]any{"auto_upgrade": api.ImageAutoUpgrade{Enabled: true, At: "04:30", Packages: true}}}
+	patch := map[string]any{"spec": map[string]any{"auto_upgrade": api.ImageAutoUpgrade{Enabled: true, At: "04:30"}}}
 	im, err := c.Images().Patch(ctx, "freebsd-15", patch, "")
-	if err != nil || im.Spec.AutoUpgrade == nil || !im.Spec.AutoUpgrade.Packages || im.Spec.AutoUpgrade.At != "04:30" {
+	if err != nil || im.Spec.AutoUpgrade == nil || im.Spec.AutoUpgrade.At != "04:30" {
 		t.Fatalf("%v %+v", err, im.Spec.AutoUpgrade)
 	}
 	if im.Status.AutoUpgrade == nil || im.Status.AutoUpgrade.NextAt.Hour() != 4 || im.Status.AutoUpgrade.NextAt.Minute() != 30 {

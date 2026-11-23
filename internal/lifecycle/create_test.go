@@ -8,64 +8,57 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-func TestCreateThin(t *testing.T) {
+func TestCreateCopiesTheGeneration(t *testing.T) {
 	w := newWorld(t)
-	w.Files.Dirs["/jailops/projects/alpha/jails/web/root/etc"] = true // the image ships /etc but not /usr/local
 	res, err := w.S.CreateJail(bg, w.jail("web"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Jail.Status.ImageGeneration != "fb#g1" || res.Jail.Spec.Layout != api.LayoutThin {
+	if res.Jail.Status.ImageGeneration != "fb#g1" {
 		t.Fatalf("%+v", res.Jail)
 	}
 	c := "tank/jailops/projects/alpha/jails/web"
-	if o, _ := w.Z.Origin(bg, c+"/root"); o != "tank/jailops/images/fb/g1@ro" {
+	// the root is a dataset of its own with the files of the generation: no origin, nothing depends on the image
+	if o, _ := w.Z.Origin(bg, c+"/root"); o != "" {
 		t.Fatalf("root origin %q", o)
 	}
-	want := []string{c, c + "/etc", c + "/home", c + "/local", c + "/rootdir", c + "/root", c + "/var-db", c + "/var-log", c + "/var-mail", c + "/var-spool"}
-	have := map[string]bool{}
+	if cl, _ := w.Z.Clones(bg, "tank/jailops/images/fb/g1@ro"); len(cl) != 0 {
+		t.Fatal(cl)
+	}
+	var below []string
 	for _, n := range w.Z.Names() {
-		have[n] = true
-	}
-	// a jail owns no volume dataset: the volume it attaches is the project's
-	if have[c+"/data"] || have[c+"/data/db"] {
-		t.Error("the jail has volume datasets of its own")
-	}
-	for _, n := range want {
-		if !have[n] {
-			t.Errorf("missing dataset %s", n)
+		if strings.HasPrefix(n, c+"/") {
+			below = append(below, n)
 		}
 	}
+	if len(below) != 1 || below[0] != c+"/root" {
+		t.Fatalf("the jail has datasets besides its root: %v", below)
+	}
 	checks := map[[2]string]string{
-		{c, PropManaged}: "on", {c, PropID}: "uuid-web", {c, PropComplete}: "on", {c, PropKind}: KindContainer,
+		{c, PropManaged}: "on", {c, PropID}: "uuid-web", {c, PropComplete}: "on", {c, PropKind}: KindContainer, {c, PropLayout}: "",
 		{c + "/root", PropGen}: "1", {c, "quota"}: "10G", {c + "/root", "quota"}: "", {c + "/root", "mountpoint"}: "/jailops/projects/alpha/jails/web/root",
-		{c + "/etc", "mountpoint"}: "/jailops/projects/alpha/jails/web/root/etc", {c + "/etc", PropClass}: "system", {c + "/etc", PropMerge}: "on",
-		{c + "/home", PropClass}: "data",
 	}
 	for k, v := range checks {
 		if got := w.Z.PropOrEmpty(k[0], k[1]); got != v {
 			t.Errorf("%s %s = %q want %q", k[0], k[1], got, v)
 		}
 	}
-	// persistent datasets were seeded from the image before being mounted over it
-	seeded := false
+	copied := false
 	for _, l := range w.F.Log {
-		if strings.HasPrefix(l, "copytree /jailops/projects/alpha/jails/web/root/etc ") {
-			seeded = true
+		if strings.HasPrefix(l, "copytree ") && strings.HasSuffix(l, " /jailops/projects/alpha/jails/web/root") {
+			copied = true
 		}
 	}
-	if !seeded {
-		t.Fatal("etc not seeded", w.F.Log)
-	}
-	for _, l := range w.F.Log {
-		if strings.HasPrefix(l, "copytree /jailops/projects/alpha/jails/web/root/usr/local ") {
-			t.Fatalf("a directory the image does not ship must not be copied: %s", l)
-		}
+	if !copied {
+		t.Fatal("the files of the generation were not copied", w.F.Log)
 	}
 	var rec Record
 	b, _ := w.Files.ReadFile(bg, "/jailops/projects/alpha/jails/web/spec.json")
 	if err := json.Unmarshal(b, &rec); err != nil || rec.Metadata.Name != "web" || rec.Spec.Image != "fb" {
 		t.Fatal(err, rec)
+	}
+	if strings.Contains(string(b), "layout") {
+		t.Fatalf("spec.json names a layout: %s", b)
 	}
 	var bd Bundle
 	b, _ = w.Files.ReadFile(bg, "/jailops/projects/alpha/jails/web/bundle.json")
@@ -77,7 +70,7 @@ func TestCreateThin(t *testing.T) {
 	}
 }
 
-func TestCreateThickLinux(t *testing.T) {
+func TestCreateLinux(t *testing.T) {
 	w := newWorld(t)
 	j := w.jail("deb")
 	j.Spec.Image = "alp"
@@ -87,30 +80,14 @@ func TestCreateThickLinux(t *testing.T) {
 	}
 	c := "tank/jailops/projects/alpha/jails/deb"
 	if o, _ := w.Z.Origin(bg, c+"/root"); o != "" {
-		t.Fatalf("thick root must be independent, origin %q", o)
+		t.Fatalf("the root must be independent, origin %q", o)
 	}
 	if s, _ := w.Z.Snapshots(bg, c+"/root"); len(s) != 0 {
 		t.Fatalf("copied @ro left on the root: %v", s)
 	}
-	if ok, _ := w.Z.Exists(bg, c+"/etc"); ok {
-		t.Fatal("thick jails have no persistent datasets")
-	}
-	if got := w.Z.PropOrEmpty(c, PropLayout); got != "thick" {
-		t.Fatal(got)
-	}
 	// The emulation directory exists in the real root before the first start.
 	if !w.Files.Dirs["/jailops/projects/alpha/jails/deb/root/dev/shm"] {
 		t.Fatalf("dev/shm was not created: %v", w.Files.Dirs)
-	}
-	// the generation can be destroyed from under no clone: it has no dependent
-	if cl, _ := w.Z.Clones(bg, "tank/jailops/images/alp/g1@ro"); len(cl) != 0 {
-		t.Fatal(cl)
-	}
-	j2 := w.jail("x")
-	j2.Spec.Layout = api.LayoutThin
-	j2.Spec.Image = "alp"
-	if _, err := w.S.CreateJail(bg, j2, false); !api.IsCode(err, api.CodeInvalid) {
-		t.Fatalf("thin Linux jail accepted: %v", err)
 	}
 }
 
@@ -129,7 +106,7 @@ func TestCreateValidation(t *testing.T) {
 		{"bad quota", func(j *api.Jail) { j.Spec.Resources.Disk = "lots" }, api.CodeInvalid},
 		{"relative mount", func(j *api.Jail) { j.Spec.Volumes[0].Mount = "srv/db" }, api.CodeInvalid},
 		{"dotdot mount", func(j *api.Jail) { j.Spec.Volumes[0].Mount = "/srv/../etc" }, api.CodeInvalid},
-		{"mount over persistent", func(j *api.Jail) { j.Spec.Volumes[0].Mount = "/etc" }, api.CodeInvalid},
+		{"mount over the system", func(j *api.Jail) { j.Spec.Volumes[0].Mount = "/etc" }, api.CodeInvalid},
 		{"dup volume", func(j *api.Jail) { j.Spec.Volumes = append(j.Spec.Volumes, j.Spec.Volumes[0]) }, api.CodeInvalid},
 		{"bad volume name", func(j *api.Jail) { j.Spec.Volumes[0].Name = "a/b" }, api.CodeInvalid},
 	}
@@ -155,13 +132,13 @@ func TestCreateDryRun(t *testing.T) {
 	before := w.state()
 	w.F.Reset(0)
 	r, err := w.S.CreateJail(bg, w.jail("web"), true)
-	if err != nil || w.F.Count() != 0 || w.state() != before || len(r.Plan) < 10 {
+	if err != nil || w.F.Count() != 0 || w.state() != before || len(r.Plan) < 7 {
 		t.Fatal(err, w.F.Count(), len(r.Plan))
 	}
 }
 
 func TestCreateFailureSweep(t *testing.T) {
-	for name, img := range map[string]string{"thin": "fb", "thick": "alp"} {
+	for name, img := range map[string]string{"freebsd": "fb", "linux": "alp"} {
 		t.Run(name, func(t *testing.T) {
 			sweep(t, newWorld, func(w *world) error {
 				j := w.jail("web")

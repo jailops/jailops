@@ -13,7 +13,7 @@ import (
 func sample(t *testing.T, compress bool) ([]byte, [][]byte) {
 	t.Helper()
 	var buf bytes.Buffer
-	m := api.ExportManifest{Name: "web", Project: "shop", UUID: "u1", Layout: api.LayoutThin}
+	m := api.ExportManifest{Name: "web", Project: "shop", UUID: "u1"}
 	w, err := NewWriter(&buf, m)
 	if err != nil {
 		t.Fatal(err)
@@ -26,7 +26,7 @@ func sample(t *testing.T, compress bool) ([]byte, [][]byte) {
 			d[j] = byte(r.IntN(7))
 		}
 		datas = append(datas, d)
-		p := api.ExportPart{Dataset: []string{"root", "etc", "local", "home"}[i], Kind: api.PartPersistent, Snapshot: "export"}
+		p := api.ExportPart{Dataset: []string{"root", "etc", "local", "home"}[i], Kind: api.PartRoot, Snapshot: "export"}
 		if compress {
 			p.Compression = "zstd"
 		}

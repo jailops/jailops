@@ -7,19 +7,20 @@ block in quick on { joe1a, joe2a } inet6 proto icmp6 from any to any icmp6-type 
 pass in quick on { joe1a, joe2a } inet6 proto icmp6 from :: to ff02::1:ff00:0/104 icmp6-type neighbrsol label "jo-b70cd41fff32" keep state (if-bound)
 block in quick on { joe1a, joe2a } from ! <jail_addrs> to any
 block in quick on { joe1a, joe2a } inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv
-pass in quick on { joe1a, joe2a } inet6 proto icmp6 from { fd00::10, fe80::/10 } to any icmp6-type { neighbrsol, neighbradv } label "jo-d38a5e5c491b" keep state (if-bound)
-pass in quick on { joe1a, joe2a } inet6 proto icmp6 from { fd00::10, fe80::/10 } to ff02::/16 icmp6-type { listenrep, listendone, 143 } label "jo-f4ede021d406" keep state (if-bound)
-pass in quick on { joe1a, joe2a } inet6 proto icmp6 from { fd00::10, fe80::/10 } to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-57f8e328cd2f" keep state (if-bound)
+pass in quick on { joe1a, joe2a } inet6 proto icmp6 from { fd00::10, fe80::/10 } to { fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv } label "jo-c779d141397f" keep state (if-bound)
+pass in quick on { joe1a, joe2a } inet6 proto icmp6 from { fd00::10, fe80::/10 } to ff02::/16 icmp6-type { listenrep, listendone, 143 } label "jo-8ddb5cad155f" keep state (if-bound)
+pass in quick on { joe1a, joe2a } inet6 proto icmp6 from { fd00::10, fe80::/10 } to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-e069937a4d9e" keep state (if-bound)
 block out quick on { joe1a, joe2a } inet6 proto icmp6 from any to any icmp6-type { redir, routeradv }
-pass out quick on { joe1a, joe2a } inet6 proto icmp6 from any to { fd00::10, fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv } label "jo-433a2021e04c" keep state (if-bound)
-pass out quick on { joe1a, joe2a } inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-cfe0a26510b5" keep state (if-bound)
+pass out quick on { joe1a, joe2a } inet6 proto icmp6 from any to { fd00::10, fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv } label "jo-4b25ab0169f5" keep state (if-bound)
+pass out quick on { joe1a, joe2a } inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-5e724e414057" keep state (if-bound)
 block drop out quick on { joe1a, joe2a } from any to ! <jail_addrs>
 block drop out quick on { joe1a, joe2a } inet proto icmp from any to any icmp-type redir
+block drop in quick on { joe1a, joe2a } inet from any to 255.255.255.255
 # the host: closed to the jail whatever its policies allow; ping, the errors a path needs and the network's resolver stay open
-pass in quick on { joe1a, joe2a } inet proto icmp from any to <host> icmp-type { echoreq, unreach, timex, paramprob } label "jo-2c263cd8d47e" keep state (if-bound)
-pass in quick on { joe1a, joe2a } inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob } label "jo-d14770e859b8" keep state (if-bound)
+pass in quick on { joe1a, joe2a } inet proto icmp from any to <host> icmp-type { echoreq, unreach, timex, paramprob } label "jo-c2468774f452" keep state (if-bound)
+pass in quick on { joe1a, joe2a } inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob } label "jo-cab6efa0ac9b" keep state (if-bound)
 block drop in quick on { joe1a, joe2a } from any to <host>
 # policy web
 # defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
 block drop out quick on { joe1a, joe2a } all
-pass in quick on { joe1a, joe2a } all label "jo-7cb85249f19e" keep state (if-bound)
+pass in quick on { joe1a, joe2a } all label "jo-deb4e4c44282" keep state (if-bound)

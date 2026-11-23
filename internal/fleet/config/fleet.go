@@ -620,6 +620,7 @@ func (f *Fleet) loadRollouts() error {
 			return fmt.Errorf("%s: %w", f.rel(p), err)
 		}
 		var spec model.RolloutSpec
+		api.UpgradeFields(api.KindRollout, doc.Spec)
 		if err := model.DecodeStrict(doc.Spec, &spec); err != nil {
 			return fmt.Errorf("%s: spec: %w", f.rel(p), err)
 		}

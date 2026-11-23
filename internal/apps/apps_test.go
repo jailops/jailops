@@ -12,7 +12,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"jailops.net/jailops/internal/lifecycle"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -140,14 +139,14 @@ func TestInvalidDefinitions(t *testing.T) {
 		{"data var run", func(a *api.App) { a.Data[0].Path = "/var/run/demo" }, "base system"},
 		{"data root", func(a *api.App) { a.Data[0].Path = "/" }, "data[0].path"},
 		{"data var itself", func(a *api.App) { a.Data[0].Path = "/var" }, "must lie below one of /var, /usr/local, /usr/local/etc, /home"},
-		{"data usr local itself", func(a *api.App) { a.Data[0].Path = "/usr/local" }, "data[0].path: /usr/local is a persistent dataset of every jail"},
-		{"data var db itself", func(a *api.App) { a.Data[0].Path = "/var/db" }, "data[0].path: /var/db is a persistent dataset of every jail"},
-		{"data var log itself", func(a *api.App) { a.Data[0].Path = "/var/log" }, "data[0].path: /var/log is a persistent dataset"},
-		{"data var spool itself", func(a *api.App) { a.Data[0].Path = "/var/spool" }, "data[0].path: /var/spool is a persistent dataset"},
-		{"data var mail itself", func(a *api.App) { a.Data[0].Path = "/var/mail" }, "data[0].path: /var/mail is a persistent dataset"},
-		{"data home itself", func(a *api.App) { a.Data[0].Path = "/home" }, "data[0].path: /home is a persistent dataset"},
-		{"data root dir", func(a *api.App) { a.Data[0].Path = "/root" }, "data[0].path: /root is a persistent dataset"},
-		{"config var db itself", func(a *api.App) { a.Config[0].Path = "/var/db" }, "config[0].path: /var/db is a persistent dataset"},
+		{"data usr local itself", func(a *api.App) { a.Data[0].Path = "/usr/local" }, "data[0].path: /usr/local is a directory of every jail's own root"},
+		{"data var db itself", func(a *api.App) { a.Data[0].Path = "/var/db" }, "data[0].path: /var/db is a directory of every jail's own root"},
+		{"data var log itself", func(a *api.App) { a.Data[0].Path = "/var/log" }, "data[0].path: /var/log is a directory of every jail's own root"},
+		{"data var spool itself", func(a *api.App) { a.Data[0].Path = "/var/spool" }, "data[0].path: /var/spool is a directory of every jail's own root"},
+		{"data var mail itself", func(a *api.App) { a.Data[0].Path = "/var/mail" }, "data[0].path: /var/mail is a directory of every jail's own root"},
+		{"data home itself", func(a *api.App) { a.Data[0].Path = "/home" }, "data[0].path: /home is a directory of every jail's own root"},
+		{"data root dir", func(a *api.App) { a.Data[0].Path = "/root" }, "data[0].path: /root is a directory of every jail's own root"},
+		{"config var db itself", func(a *api.App) { a.Config[0].Path = "/var/db" }, "config[0].path: /var/db is a directory of every jail's own root"},
 		{"data elsewhere", func(a *api.App) { a.Data[0].Path = "/opt/demo" }, "must lie below"},
 		{"data trailing slash", func(a *api.App) { a.Data[0].Path = "/var/db/demo/" }, "data[0].path"},
 		{"data space", func(a *api.App) { a.Data[0].Path = "/var/db/de mo" }, "data[0].path"},
@@ -563,20 +562,11 @@ func TestReferenceCatalog(t *testing.T) {
 	}
 }
 
-// The persistent paths a data or config path may not be are the persistent
-// datasets of the default layout.
-func TestPersistentPathsMatchTheLayout(t *testing.T) {
-	var want []string
-	for _, p := range lifecycle.DefaultPersistent() {
-		want = append(want, p.Path)
-	}
-	if !slices.Equal(PersistentPaths, want) {
-		t.Fatalf("PersistentPaths %v, the default layout %v", PersistentPaths, want)
-	}
-	// a host that keeps another path persistent: the installer checks its list with the same function
+// A data or config path is never a directory of the jail's own root.
+func TestRootPathsAreRefused(t *testing.T) {
 	a := good()
 	a.Data[0].Path = "/var/db/demo"
-	if err := CheckPersistent(a, []string{"/var/db/demo"}); err == nil || !strings.Contains(err.Error(), "data[0].path: /var/db/demo is a persistent dataset") {
+	if err := CheckRootPaths(a, []string{"/var/db/demo"}); err == nil || !strings.Contains(err.Error(), "data[0].path: /var/db/demo is a directory of every jail's own root") {
 		t.Fatal(err)
 	}
 }

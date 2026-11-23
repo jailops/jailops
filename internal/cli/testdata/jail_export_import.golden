@@ -3,7 +3,7 @@ jail/web created
 ! network lan: the only network of project main
 
 $ jailops jail export web --to <dir>/web.jailexport
-jail/web exported to <dir>/web.jailexport (0 dataset streams, 551 B, complete)
+jail/web exported to <dir>/web.jailexport (0 dataset streams, 512 B, complete)
 
 $ jailops jail export web --to <dir>/web.jailexport
 ! usage: <dir>/web.jailexport exists: choose another file, or --overwrite to replace it
@@ -11,7 +11,7 @@ $ jailops jail export web --to <dir>/web.jailexport
 [exit 2]
 
 $ jailops jail export web --to <dir>/web.jailexport --overwrite --zstd
-jail/web exported to <dir>/web.jailexport (0 dataset streams, 551 B, complete)
+jail/web exported to <dir>/web.jailexport (0 dataset streams, 512 B, complete)
 
 $ jailops jail export web
 ! usage: --to FILE is required (or --to - for the standard output)
@@ -24,14 +24,14 @@ $ jailops jail export nobody --to <dir>/none
 [exit 4]
 
 $ jailops jail import <dir>/web.jailexport
-file: jail web of project main (thin, image freebsd-15@stable)
+file: jail web of project main (image freebsd-15@stable)
   the new jail gets a new uuid and does not start at boot
   error: a jail named web exists: choose another name with --as
 ! error: the import cannot be done: a jail named web exists: choose another name with --as
 [exit 1]
 
 $ jailops --dry-run jail import <dir>/web.jailexport --as web2
-file: jail web of project main (thin, image freebsd-15@stable)
+file: jail web of project main (image freebsd-15@stable)
   the new jail gets a new uuid and does not start at boot
 the file is complete; its checksums are verified when it is imported; nothing was changed
 
@@ -52,8 +52,8 @@ Age:         3h
 SPEC                        STATUS
 ----                        ------
 image: freebsd-15@stable    power: ""
+os: freebsd
 storage: default
-layout: thin
 hostname: web
 network:
   - network: lan

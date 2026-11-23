@@ -41,7 +41,7 @@ func (r *Reconciler) hostBooted(ctx context.Context) bool {
 		// the boot of the host cannot be read: a first start still boots the jails, a later one does not
 		return !known
 	}
-	if known && sameBoot(strings.TrimSpace(string(prev)), id) {
+	if known && sameBoot(strings.TrimSpace(string(prev)), id) && !r.rebootedSince(f, id) {
 		r.log.Info("the daemon started again on a host that stayed up: no jail is started at boot")
 		if strings.TrimSpace(string(prev)) != id { // the clock was set: keep the new reading
 			_ = os.WriteFile(f, []byte(id+"\n"), 0o600)
@@ -178,6 +178,26 @@ func (r *Reconciler) setBootCond(name string, c api.Condition) {
 	r.mu.Lock()
 	r.bootCond[name] = c
 	r.mu.Unlock()
+}
+
+// rebootedSince says whether the host booted again after the boot reading in file f was recorded, although the two
+// readings of kern.boottime are within the tolerance of sameBoot (a host that rebooted twice in ten minutes). A host that
+// stayed up has been up at least as long as it is since the file was written; a host that rebooted since has been up for
+// less. The minute of slack covers the clock being set a little between the two readings.
+func (r *Reconciler) rebootedSince(f, id string) bool {
+	m := bootSecRE.FindStringSubmatch(id)
+	fi, err := os.Stat(f)
+	if m == nil || err != nil || r.env.Clock == nil {
+		return false
+	}
+	boot, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil {
+		return false
+	}
+	now := r.env.Clock.Now()
+	uptime := now.Unix() - boot
+	since := int64(now.Sub(fi.ModTime()).Seconds())
+	return uptime+60 < since
 }
 
 var bootSecRE = regexp.MustCompile(`sec = (\d+)`)

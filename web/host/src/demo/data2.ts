@@ -88,7 +88,7 @@ export function updateReports(jails: Jail[]): UpdateReport[] {
   return jails.map((j): UpdateReport => {
     const name = j.metadata.name
     const base = { jail: name, project: j.metadata.project ?? 'web', mode: j.spec.update?.mode ?? 'manual', checked_at: ago(3600), available: false }
-    if (name === 'web') return { ...base, available: true, packages: [{ name: 'nginx', from: '1.26.1', to: '1.26.3' }, { name: 'openssl', from: '3.0.15', to: '3.0.16' }], os: { from: 'freebsd-15-1#g4', to: 'freebsd-15-1#g5' } }
+    if (name === 'web') return { ...base, available: true, packages: [{ name: 'nginx', from: '1.26.1', to: '1.26.3' }, { name: 'openssl', from: '3.0.15', to: '3.0.16' }], os: { from: '15.1-RELEASE-p6', to: '15.1-RELEASE-p7' } }
     if (name === 'cache' || name === 'stg-web') return { ...base, available: true, packages: [{ name: 'redis', from: '7.2.4', to: '7.2.5' }] }
     if (name === 'build') return { ...base, error: 'the jail is stopped: its packages cannot be listed' }
     return base
@@ -99,7 +99,7 @@ export function updateHistory(name: string): UpdateRecord[] {
   if (name !== 'web') return []
   return [
     { id: 'u2', jail: name, project: 'web', kind: 'packages', result: 'success', started_at: ago(86400 * 2), finished_at: ago(86400 * 2 - 40), snapshot: 'pre-update-20261020', packages: [{ name: 'curl', from: '8.9.0', to: '8.9.1' }], scheduled: true },
-    { id: 'u1', jail: name, project: 'web', kind: 'os', result: 'rolled_back', started_at: ago(86400 * 9), finished_at: ago(86400 * 9 - 120), snapshot: 'pre-update-20261013', from: 'freebsd-15-1#g3', to: 'freebsd-15-1#g4', root_rolled_back: true, error: 'health check /usr/local/bin/check exited 1' },
+    { id: 'u1', jail: name, project: 'web', kind: 'os', result: 'failure', started_at: ago(86400 * 9), finished_at: ago(86400 * 9 - 120), snapshot: 'pre-update-20261013', from: '15.1-RELEASE-p4', to: '15.1-RELEASE-p5', error: 'health check /usr/local/bin/check exited 1; the jail runs on as it is' },
   ]
 }
 

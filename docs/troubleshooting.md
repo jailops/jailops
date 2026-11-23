@@ -28,7 +28,13 @@ JailOps itself failed before or while running it (a wrong invocation stays 2). W
 | `sysctl.persistent` | forwarding on and persistent | `warn`: set `gateway_enable=YES` and `ipv6_gateway_enable=YES` in `rc.conf`, or the forwarding lines in `sysctl.conf` (JailOps never edits them) |
 | `zfs.pool`, `zfs.pool.<storage>` | the pools are `ONLINE` | `zpool status <pool>` |
 | `zfs.compat` | pool features against `zfs.compat_file` | `fail`: replication to an older host would fail; JailOps never runs `zpool upgrade` |
+| `zfs.block_cloning`, `zfs.block_cloning.<storage>` | per storage: whether a new jail shares the blocks of its image (about 3 MB) or is a full copy (about 75 MB) | `warn` when the pool has not enabled the feature `block_cloning` (`zpool upgrade POOL` enables it; systems older than OpenZFS 2.2 can then no longer import the pool, and JailOps never changes pool features) or when `vfs.zfs.bclone_enabled=0` (`sysctl vfs.zfs.bclone_enabled=1` and the line in `/etc/sysctl.conf`); `info` for an encrypted storage, where every jail is a full copy. No line when the state cannot be read |
 | `jail.volumes` | the volume datasets of the jails have `canmount=noauto` | `warn`: a volume made before that has `canmount=on` and is mounted at boot before the jail root it lies in; run the `zfs set canmount=noauto <dataset>` the hint lists |
+| `jail.upgrade_state` | jails whose in-place upgrade did not finish | `fail` per jail: its root may hold part of the upgrade. Run the upgrade again to complete it, or stop the jail and run the rollback the hint names (`jailops jail rollback NAME --project P --confirm-data-loss`); a successful upgrade or rollback clears it |
+| `jail.volume_system_dir` | volumes of a jail at a directory of its system (`/usr/local`, `/var`, `/var/db`, `/var/db/pkg`, ...), which JailOps 0.9.2 allowed | `warn` per volume: the jail starts, but its in-place upgrade is refused (what pkg writes there would be outside the root's snapshot) and no other volume can be attached or detached. The fix: move the data into a volume mounted below that directory and detach this one |
+| `jail.unsupported_layout` | jails with a root layout of JailOps 0.9.2 and before that this release does not support (a clone of an image with separate datasets for `/etc`, `/usr/local` and `/var`) | `fail` per jail: it does not start; a running one can be stopped, and it can be deleted, nothing else; the jail carries the condition `UnsupportedLayout` (reason `EarlierRelease`). The fix: [upgrade.md](upgrade.md#jails-with-an-unsupported-root-layout) |
+| `jail.audit` | jails whose last `jailops jail audit` since the daemon started found something ([audit.md](audit.md)) | `fail` per jail with a critical finding, `warn` with a warning, naming the checks; `jailops jail audit NAME` shows each finding and its fix. No line for a jail that was not audited |
+| `jail.suspected_compromised` | jails whose root held what only an attack on host-side pkg plants (a link out of the root, a link among pkg's files, a `pkg.conf` with plugins) at the last upgrade check | `fail` per jail, with what was found: the jail is not upgraded. Look at it and remove what is listed; the next upgrade checks again and clears it |
 | `pf.anchors` | the anchor line is in the loaded ruleset | add it to `pf.conf` among the filter rules and `pfctl -f /etc/pf.conf` ([install.md](install.md)) |
 | `pf.order` | a `quick` pass before the `jailops` anchor | `warn`: such a rule passes its traffic for good so policies cannot filter it; move the anchor line before it |
 | `pf.inbound` | while a jail on an IPv6 or a non-NAT IPv4 network exists: a `block ... quick` rule for every source before the anchor line, or a hand-written `pass ... quick` rule for a jail prefix | `fail` for the block (it drops inbound traffic to the jails before their policies are asked: decide whether that is what the rule is for; to let the policies decide, move the anchor line above it; rules for single sources, such as a blocklist, are not flagged), `warn` for the pass (it keeps a jail without an `allow in` rule reachable: delete it; the jail's own `allow in` rules open the uplink, [install.md](install.md) section 3) |
@@ -36,6 +42,8 @@ JailOps itself failed before or while running it (a wrong invocation stays 2). W
 | `jails.exposed` | the jails whose anchor has a pass rule on an uplink | `info`: lists the jails the Internet can reach and their ports (a port forward, or an `allow in` rule with an external source), so the rules a project's administrator writes for his own jail are visible to the others |
 | `jails.inbound-without-source` | jails on a routed address with an `allow in` rule that names no source | `info`: such a rule is for the project's jails and the host and does not open the uplink; give it `--from any` or use `jailops expose JAIL PORTS` |
 | `pf.state-policy` | a loaded ruleset that blocks by default (a `block ... all` without `quick`) while a network has NAT or jails exist, against the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`; includes are not followed) | `warn` when it has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow passes). Add the line at the top of `pf.conf` and `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`; never `service pf restart` over ssh. `unknown` when the daemon cannot read the file |
+| `pf.host_default_deny` | the loaded ruleset blocks inbound traffic by default on each uplink of the jails' networks, each address family on its own (`block in inet all` leaves IPv6 open) | `warn` naming the uplink, and the family when only one is open (`vtnet0 (IPv6)`): pf passes what no rule decides, so the routed addresses of the jails (IPv6, IPv4 without NAT) are reachable from the Internet on every port their policies do not deny, and "closed" in `firewall test`, `firewall show` and `firewall exposed` assumes the block. Add `block in all` (both families) without `quick` before the anchor line, with a pass for ssh ([install.md](install.md#3-the-firewall-one-line-in-pfconf)). No line without jails on an uplink |
+| `pf.states` | the per-rule state limits of the running jails with a link (`jails.max_states`, or `resources.states`) against the hard limit of pf's state table (`pfctl -s memory`); stopped jails create no state and are not counted | `warn` when a running jail has no limit, or a limit above half the table (one busy jail could fill it, and new connections then fail host-wide, ssh included); `info` when the limits of the running jails add up to more than the table holds. Raise it with `set limit states N` in `pf.conf` (the hint gives a value), or lower `jails.max_states`. No line while no jail with a link runs |
 | `network.dns` | for every network a jail uses: where its jails get their nameservers (the network's `dns`, the host's `/etc/resolv.conf`, or the gateway when the host resolves only through loopback); a gateway is asked one query (`. NS`, one second) once a jail on the network runs | `warn` when the gateway does not answer, refuses (access control) or no nameserver could be worked out; the hint has the resolver and `pf.conf` lines ([networking-ipv6.md](networking-ipv6.md#name-resolution-of-jails)) |
 | `network.epairs` | epairs without a jail | `warn`: the reconcile loop removes them on its next pass |
 | `net.descriptions` | every interface JailOps owns carries its description (both ends of running jails' epairs, WireGuard interfaces) | `warn` lists them with what they carry: the reconcile loop sets them on its next pass |
@@ -150,24 +158,37 @@ unicast neighbor solicitations from their global addresses, which FreeBSD drops 
 and what to set (`net.inet6.icmp6.nd6_onlink_ns_rfc4861=1`, which JailOps never sets): see
 [networking-ipv6.md](networking-ipv6.md#one-host-setting-that-matters-on-some-segments).
 
-**`jailops jail diff` says "compared with the image, not with a snapshot", or refuses a jail.** A jail made before the
-baseline snapshot existed has none on its persistent datasets: the command compares their files with the image and marks
-the dataset, and a change that only moved a file shows as `-` and `+`. `jailops jail diff` needs a thin jail: a thick or
-Linux jail has a full copy of its image, so there is nothing to compare it with. For a jail with a locked volume, unlock it
-first ([storage.md](storage.md#encrypted-volumes)). `--packages` answers for a running jail only
-([storage.md](storage.md#what-is-unique-in-a-jail)).
-
 **Jail deletion or unmount reports `busy`.** Stopping a jail retries a busy unmount for a few seconds; if it persists, something
 inside still holds a file open (`fstat -f /usr/local/jailops/projects/...`).
 
-**An `/etc` merge conflict (`merge_conflict`) on upgrade.** The jail stays on the old generation. Resolve the listed files in the
-jail, then `jailops jail upgrade` again.
+**`jailops jail upgrade` or `jail base add` is refused.** The message says why, and none of these
+leaves a package changed:
 
-**`jailops jail convert` fails or says `busy`.** A failure puts the old layout back: the jail keeps its layout and runs, and the log of the
-operation says which step failed (often the disk limit: both roots count until the conversion ends, so raise `resources.disk` or
-free space, then convert again). `busy` means a `root.new` or `root.stale` is left by an interrupted operation: run
-an operation the daemon was interrupted in (it rolls those back when it starts: restart `jailopsd` and look at `jailops doctor`). A thick jail whose image generation was deleted needs `--image` to name one
-([storage.md](storage.md#changing-the-layout-of-a-jail)).
+- `forbidden: suspected_compromised: jail X: etc/Y is a symbolic link out of the root (to /Z); ...`: the root holds what
+  only an attack on host-side pkg plants (a link out of the root, a link among pkg's files, a `pkg.conf` with plugins).
+  Nothing in the jail changed, and `jailops doctor` names it (`jail.suspected_compromised`). Look at the jail, remove what
+  is listed (or make a link of your own point inside the jail with a relative target) and run the command again: it
+  checks again. [thick-jail-upgrades.md](thick-jail-upgrades.md#a-jail-jailops-does-not-trust).
+- `precondition_failed: jail X does not run`: a jail is upgraded while it runs; JailOps does not start it.
+- `precondition_failed: jail X runs: a root rolled back under running services kills them`: stop the jail, roll back,
+  start it.
+- `precondition_failed: the root of jail X says it is A and JailOps installed B`: the files of the root disagree with
+  the release JailOps recorded. Name the release with `--release`, or roll the jail back
+  ([lifecycle.md](lifecycle.md#35-a-freebsd-jail)).
+- `precondition_failed: pkg's dry run said nothing JailOps understands`: pkg answered in a form JailOps does not read;
+  the message carries pkg's last line.
+- `nothing to add: pkg finds P installed`: not an error; the package is there.
+
+**`jailops cp` or the Files tab answers `busy`.** An operation has the jail (an upgrade, a stop, a start) or a package
+update or app installation holds it; the message names it. Copy again when it has ended (`jailops op list`).
+
+**The daemon logs "the firewall anchor of a running jail is empty".** The daemon watches the anchor of one running
+jail (the field `anchor` of the line names it) to notice a flush; that anchor was found empty, and the daemon loads the
+anchors again at once. Either pf was flushed (`service pf
+restart`, `pfctl -F all`), or an operation was stopping that jail at that moment (a stop, an upgrade), which empties its
+anchor on purpose: then the line names the jail being stopped and needs nothing. It is logged once for that anchor,
+not every few seconds; the next pass picks the anchor it watches anew. When it repeats for jails nobody stopped, look for what flushes pf on the host
+([networking.md](networking.md#when-pf-is-off-or-was-flushed)).
 
 **`unverified_platform`.** The feature needs a facility this host does not have, or that was never proven on FreeBSD 15.1 or later.
 The hint says which.
@@ -198,9 +219,7 @@ for and the proxy never answered (`network.ndproxy`).
 | `interrupted` | the daemon stopped while the operation ran; `error.detail.recovery` is `rolled_back`, `completed`, `dropped` or `needs_attention` | check the object, repeat the command; for `needs_attention` read `jailops doctor` |
 | `quota_exceeded` | a project quota (jails, CPU, memory, PIDs, addresses, storage) | `jailops project show NAME`; a global admin raises it |
 | `ip_conflict`, `pool_exhausted` | the address is taken or outside the range; the range is full | use `auto`; `jailops network leases NAME`; widen the range |
-| `image_in_use` | a jail still uses the image or generation (the error names the jails) | upgrade or delete those jails |
 | `data_loss_unconfirmed` | the operation would discard data | type the jail name or pass `--confirm-data-loss` |
-| `merge_conflict` | an `/etc` merge needs a human | see above |
 | `zfs_incompatible` | the pool lacks a feature the operation needs | check the pool features on both ends |
 | `chain_broken` | a backup chain has a missing or corrupt link | `jailops backup verify`, take a new full backup |
 | `key_not_escrowed` | a raw backup was refused because the key has no escrow | `jailops backup key escrow` |

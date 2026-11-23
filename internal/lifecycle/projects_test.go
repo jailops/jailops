@@ -39,7 +39,7 @@ func TestProjectJailLayoutOnAnotherStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := "tank/fast/projects/p1/jails/web"
-	for _, ds := range []string{c, c + "/root", c + "/etc"} {
+	for _, ds := range []string{c, c + "/root"} {
 		if ok, _ := w.Z.Exists(bg, ds); !ok {
 			t.Fatalf("%s is missing", ds)
 		}

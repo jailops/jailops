@@ -286,7 +286,7 @@ func (s *Service) RollbackVolume(ctx context.Context, st Storage, project, name,
 }
 
 // CopyIntoVolume copies the files a stopped jail has at mountPath into a volume, so that attaching the volume there
-// does not hide them. The root and the persistent datasets of the jail are mounted for the copy and unmounted again;
+// does not hide them. The root of the jail is mounted for the copy and unmounted again;
 // nothing is removed from the jail. A path the jail does not have copies nothing.
 func (s *Service) CopyIntoVolume(ctx context.Context, name, mountPath string, st Storage, project, volume string) error {
 	js, err := s.observe(ctx, name)
@@ -374,11 +374,7 @@ func (s *Service) RemountHostDir(ctx context.Context, name string, a Attached) e
 		_, _ = s.Exec.Run(ctx, []string{"umount", "-f", targets[i]}) // a mount that is not there is fine
 	}
 	for i, target := range targets {
-		argv := []string{"mount", "-t", "nullfs"}
-		if a.ReadOnly {
-			argv = append(argv, "-o", "ro")
-		}
-		argv = append(argv, a.Mountpoint, target)
+		argv := append(nullfsVolumeArgv(a.ReadOnly), a.Mountpoint, target)
 		out, err := s.Exec.Run(ctx, argv)
 		if err == nil {
 			continue
@@ -418,7 +414,7 @@ func (s *Service) BindVolumes(ctx context.Context, name string) error {
 		if err := s.Files.MkdirAll(ctx, target); err != nil {
 			return err
 		}
-		if out, err := s.Exec.Run(ctx, []string{"mount", "-t", "nullfs", a.Mountpoint, target}); err != nil {
+		if out, err := s.Exec.Run(ctx, append(nullfsVolumeArgv(false), a.Mountpoint, target)); err != nil {
 			_ = s.unbind(ctx, name, atts[:i])
 			return fmt.Errorf("mount %s on %s: %w: %s", a.Mountpoint, target, err, strings.TrimSpace(string(out)))
 		}
@@ -487,11 +483,7 @@ func (s *Service) mountLive(ctx context.Context, name string, a Attached) error 
 	if err := s.Files.MkdirAll(ctx, target); err != nil {
 		return err
 	}
-	argv := []string{"mount", "-t", "nullfs"}
-	if a.ReadOnly {
-		argv = append(argv, "-o", "ro")
-	}
-	argv = append(argv, a.Mountpoint, target)
+	argv := append(nullfsVolumeArgv(a.ReadOnly), a.Mountpoint, target)
 	if out, err := s.Exec.Run(ctx, argv); err != nil {
 		return fmt.Errorf("mount %s on %s: %w: %s", a.Mountpoint, target, err, strings.TrimSpace(string(out)))
 	}
@@ -550,11 +542,7 @@ func (s *Service) unmountLive(ctx context.Context, name string, a Attached) (boo
 	did, err := s.umountOne(ctx, s.Cfg.at(name).rootMP()+a.Path, a.Path)
 	if err != nil {
 		if changed {
-			argv := []string{"mount", "-t", "nullfs"}
-			if a.ReadOnly {
-				argv = append(argv, "-o", "ro")
-			}
-			_, _ = s.Exec.Run(ctx, append(argv, a.Mountpoint, compat))
+			_, _ = s.Exec.Run(ctx, append(nullfsVolumeArgv(a.ReadOnly), a.Mountpoint, compat))
 		}
 		return false, err
 	}
@@ -577,4 +565,13 @@ func (s *Service) umountOne(ctx context.Context, target, path string) (bool, err
 		return false, &VolumeBusyError{Path: path, Detail: text}
 	}
 	return false, fmt.Errorf("unmount %s: %w: %s", target, err, text)
+}
+
+// nullfsVolumeArgv is the mount of a volume into a jail's root without its source and target: nosuid always (a setuid
+// file of a volume never gains root in a jail, as the fstab of a start mounts it), read-only when the attachment says.
+func nullfsVolumeArgv(readOnly bool) []string {
+	if readOnly {
+		return []string{"mount", "-t", "nullfs", "-o", "ro,nosuid"}
+	}
+	return []string{"mount", "-t", "nullfs", "-o", "nosuid"}
 }

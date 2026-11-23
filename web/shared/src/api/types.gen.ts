@@ -93,6 +93,14 @@ export type EventType =
 
 export const EventTypeValues: readonly EventType[] = ['lifecycle', 'operation', 'logging']
 
+export type JailAuditResult =
+  | "pass"
+  | "info"
+  | "warn"
+  | "critical"
+
+export const JailAuditResultValues: readonly JailAuditResult[] = ['pass', 'info', 'warn', 'critical']
+
 export type JailLogKind =
   | "active"
   | "rotated"
@@ -130,12 +138,6 @@ export type Kind =
 
 export const KindValues: readonly Kind[] = ['Jail', 'Image', 'Network', 'FirewallPolicy', 'AddressSet', 'BackupPolicy', 'BackupTarget', 'HostGroup', 'Rollout', 'JailTemplate', 'Remote', 'User', 'Token', 'Certificate', 'Host', 'ImageGeneration', 'JailSnapshot', 'Backup', 'Operation', 'Project', 'Storage', 'HostIdentity', 'WireGuard', 'Volume', 'LogForward', 'HostFirewall', 'HostCertificate']
 
-export type Layout =
-  | "thin"
-  | "thick"
-
-export const LayoutValues: readonly Layout[] = ['thin', 'thick']
-
 export type LogSinkType =
   | "syslog"
   | "webhook"
@@ -156,7 +158,6 @@ export type OperationAction =
   | "jail.restart"
   | "jail.configure"
   | "jail.copy"
-  | "jail.convert"
   | "jail.upgrade"
   | "jail.rollback"
   | "jail.snapshot"
@@ -164,7 +165,6 @@ export type OperationAction =
   | "jail.import"
   | "jail.provision"
   | "jail.shell_setup"
-  | "jail.repair_packages"
   | "jail.restore"
   | "app.install"
   | "rename"
@@ -181,7 +181,6 @@ export type OperationAction =
   | "volume.restore"
   | "image.build"
   | "image.upgrade"
-  | "image.move"
   | "image.generation_delete"
   | "image.auto_upgrade"
   | "backup.run"
@@ -191,7 +190,7 @@ export type OperationAction =
   | "update.apply"
   | "update.scheduled"
 
-export const OperationActionValues: readonly OperationAction[] = ['jail.create', 'jail.delete', 'jail.start', 'jail.stop', 'jail.restart', 'jail.configure', 'jail.copy', 'jail.convert', 'jail.upgrade', 'jail.rollback', 'jail.snapshot', 'jail.snapshot_delete', 'jail.import', 'jail.provision', 'jail.shell_setup', 'jail.repair_packages', 'jail.restore', 'app.install', 'rename', 'volume.create', 'volume.delete', 'volume.snapshot', 'volume.snapshot_delete', 'volume.rollback', 'volume.attach', 'volume.detach', 'volume.lock', 'volume.unlock', 'volume.passphrase', 'volume.restore', 'image.build', 'image.upgrade', 'image.move', 'image.generation_delete', 'image.auto_upgrade', 'backup.run', 'backup.verify', 'backup.delete', 'update.check', 'update.apply', 'update.scheduled']
+export const OperationActionValues: readonly OperationAction[] = ['jail.create', 'jail.delete', 'jail.start', 'jail.stop', 'jail.restart', 'jail.configure', 'jail.copy', 'jail.upgrade', 'jail.rollback', 'jail.snapshot', 'jail.snapshot_delete', 'jail.import', 'jail.provision', 'jail.shell_setup', 'jail.restore', 'app.install', 'rename', 'volume.create', 'volume.delete', 'volume.snapshot', 'volume.snapshot_delete', 'volume.rollback', 'volume.attach', 'volume.detach', 'volume.lock', 'volume.unlock', 'volume.passphrase', 'volume.restore', 'image.build', 'image.upgrade', 'image.generation_delete', 'image.auto_upgrade', 'backup.run', 'backup.verify', 'backup.delete', 'update.check', 'update.apply', 'update.scheduled']
 
 export type OperationStatus =
   | "pending"
@@ -771,28 +770,6 @@ export interface DevfsDevice {
   device: string
 }
 
-export interface DiffDataset {
-  name: string
-  path: string
-  base: string
-  note?: string
-  entries: DiffEntry[]
-  total: number
-  counts: Record<string, number>
-  truncated?: boolean
-}
-
-export interface DiffEntry {
-  kind: string
-  path: string
-  to?: string
-}
-
-export interface DiffPackages {
-  packages: string[]
-  note?: string
-}
-
 export interface DoctorCheck {
   name: string
   status: DoctorStatus
@@ -850,14 +827,6 @@ export interface ExecRequest {
   user?: string
 }
 
-export interface ExportImage {
-  name: string
-  generation?: number
-  release?: string
-  freebsd_version?: string
-  manifest?: string
-}
-
 export interface ExportManifest {
   format: number
   created: string
@@ -865,9 +834,7 @@ export interface ExportManifest {
   project: string
   uuid: string
   labels?: Record<string, string>
-  layout: Layout
   os?: OS
-  image: ExportImage
   bundle: RestoreBundle
   parts: ExportPart[]
   volumes?: ExportVolume[]
@@ -1282,7 +1249,6 @@ export interface Image {
 export interface ImageAutoUpgrade {
   enabled: boolean
   at?: string
-  packages?: boolean
 }
 
 export interface ImageAutoUpgradeStatus {
@@ -1305,7 +1271,6 @@ export interface ImageGeneration {
   freebsd_version?: string
   dataset?: string
   created_at?: string
-  refs?: string[]
   storages?: string[]
 }
 
@@ -1338,21 +1303,8 @@ export interface ImageStatus {
 }
 
 export interface ImageUpgrade {
-  no_jails?: boolean
-  project?: string
   dry_run?: boolean
   storage?: string
-  to?: string
-}
-
-export interface ImageUpgradeJail {
-  jail: string
-  project: string
-  status: string
-  from?: string
-  to?: string
-  reason?: string
-  record?: string
 }
 
 export interface ImageUpgradeResult {
@@ -1361,7 +1313,6 @@ export interface ImageUpgradeResult {
   unchanged?: boolean
   plan?: string[]
   dry_run?: boolean
-  jails: ImageUpgradeJail[]
 }
 
 export interface ImageUpgradeRun {
@@ -1369,9 +1320,6 @@ export interface ImageUpgradeRun {
   finished_at: string
   result: string
   generation?: string
-  jails_moved?: number
-  jails_upgraded?: number
-  jails_failed?: number
   detail?: string
 }
 
@@ -1395,36 +1343,36 @@ export interface JailAction {
   force?: boolean
 }
 
-export interface JailConvert {
-  layout: Layout
-  image?: string
-  dry_run?: boolean
+export interface JailAudit {
+  jail: string
+  running: boolean
+  critical: number
+  warnings: number
+  checks: JailAuditCheck[]
 }
 
-export interface JailConvertResult {
+export interface JailAuditCheck {
+  id: string
+  group: string
+  result: JailAuditResult
+  detail: string
+  fix?: string
+}
+
+export interface JailBase {
   jail: string
-  from: Layout
-  to: Layout
-  image?: string
-  changed: boolean
-  dry_run?: boolean
-  steps?: string[]
-  kept?: string[]
-  replaced?: string
-  warnings?: string[]
+  packages: JailBasePackage[]
+}
+
+export interface JailBasePackage {
+  name: string
+  version: string
 }
 
 export interface JailCopy {
   name: string
   labels?: Record<string, string>
   snapshot?: string
-}
-
-export interface JailDiff {
-  jail: string
-  image: string
-  datasets: DiffDataset[]
-  packages?: DiffPackages
 }
 
 export interface JailDiskUsage {
@@ -1541,7 +1489,6 @@ export interface JailSpec {
   image: string
   os?: OS
   storage?: string
-  layout?: Layout
   hostname?: string
   update?: UpdatePolicy
   resources?: Resources
@@ -1576,13 +1523,14 @@ export interface JailStatus {
   warnings?: string[]
   locked?: string[]
   disk_used_bytes?: number
-  rollback_expires_at?: string
   exposed?: ExposedEntry[]
 }
 
 export interface JailUpgrade {
-  generation?: string
-  image?: string
+  release?: string
+  no_packages?: boolean
+  force?: boolean
+  add_packages?: string[]
   dry_run?: boolean
 }
 
@@ -1913,6 +1861,7 @@ export interface ProjectSpec {
   quotas?: ProjectQuotas
   firewall_policies?: string[]
   images?: string[]
+  shell?: string
   new_network?: boolean
 }
 
@@ -2049,16 +1998,6 @@ export interface RenameResult {
   counts: Record<string, number>
   steps?: string[]
   warnings?: string[]
-}
-
-export interface RepairPackagesRequest {
-}
-
-export interface RepairPackagesResult {
-  jail: string
-  base: number
-  replaced: number
-  added: number
 }
 
 export interface RepositoryStatus {
@@ -2780,7 +2719,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "resources.disk",
     "type": "size",
-    "description": "ZFS quota of the jail's container: its root, persistent datasets, volumes and snapshots together.",
+    "description": "ZFS quota of the jail's container: its root, its delegated dataset and their snapshots together.",
     "example": "20G",
     "restart_required": false,
     "profile": true,
@@ -2875,7 +2814,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "update.os",
     "type": "bool",
-    "description": "Move the jail to a newer image generation (root swap).",
+    "description": "Upgrade the FreeBSD base of the jail in place, inside its release: on the schedule of a managed jail (a global administrator turns that on), or on demand by a global administrator.",
     "example": "true",
     "restart_required": false,
     "profile": true,
@@ -2897,7 +2836,7 @@ export const configKeys: readonly ConfigKey[] = [
       "manual",
       "auto"
     ],
-    "description": "Whether a jail restart that an update needs is applied automatically (auto) or left to you (manual, the default).",
+    "description": "Kept for compatibility: JailOps never stops or restarts a running jail for an update, so auto behaves as manual (the default) and the update record names the processes whose restart is pending.",
     "example": "manual",
     "restart_required": false,
     "profile": true,
@@ -2952,4 +2891,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'jail_repair_packages', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'jail_diff', 'firewall_applied', 'jail_export', 'jail_files', 'jail_convert', 'volume_from_dir', 'top']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'firewall_applied', 'jail_export', 'jail_files', 'volume_from_dir', 'top', 'jail_audit', 'jail_base']

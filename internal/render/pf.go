@@ -498,8 +498,12 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 		src6m := listMatch(src6)
 		b.rule(icmp6(StageNeighbour, "block", "in", anyMatch(), listMatch([]string{"ff02::/16"}), "neighbradv"),
 			"block in quick on %s inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv", ifs)
-		b.rule(icmp6(StageNeighbour, "pass", "in", src6m, anyMatch(), "neighbrsol", "neighbradv"),
-			"pass in quick on %s inet6 proto icmp6 from %s to any icmp6-type { neighbrsol, neighbradv }", ifs, from6)
+		// Neighbour messages are link-scoped: the jail resolves and checks only its gateway fe80::1 (the host end of its
+		// link holds no other IPv6 address) and answers the host's solicitations, which come from fe80::1; a jail with a
+		// /64 may solicit a solicited-node group. Any other destination is a message the host would forward off the link.
+		ndTo := []string{"fe80::/10", "ff02::1:ff00:0/104"}
+		b.rule(icmp6(StageNeighbour, "pass", "in", src6m, listMatch(ndTo), "neighbrsol", "neighbradv"),
+			"pass in quick on %s inet6 proto icmp6 from %s to %s icmp6-type { neighbrsol, neighbradv }", ifs, from6, listStr(ndTo))
 		b.rule(icmp6(StageNeighbour, "pass", "in", src6m, listMatch([]string{"ff02::/16"}), "listenrep", "listendone", "143"),
 			"pass in quick on %s inet6 proto icmp6 from %s to ff02::/16 icmp6-type { listenrep, listendone, 143 }", ifs, from6)
 		b.rule(icmp6(StageNeighbour, "pass", "in", src6m, anyMatch(), "unreach", "toobig", "timex", "paramprob"),
@@ -520,6 +524,10 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	if len(famAddrs(fams, "inet")) > 0 {
 		b.rule(Rule{Action: "block", Dir: "out", Family: "inet", Proto: "icmp", ICMPTypes: []string{"redir"}, From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageOwnAddrs}},
 			"block drop out quick on %s inet proto icmp from any to any icmp-type redir", ifs)
+		// The limited broadcast is delivered to the host itself (to every service bound to 0.0.0.0), and it is not an
+		// address of <host>: it is closed before any policy, since a jail has no use for it (no DHCP in a jail).
+		b.rule(Rule{Action: "block", Dir: "in", Family: "inet", From: anyMatch(), To: listMatch([]string{"255.255.255.255"}), Origin: Origin{Stage: StageHost}},
+			"block drop in quick on %s inet from any to 255.255.255.255", ifs)
 	}
 
 	// Deny wins over allow, whatever the order of the policies: when any policy has an enabled deny rule, the deny rules of
@@ -642,7 +650,7 @@ var (
 )
 
 // labelPassRules puts a label on every stateful pass rule of an anchor. The label is a hash of the anchor's name, the
-// rule's text, the members of the tables the rule names, and everything that comes before the rule in the anchor
+// rule's text, the members of the tables the rule names (not those of hostBound), and everything that comes before the rule in the anchor
 // (every rule above it, with the members of their tables). It is the same for as long as the rule means the same
 // thing at the same place, and different as soon as it does not: a rule removed, a port changed, an address taken out
 // of a set, or a deny put in front of it, which changes what the rule lets through. The reconciler kills the states of
@@ -657,6 +665,17 @@ const (
 	rawBegin = "# raw fragment (admin)"
 	rawEnd   = "# end of raw fragment (admin)"
 )
+
+// hostBound are the tables whose members follow the host and the other projects rather than what a rule means: the
+// host's own addresses (a network's first jail starting or its last stopping, a tunnel coming up or going down, an
+// address on the uplink), the other projects' subnets and the subnets that never arrive on the uplink (a network created
+// or deleted anywhere). They close or narrow a pass: a block names them, or a pass names them negated (to ! <host>,
+// from ! <foreign>), so a member added makes a pass let through less, never more. A change of their members ends no
+// flow: a state a pass created before a member was added keeps until it ends. If their members entered the labels,
+// every such change would end every established connection of every jail on the host. Their names stay in the hash
+// (they are in the rule's text); the members of an address set, of a jail reference and of the jail's own addresses
+// do enter it.
+var hostBound = map[string]bool{HostTable: true, ForeignTable: true, UplinkTable: true}
 
 func labelPassRules(anchor, text string, maxStates int) string {
 	tables := map[string]string{}
@@ -680,6 +699,9 @@ func labelPassRules(anchor, text string, maxStates int) string {
 		if rule {
 			uses := ""
 			for _, m := range tableUseRE.FindAllStringSubmatch(ln, -1) {
+				if hostBound[m[1]] {
+					continue // the name is in the rule's text; the members follow the host, not the rule
+				}
 				if body, ok := tables[m[1]]; ok {
 					uses += m[1] + "=" + body + "\n"
 				}

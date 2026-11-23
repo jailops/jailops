@@ -50,6 +50,11 @@ type kindDesc[T any] struct {
 	// brief is the short form of the list on a terminal; nil shows head and
 	// row there too. -o wide always shows head and row.
 	brief *listView[T]
+	// more are the columns -v (--verbose) adds to the list, after those of the form shown; -o wide shows them too.
+	// nil for a kind that has none.
+	more *listView[T]
+	// moreHelp is the paragraph of the list help that says what the columns of more hold.
+	moreHelp string
 	// show prints the human form of one object; nil prints YAML.
 	show func(a *app, x T) error
 	// nextStep is one line printed on standard output after an object is created, the command that makes it usable
@@ -112,17 +117,45 @@ type listView[T any] struct {
 	drop []int
 }
 
-// view picks the form of the list for the current output.
-func (d *kindDesc[T]) view(a *app) listView[T] {
+// view picks the form of the list for the current output; verbose (-v) adds the columns of more.
+func (d *kindDesc[T]) view(a *app, verbose bool) listView[T] {
+	v := d.full()
 	if d.brief != nil && !a.wide && a.pretty() {
-		return *d.brief
+		v = *d.brief
 	}
-	return d.full()
+	if d.more != nil && (verbose || a.wide) {
+		v = v.with(*d.more)
+	}
+	return v
 }
 
-// full is the form with every column, the one -o wide shows.
+// full is the form with every column of head; -o wide shows it with the columns of more.
 func (d *kindDesc[T]) full() listView[T] {
 	return listView[T]{head: d.head, row: d.row, style: d.style}
+}
+
+// with is the view followed by the columns of more. On a narrow terminal the columns more drops go first, then those
+// the view drops.
+func (v listView[T]) with(more listView[T]) listView[T] {
+	n := len(v.head)
+	out := listView[T]{head: append(slices.Clone(v.head), more.head...)}
+	out.row = func(now time.Time, x T) []string { return append(v.row(now, x), more.row(now, x)...) }
+	if v.style != nil || more.style != nil {
+		out.style = func(col int, val string) string {
+			switch {
+			case col < n && v.style != nil:
+				return v.style(col, val)
+			case col >= n && more.style != nil:
+				return more.style(col-n, val)
+			}
+			return ""
+		}
+	}
+	for _, c := range more.drop {
+		out.drop = append(out.drop, c+n)
+	}
+	out.drop = append(out.drop, v.drop...)
+	return out
 }
 
 // newDesc builds the parts of a descriptor that follow from the types.
@@ -311,15 +344,26 @@ func cellValue(s string) (float64, bool) {
 	if n, err := strconv.ParseFloat(s, 64); err == nil {
 		return n, true
 	}
+	// a duration as age and uptime write it: "5m", "3d4h"
 	unit := map[byte]float64{'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
-	if l := len(s); l > 1 {
-		if m, ok := unit[s[l-1]]; ok {
-			if n, err := strconv.Atoi(s[:l-1]); err == nil {
-				return float64(n) * m, true
-			}
+	total, digits := 0.0, 0
+	for i := 0; i < len(s); i++ {
+		if s[i] >= '0' && s[i] <= '9' {
+			digits++
+			continue
 		}
+		m, ok := unit[s[i]]
+		if !ok || digits == 0 {
+			return 0, false
+		}
+		n, _ := strconv.Atoi(s[i-digits : i])
+		total += float64(n) * m
+		digits = 0
 	}
-	return 0, false
+	if digits != 0 || total == 0 && !strings.HasPrefix(s, "0") {
+		return 0, false
+	}
+	return total, true
 }
 
 func matchesAny(patterns []string, name string) bool {
@@ -338,6 +382,9 @@ func matchesAny(patterns []string, name string) bool {
 // on a terminal has.
 func (d *kindDesc[T]) columns() []string {
 	out := columnNames(d.head)
+	if d.more != nil {
+		out = append(out, columnNames(d.more.head)...)
+	}
 	if d.brief != nil {
 		for _, c := range columnNames(d.brief.head) {
 			if !slices.Contains(out, c) {
@@ -346,6 +393,14 @@ func (d *kindDesc[T]) columns() []string {
 		}
 	}
 	return out
+}
+
+// moreExample is the example of -v for a kind that has it.
+func (d *kindDesc[T]) moreExample() string {
+	if d.more == nil {
+		return ""
+	}
+	return "\njailops " + "@P@" + " list -v"
 }
 
 // grantedHelp is the paragraph of the list help for a kind that projects are granted.
@@ -400,6 +455,10 @@ func (d *kindDesc[T]) viewFor(names []string) (listView[T], error) {
 		return d.full(), nil
 	case d.brief != nil && has(d.brief.head):
 		return *d.brief, nil
+	case d.more != nil && has(d.full().with(*d.more).head):
+		return d.full().with(*d.more), nil
+	case d.more != nil && d.brief != nil && has(d.brief.with(*d.more).head):
+		return d.brief.with(*d.more), nil
 	}
 	for _, n := range names {
 		if !slices.Contains(d.columns(), strings.ToLower(strings.TrimSpace(n))) {
@@ -429,7 +488,7 @@ func listExample(head []string) string {
 func addList[T any](a *app, parent *cobra.Command, d *kindDesc[T], extraExample string) {
 	var labels, columns []string
 	var sortBy string
-	var all bool
+	var all, verbose bool
 	var keep func() (func(T) bool, error)
 	cmd := &cobra.Command{
 		Use:     "list [PATTERN...]",
@@ -438,8 +497,8 @@ func addList[T any](a *app, parent *cobra.Command, d *kindDesc[T], extraExample 
 		Long: "List " + d.plural + ` known to the server, optionally filtered by label (-l, also
 --selector) or by name patterns such as 'web*'. The default output is a table: -c
 picks its columns and --sort orders its rows (columns: ` + strings.Join(d.columns(), ", ") + `).
--o json and -o yaml print the full objects, -o name the names only, -o csv the table as CSV.` + d.grantedHelp(),
-		Example:           "jailops " + "@P@" + " list\njailops " + "@P@" + " list 'web*' " + listExample(d.head) + "\njailops " + "@P@" + " list -l env=prod -o name" + extraExample,
+-o json and -o yaml print the full objects, -o name the names only, -o csv the table as CSV.` + d.grantedHelp() + d.moreHelp,
+		Example:           "jailops " + "@P@" + " list\njailops " + "@P@" + " list 'web*' " + listExample(d.head) + "\njailops " + "@P@" + " list -l env=prod -o name" + d.moreExample() + extraExample,
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeKind(a, d),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -459,7 +518,7 @@ picks its columns and --sort orders its rows (columns: ` + strings.Join(d.column
 			if err != nil {
 				return err
 			}
-			v := d.view(a)
+			v := d.view(a, verbose)
 			if all {
 				conn, err := a.resolveConnection()
 				if err != nil {
@@ -560,6 +619,9 @@ picks its columns and --sort orders its rows (columns: ` + strings.Join(d.column
 	cmd.Flags().StringArrayVarP(&labels, "selector", "l", nil, "only objects with these labels, key=value (repeatable)")
 	cmd.Flags().StringSliceVarP(&columns, "columns", "c", nil, "columns of the table, comma separated: "+strings.Join(d.columns(), ", "))
 	cmd.Flags().StringVar(&sortBy, "sort", "", "order the rows by this column")
+	if d.more != nil {
+		cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "add the columns "+strings.Join(d.more.head, ", ")+" to the table")
+	}
 	cols := d.columns()
 	if d.granted != nil {
 		cols = append(cols, "granted", "projects")

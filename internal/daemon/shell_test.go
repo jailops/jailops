@@ -205,10 +205,10 @@ func TestNewJailGetsBashAndThePrompt(t *testing.T) {
 func TestShellChoicesAndExistingJails(t *testing.T) {
 	shellT = t
 	dir := t.TempDir()
-	e := dtest.New(t, dtest.Options{Dir: dir, Mutate: func(c *daemon.Config) { c.Jails.Shell = "sh" }})
+	e := dtest.New(t, dtest.Options{Dir: dir, Mutate: func(c *daemon.Config) { c.Jails.Shell, c.Jails.Prompt = "sh", "none" }})
 	e.Seed()
 	ctx := context.Background()
-	// a host that chose sh: nothing is installed or written, the shell is /bin/sh
+	// a host that chose sh and no prompt: nothing is installed or written, the shell is /bin/sh
 	j := mustOp(e.Admin.Jails().Create(ctx, dtest.WebJail("web")))
 	if j.Spec.Shell != "" || j.Spec.Prompt != "" {
 		t.Fatalf("%+v", j.Spec)
@@ -266,7 +266,7 @@ func TestShellChoicesAndExistingJails(t *testing.T) {
 	j3 := dtest.WebJail("web3")
 	j3.Spec.Profiles = []string{"plain"}
 	j = mustOp(e2.Admin.Jails().Create(ctx, j3))
-	if j.Spec.Shell != "" || j.Spec.Prompt != "" {
+	if j.Spec.Shell != "" || j.Spec.Prompt != api.PromptDefault { // the profile keeps sh; sh gets the host's prompt too
 		t.Fatalf("the default overrode the profile: %+v", j.Spec)
 	}
 	// a whole spec written back (jailops apply, jailops-sync) may name the shell too
@@ -365,7 +365,7 @@ func TestLinuxJailsKeepTheirShell(t *testing.T) {
 
 func TestJailsConfig(t *testing.T) {
 	cfg, err := daemon.Decode(strings.NewReader("pool: tank\n"))
-	if err != nil || cfg.Jails.Shell != "bash" || cfg.Jails.Prompt != "default" || cfg.Jails.PromptColor == nil || *cfg.Jails.PromptColor != 39 {
+	if err != nil || cfg.Jails.Shell != "sh" || cfg.Jails.Prompt != "default" || cfg.Jails.PromptColor == nil || *cfg.Jails.PromptColor != 39 {
 		t.Fatalf("%+v %v", cfg.Jails, err)
 	}
 	cfg, err = daemon.Decode(strings.NewReader("pool: tank\njails:\n  shell: sh\n  prompt: '\\u@\\h:\\w\\$ '\n  prompt_color: 196\n"))
@@ -450,29 +450,5 @@ func TestJailsMaxStatesConfig(t *testing.T) {
 		if _, err := daemon.Decode(strings.NewReader("pool: tank\njails:\n  max_states: " + bad + "\n")); err == nil || !strings.Contains(err.Error(), "jails.max_states") {
 			t.Errorf("max_states %s: %v", bad, err)
 		}
-	}
-}
-
-// A Linux jail is thick: the persistent datasets of a thin layout are ZFS mounts that the nullfs mirror at
-// compat/linux does not show, so the thin layout is refused at once and nothing is made.
-func TestALinuxJailIsAlwaysThick(t *testing.T) {
-	shellT = t
-	e := dtest.New(t, dtest.Options{})
-	e.Seed()
-	e.SeedLinux()
-	ctx := context.Background()
-	thin := dtest.AlpineJail("alp-thin")
-	thin.Spec.Layout = api.LayoutThin
-	_, err := e.Admin.Jails().Create(ctx, thin)
-	var ae *api.Error
-	if !errors.As(err, &ae) || ae.Code != api.CodeInvalid || !strings.Contains(ae.Message, "a Linux jail is thick") {
-		t.Fatalf("thin on a Linux image: %v", err)
-	}
-	if _, err := e.Admin.Jails().Get(ctx, "alp-thin"); !api.IsCode(err, api.CodeNotFound) {
-		t.Fatalf("a refused jail was stored: %v", err)
-	}
-	j := mustOp(e.Admin.Jails().Create(ctx, dtest.AlpineJail("alp")))
-	if j.Spec.Layout != api.LayoutThick {
-		t.Fatalf("layout of a Linux jail: %q", j.Spec.Layout)
 	}
 }

@@ -10,18 +10,6 @@ const (
 	OSLinux   OS = "linux" // Linuxulator; Alpine first, Debian later
 )
 
-// Layout selects how a FreeBSD jail's root is built from an image generation.
-//
-// JailOps is ZFS-native: a thin jail's root is a ZFS clone of an immutable
-// image generation, and everything that must survive an update lives in
-// separate datasets. There is no nullfs-based thin layout.
-type Layout string
-
-const (
-	LayoutThin  Layout = "thin"
-	LayoutThick Layout = "thick" // full independent copy
-)
-
 // Jail is a managed jail. Jails are ScopeHost objects.
 type Jail struct {
 	Metadata ObjectMeta `json:"metadata"`
@@ -45,8 +33,6 @@ type JailSpec struct {
 	// Storage names the storage the jail's datasets are created on. It is
 	// empty only when a profile names one; otherwise the jail is refused (nothing is filled in).
 	Storage string `json:"storage,omitempty"`
-	// Layout defaults to thin for FreeBSD jails and thick for Linux jails.
-	Layout Layout `json:"layout,omitempty"`
 	// Hostname defaults to the jail name.
 	Hostname string `json:"hostname,omitempty"`
 
@@ -106,10 +92,13 @@ type UpdatePolicy struct {
 	Schedule string `json:"schedule,omitempty"`
 	// Packages updates the packages inside the jail from the host (pkg or apk).
 	Packages bool `json:"packages,omitempty"`
-	// OS moves the jail to a newer image generation (root swap, design 4.3).
+	// OS upgrades the FreeBSD base of the jail in place, inside its release (as jail upgrade): with mode managed on the
+	// jail's schedule, otherwise on demand by a global administrator. Turning it on together with mode managed needs a
+	// global administrator (the request is forbidden for anyone else).
 	OS bool `json:"os,omitempty"`
-	// Reboot says whether a jail restart that an update needs is applied
-	// automatically (auto) or left to the user (manual, the default).
+	// Reboot is kept for compatibility: JailOps never stops or restarts a
+	// running jail for an update, so auto behaves as manual (the default): the
+	// update record names the processes whose restart is pending.
 	Reboot UpdateReboot `json:"reboot,omitempty"`
 }
 
@@ -123,7 +112,8 @@ const (
 	UpdateModeManaged UpdateMode = "managed"
 )
 
-// UpdateReboot says whether a restart an update needs is automatic.
+// UpdateReboot is the restart policy of an update. Both values report a
+// pending restart; JailOps never restarts a jail for an update.
 type UpdateReboot string
 
 // Reboot policies.
@@ -138,7 +128,7 @@ const (
 type Resources struct {
 	CPU    int    `json:"cpu,omitempty"`    // cores: rctl pcpu, the jail is slowed down to that share
 	Memory string `json:"memory,omitempty"` // "2G": rctl swapuse, the anonymous memory the jail may reserve; an allocation beyond it fails
-	Disk   string `json:"disk,omitempty"`   // ZFS quota of the container: root, persistent datasets, volumes and snapshots
+	Disk   string `json:"disk,omitempty"`   // ZFS quota of the container: root, delegated dataset and snapshots
 	PIDs   int    `json:"pids,omitempty"`   // rctl maxproc: fork fails at that many processes
 	// DiskReservation is an optional ZFS reservation of the jail's container.
 	DiskReservation string `json:"disk_reservation,omitempty"`
@@ -266,10 +256,11 @@ type JailStatus struct {
 	Power PowerState `json:"power"`
 	// JID is the kernel jail id while the jail runs.
 	JID int `json:"jid,omitempty"`
-	// ImageGeneration is the image generation the root currently uses, written IMAGE#gN.
+	// ImageGeneration is the image generation the jail's root was copied from, written IMAGE#gN. It is where the
+	// jail came from, not something it depends on.
 	ImageGeneration string `json:"image_generation,omitempty"`
-	// FreeBSDVersion is the FreeBSD version of that generation (ImageGeneration.FreeBSDVersion); empty when it was
-	// not recorded.
+	// FreeBSDVersion is the FreeBSD version installed in the jail (what its last upgrade installed, else the version of
+	// the generation it was copied from); empty when it was not recorded.
 	FreeBSDVersion string `json:"freebsd_version,omitempty"`
 	// Addresses are the addresses actually configured.
 	Addresses []string  `json:"addresses,omitempty"`
@@ -287,13 +278,10 @@ type JailStatus struct {
 	Warnings []string `json:"warnings,omitempty"`
 	// Locked names the encrypted volumes whose key is not loaded: the jail does not start until it is unlocked.
 	Locked []string `json:"locked,omitempty"`
-	// DiskUsed is what the jail's own datasets take on the pool (`used` of the root and of the persistent datasets, the
-	// space a thin root shares with its image excluded); the volumes it attaches are the project's. Zero when ZFS
-	// could not be read. Filled by list and get.
+	// DiskUsed is what the jail's own datasets take on the pool (`used` of the root and the delegated dataset, their
+	// snapshots included); the volumes it attaches are the project's. Zero when ZFS could not be read. Filled by list
+	// and get.
 	DiskUsed int64 `json:"disk_used_bytes,omitempty"`
-	// RollbackExpiresAt is when the previous root of an upgraded jail is removed; until then `jail rollback` can return to
-	// it. Absent when there is none. Filled by get only.
-	RollbackExpiresAt time.Time `json:"rollback_expires_at,omitzero"`
 	// Exposed is what the Internet reaches on the jail: pass rules on an uplink and port forwards, from the anchor the
 	// renderer builds. Filled by list and get; empty when nothing is reachable or the anchor could not be built.
 	Exposed []ExposedEntry `json:"exposed,omitempty"`
@@ -330,11 +318,10 @@ func CheckPassphrase(p string) error {
 type RollbackScope string
 
 const (
-	// RollbackRoot returns only the OS root to the previous generation and
-	// leaves application data untouched. It is the default.
+	// RollbackRoot returns the root to the snapshot of the latest upgrade (a stopped jail only). It is the default.
 	RollbackRoot RollbackScope = "root"
-	// RollbackData rolls the data datasets back to a snapshot and discards
-	// everything written since.
+	// RollbackData rolls the delegated dataset back to a snapshot and discards everything written since; RollbackAll
+	// rolls the root and the delegated dataset back to it.
 	RollbackData RollbackScope = "data"
 	RollbackAll  RollbackScope = "all"
 )
@@ -360,48 +347,36 @@ type JailCopy struct {
 	Snapshot string `json:"snapshot,omitempty"`
 }
 
-// JailConvert is the body of POST /api/v1/jails/{name}/convert: the jail's root changes layout. Thin to thick makes the root
-// a full copy of its own (the persistent datasets are folded into it); thick to thin gives the jail a clone of an image
-// generation as its root and the directories of the persistent datasets keep the jail's data. The jail is stopped for it
-// and started again when it ran. Linux jails are thick and stay so.
-type JailConvert struct {
-	// Layout is the layout the jail gets: thin or thick.
-	Layout Layout `json:"layout"`
-	// Image is the image generation a jail converted to thin takes its root from: NAME (the newest generation) or
-	// NAME#gN. Empty: the generation the thick root was copied from, which is the exact image the jail is made of.
-	Image  string `json:"image,omitempty"`
-	DryRun bool   `json:"dry_run,omitempty"`
-}
-
-// JailConvertResult is the result of a convert operation (the plan of a dry run).
-type JailConvertResult struct {
-	Jail string `json:"jail"`
-	From Layout `json:"from"`
-	To   Layout `json:"to"`
-	// Image is the image the jail uses afterwards.
-	Image string `json:"image,omitempty"`
-	// Changed is false when the jail has the layout already.
-	Changed bool `json:"changed"`
-	DryRun  bool `json:"dry_run,omitempty"`
-	// Steps are the steps of the plan, in order.
-	Steps []string `json:"steps,omitempty"`
-	// Kept are the paths of the jail that carry its data over the conversion; Replaced says what comes from the image
-	// instead of the old root.
-	Kept     []string `json:"kept,omitempty"`
-	Replaced string   `json:"replaced,omitempty"`
-	Warnings []string `json:"warnings,omitempty"`
-}
-
 // JailUpgrade is the body of POST /api/v1/jails/{name}/upgrade.
 type JailUpgrade struct {
-	// Generation pins the target, written gN or IMAGE#gN; empty means the newest generation of the
-	// jail's image (or of Image).
-	Generation string `json:"generation,omitempty"`
-	// Image moves a thin FreeBSD jail to another image of the same OS and architecture whose release is the same
-	// or newer (a new release): the jail keeps its data, volumes, addresses and configuration, and follows that
-	// image from then on. Empty keeps the jail's image.
-	Image  string `json:"image,omitempty"`
-	DryRun bool   `json:"dry_run,omitempty"`
+	// Release moves a FreeBSD jail to a new FreeBSD release: the base packages are upgraded in place against the
+	// repository of that release (15.2-RELEASE reads base_release_2; STABLE, CURRENT and the pre-release spellings such
+	// as 16.0-CURRENT, 15.2-STABLE or 15.2-PRERELEASE read base_latest). It is not older than the release installed in
+	// the jail and not newer than the host's kernel. Empty keeps the installed release: the base packages are brought to
+	// the newest of its repository. Not with AddPackages.
+	Release string `json:"release,omitempty"`
+	// NoPackages leaves the ports packages of the jail alone: only the base is upgraded.
+	NoPackages bool `json:"no_packages,omitempty"`
+	// Force goes on although the jail's health check fails before the upgrade (a rollback point that is already
+	// broken is not a safe base).
+	Force bool `json:"force,omitempty"`
+	// AddPackages installs base packages (FreeBSD-*, for example FreeBSD-ssh) into a FreeBSD jail from the host,
+	// in place, with the snapshot and health check of an upgrade; the FreeBSD-base repository stays disabled inside
+	// the jail.
+	AddPackages []string `json:"add_packages,omitempty"`
+	DryRun      bool     `json:"dry_run,omitempty"`
+}
+
+// JailBase is the body of GET /api/v1/jails/{name}/base: the base packages (FreeBSD-*) installed in a FreeBSD jail.
+type JailBase struct {
+	Jail     string            `json:"jail"`
+	Packages []JailBasePackage `json:"packages"`
+}
+
+// JailBasePackage is one installed base package.
+type JailBasePackage struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // JailSnapshot is a consistent snapshot across all datasets of a jail.
@@ -458,12 +433,46 @@ type JailDiskUsage struct {
 	// Error says why nothing was measured.
 	Error string `json:"error,omitempty"`
 	// RootBytes is `used` of the root dataset: what the root takes on the
-	// pool by itself (a thin jail's root shares the rest with its image).
+	// pool by itself (blocks cloned from the image are not counted).
 	RootBytes int64 `json:"root_bytes"`
 	// RootReferencedBytes is `referenced` of the root: the size of the root's
 	// tree, shared blocks included.
 	RootReferencedBytes int64 `json:"root_referenced_bytes"`
-	// DataBytes is `used` of the data datasets (persistent paths and
-	// volumes) together, their snapshots included.
+	// DataBytes is `used` of the dataset the jail manages itself (zfs_delegation), its snapshots included; the volumes
+	// it attaches are the project's and are not counted.
 	DataBytes int64 `json:"data_bytes"`
 }
+
+// JailAudit is the body of GET /api/v1/jails/{name}/audit: a read-only look at a FreeBSD jail, running or stopped, in
+// two groups. The security checks look at what crosses the boundary of the jail or opens it (a link out of the root, a
+// second account with uid 0, an unknown package repository); the practice checks at what a jail on JailOps does better
+// (cron jitter, periodic reports to files). Nothing is changed and the jail is not stopped.
+type JailAudit struct {
+	Jail    string `json:"jail"`
+	Running bool   `json:"running"`
+	// Critical and Warnings count the checks with that result.
+	Critical int              `json:"critical"`
+	Warnings int              `json:"warnings"`
+	Checks   []JailAuditCheck `json:"checks"`
+}
+
+// JailAuditCheck is one check of an audit: its result, one line of what was found and, unless it passed, the fix.
+type JailAuditCheck struct {
+	// ID names the check (accounts.uid0, pkg.repositories, cron.jitter, ...).
+	ID string `json:"id"`
+	// Group is "security" or "practice".
+	Group  string          `json:"group"`
+	Result JailAuditResult `json:"result"`
+	Detail string          `json:"detail"`
+	Fix    string          `json:"fix,omitempty"`
+}
+
+// JailAuditResult is the result of one audit check. Only a security check is ever critical.
+type JailAuditResult string
+
+const (
+	AuditPass     JailAuditResult = "pass"
+	AuditInfo     JailAuditResult = "info"
+	AuditWarn     JailAuditResult = "warn"
+	AuditCritical JailAuditResult = "critical"
+)

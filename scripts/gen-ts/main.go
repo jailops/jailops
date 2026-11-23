@@ -29,7 +29,7 @@ const defaultOut = "web/shared/src/api/types.gen.ts"
 // roots are the types the UI uses directly. Everything they reference is emitted too.
 var roots = []any{
 	api.ServerInfo{}, api.Response{}, api.Operation{}, api.Event{}, api.LifecycleEvent{}, api.Error{},
-	api.Jail{}, api.JailAction{}, api.JailRollback{}, api.JailUpgrade{}, api.JailCopy{}, api.JailConvert{}, api.JailConvertResult{}, api.JailSnapshot{}, api.JailUsage{}, api.JailLogFile{}, api.JailLogRead{}, api.JailFileStat{}, api.JailFileCopy{},
+	api.Jail{}, api.JailAction{}, api.JailRollback{}, api.JailUpgrade{}, api.JailCopy{}, api.JailSnapshot{}, api.JailUsage{}, api.JailBase{}, api.JailBasePackage{}, api.JailAudit{}, api.JailLogFile{}, api.JailLogRead{}, api.JailFileStat{}, api.JailFileCopy{},
 	api.Image{}, api.ImageBuild{}, api.ImageUpgrade{}, api.ImageUpgradeResult{},
 	api.Network{}, api.Lease{},
 	api.WireGuard{}, api.WireGuardPeerAdd{}, api.WireGuardPeerCreated{}, api.WireGuardJoin{}, api.WireGuardKeys{},
@@ -38,9 +38,9 @@ var roots = []any{
 	api.Token{}, api.Certificate{}, api.User{}, api.Remote{},
 	api.Document{},
 	api.Project{}, api.ProjectAggregate{}, api.ProjectHostStatus{}, api.Storage{}, api.Session{}, api.Identity{}, api.TrustTokenRequest{}, api.TrustToken{}, api.TrustClientRequest{}, api.Profile{}, api.ConfigKey{}, api.JailExpanded{}, api.ConfigChange{}, api.UpdateReport{}, api.UpdateRecord{}, api.UpdateCheckRequest{}, api.UpdateApplyRequest{},
-	api.Provision{}, api.ProvisionRequest{}, api.ProvisionResult{}, api.ShellSetupRequest{}, api.ShellSetupResult{}, api.RepairPackagesRequest{}, api.RepairPackagesResult{}, api.ExecRequest{}, api.BackupRun{}, api.BackupRunRequest{}, api.BackupVerifyRequest{},
+	api.Provision{}, api.ProvisionRequest{}, api.ProvisionResult{}, api.ShellSetupRequest{}, api.ShellSetupResult{}, api.ExecRequest{}, api.BackupRun{}, api.BackupRunRequest{}, api.BackupVerifyRequest{},
 	api.BackupKeyStatus{}, api.BackupKeyCreate{}, api.BackupKeyCreated{}, api.BackupKeyEscrow{}, api.BackupKeyImport{}, api.BackupKeyImported{},
-	api.AuditEntry{}, api.PoolUsage{}, api.DoctorReport{}, api.NDPStatus{}, api.JailReach{}, api.JailDiff{}, api.ExportManifest{}, api.JailImportPreflight{}, api.JailImportRequest{}, api.JailImported{}, api.Exposed{}, api.ExposeRequest{}, api.UnexposeRequest{}, api.ExposeResult{}, api.RepositoryStatus{}, api.UserCreate{}, api.UserCreated{}, api.PasswordSet{},
+	api.AuditEntry{}, api.PoolUsage{}, api.DoctorReport{}, api.NDPStatus{}, api.JailReach{}, api.ExportManifest{}, api.JailImportPreflight{}, api.JailImportRequest{}, api.JailImported{}, api.Exposed{}, api.ExposeRequest{}, api.UnexposeRequest{}, api.ExposeResult{}, api.RepositoryStatus{}, api.UserCreate{}, api.UserCreated{}, api.PasswordSet{},
 	api.AppSummary{}, api.AppDetail{}, api.AppInstall{}, api.AppInstallResult{}, api.AppDraft{},
 	api.HostIdentity{}, api.HostIdentityApply{}, api.HostRestore{}, api.HostChange{}, api.HostSnapshot{},
 	api.HostFirewall{}, api.HostFirewallApply{}, api.HostPending{}, api.HostPendingAction{},
@@ -57,7 +57,6 @@ var enums = map[reflect.Type][]string{
 	reflect.TypeFor[api.Permission]():      {string(api.PermReadonly), string(api.PermOperator), string(api.PermAdmin), string(api.PermBackupPush), string(api.PermBackupPull), string(api.PermRestore), string(api.PermBackupAdmin)},
 	reflect.TypeFor[api.Role]():            {string(api.RoleHost), string(api.RoleBackup)},
 	reflect.TypeFor[api.OS]():              {string(api.OSFreeBSD), string(api.OSLinux)},
-	reflect.TypeFor[api.Layout]():          {string(api.LayoutThin), string(api.LayoutThick)},
 	reflect.TypeFor[api.DNSSource]():       {string(api.DNSFromNetwork), string(api.DNSFromHost), string(api.DNSFromGateway), string(api.DNSNone)},
 	reflect.TypeFor[api.PowerState]():      {string(api.PowerStopped), string(api.PowerStarting), string(api.PowerRunning), string(api.PowerStopping), string(api.PowerError), string(api.PowerLocked)},
 	reflect.TypeFor[api.RollbackScope]():   {string(api.RollbackRoot), string(api.RollbackData), string(api.RollbackAll)},
@@ -77,6 +76,7 @@ var enums = map[reflect.Type][]string{
 	reflect.TypeFor[api.AppCategory]():     {string(api.AppDatabase), string(api.AppWeb), string(api.AppTools), string(api.AppDevops), string(api.AppStorage), string(api.AppMonitoring), string(api.AppCommunication), string(api.AppNetwork), string(api.AppSecurity), string(api.AppOther)},
 	reflect.TypeFor[api.AppSource]():       {string(api.AppSourceCatalog), string(api.AppSourceLocal)},
 	reflect.TypeFor[api.LogSinkType]():     {string(api.LogSinkSyslog), string(api.LogSinkWebhook)},
+	reflect.TypeFor[api.JailAuditResult](): {string(api.AuditPass), string(api.AuditInfo), string(api.AuditWarn), string(api.AuditCritical)},
 
 	// the certificate of the console (host_certificate)
 	reflect.TypeFor[api.CertificateSource](): {string(api.CertSourceSelfSigned), string(api.CertSourceConfigured), string(api.CertSourceUploaded), string(api.CertSourceACME)},

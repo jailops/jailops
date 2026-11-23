@@ -22,7 +22,6 @@ DNSSource gateway
 DNSSource host
 DNSSource network
 DNSSource none
-DiffEntry.kind: added modified removed renamed
 DoctorStatus fail
 DoctorStatus info
 DoctorStatus ok
@@ -39,6 +38,10 @@ FirewallRule.proto: tcp udp icmp icmp6
 FirewallTestResult.verdict: pass block unknown
 ImageSource.type: pkgbase minirootfs debootstrap
 JailAction.action: start stop restart
+JailAuditResult critical
+JailAuditResult info
+JailAuditResult pass
+JailAuditResult warn
 JailFileType dir
 JailFileType file
 JailFileType none
@@ -76,8 +79,6 @@ Kind Token
 Kind User
 Kind Volume
 Kind WireGuard
-Layout thick
-Layout thin
 LogSinkType syslog
 LogSinkType webhook
 OS freebsd

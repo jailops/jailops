@@ -23,13 +23,13 @@ const (
 	CodeInternal           Code = "internal"
 	CodeIPConflict         Code = "ip_conflict"
 	CodePoolExhausted      Code = "pool_exhausted"
-	CodeImageInUse         Code = "image_in_use"
+	CodeImageInUse         Code = "image_in_use" // reserved: the server does not return it; a jail is an independent copy of its image
 	CodeDataLoss           Code = "data_loss_unconfirmed"
 	CodeVersionSkew        Code = "version_skew"
 	CodeUnverified         Code = "unverified_platform" // needs FreeBSD or a missing kernel feature
 	CodeZFSIncompatible    Code = "zfs_incompatible"
 	CodeChainBroken        Code = "chain_broken"
-	CodeMergeConflict      Code = "merge_conflict"   // /etc merge needs a human; the jail stays on the old generation
+	CodeMergeConflict      Code = "merge_conflict"   // reserved; the server does not return it (an upgrade makes no /etc merge)
 	CodeQuotaExceeded      Code = "quota_exceeded"   // a project quota or the storage quota of a backup host would be exceeded
 	CodeRateLimited        Code = "rate_limited"     // too many failed attempts (HTTP 429)
 	CodeKeyNotEscrowed     Code = "key_not_escrowed" // raw backup refused: no recoverable key escrow
