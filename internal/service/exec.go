@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path"
 	"strings"
 	"sync"
 	"syscall"
@@ -87,35 +86,36 @@ const DefaultShell = "/bin/sh"
 const ShellPATH = "/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin"
 
 // shellSessionEnv is the environment a shell session starts with, before the jail's and the caller's: PATH, and HOME
-// for root (the user of a session that names none), so cd and ~ work. jexec passes no HOME of its own.
-func shellSessionEnv(user string) []string {
+// for root (the user of a session that names none), so cd and ~ work. jexec passes no HOME of its own. Root's sh
+// also gets ENV=/root/.shrc: an interactive sh that is no login shell reads only $ENV, and root's .shrc holds the
+// prompt (docs/shell.md). bash reads its own files and ignores ENV.
+func shellSessionEnv(user, sh string) []string {
 	env := []string{"PATH=" + ShellPATH}
 	if user == "" || user == "root" {
 		env = append(env, "HOME=/root")
+		if sh == api.ShPath {
+			env = append(env, "ENV="+api.ShrcPath)
+		}
 	}
 	return env
 }
 
-// shellWaitFor is how long a shell session waits for the bash that is being installed in the background.
-var shellWaitFor = 60 * time.Second
-
-// shellMissing is the hint for a shell that is not in the jail: why bash is not there when the setup failed, and how
-// to get it.
-func (s *Service) shellMissing(key, name, sh string) string {
-	h := shellMissingHint(name, sh)
-	if m := s.shellMark(key); sh == api.BashPath && m.Error != "" {
-		h = "the setup of bash failed: " + m.Error + "; " + h
-	} else if s.shellInBackground(key) {
-		h = "bash is still being installed in the background; try again in a moment, or " + h
-	}
-	return h
+// shellNotInstalled is the error of a shell session whose shell is not in the jail: JailOps never installs a shell,
+// and never runs another one in its place.
+func shellNotInstalled(name, sh string) error {
+	return api.Errorf(api.CodePreconditionFailed, "the shell %s is not installed in jail %s", sh, name).WithHint(shellInstallHint(name, sh))
 }
 
-func shellMissingHint(name, sh string) string {
+// shellMissing is the sentence for a shell that is not in the jail, with what to do about it.
+func shellMissing(name, sh string) string {
+	return "the shell " + sh + " is not installed in jail " + name + "; " + shellInstallHint(name, sh)
+}
+
+func shellInstallHint(name, sh string) string {
 	if sh == api.BashPath {
-		return "install it with `jailops jail shell-setup " + name + "`, or use FreeBSD's own shell: `jailops config set " + name + " shell sh`"
+		return "install it with: jailops pkg install " + name + " -- " + api.BashPackage + ", or use sh: jailops shell " + name + " --shell " + api.ShPath
 	}
-	return "install it, or choose another with `jailops config set " + name + " shell <path>`"
+	return "install it in the jail, or use sh: jailops shell " + name + " --shell " + api.ShPath
 }
 
 // StartExec starts a command in a jail of the request's project: the same
@@ -138,12 +138,16 @@ func (s *Service) StartExec(ctx context.Context, name string, req api.ExecReques
 	if j.Status.Power != api.PowerRunning {
 		return nil, api.Errorf(api.CodeBusy, "jail %q is not running", name).WithHint("start it first")
 	}
+	profs, _ := s.resolveProfiles(p.Meta.Name, j.Spec.Profiles)
+	eff, _ := api.ExpandedConfig(j.Spec, profs)
 	argv := req.Argv
 	shellSession := req.Shell || len(argv) == 0
 	if shellSession {
+		// the shell asked for, else the jail's preferred shell, else sh; it must be in the jail now (an administrator who
+		// installs bash gets it from the next session), and nothing is installed or run in its place
 		sh := req.ShellPath
 		if sh == "" {
-			sh = j.Spec.Shell
+			sh = api.ShellPath(eff.Shell)
 		}
 		if sh == "" {
 			sh = DefaultShell
@@ -151,15 +155,8 @@ func (s *Service) StartExec(ctx context.Context, name string, req api.ExecReques
 		if !strings.HasPrefix(sh, "/") || strings.ContainsAny(sh, "\x00\n ") {
 			return nil, invalid("shell %q must be an absolute path inside the jail", sh)
 		}
-		// The jail started a moment ago and its bash is being installed in the background: a session that needs that
-		// bash waits for it, but not for ever. A session that needs no bash (`exec -- cmd`, `shell --shell /bin/sh`)
-		// does not wait.
-		if sh == api.BashPath && s.shellInBackground(key) {
-			s.waitShellSetup(ctx, key, shellWaitFor)
-		}
-		if ok, _ := s.d.Files.Exists(ctx, path.Join(s.rootMount(key), sh)); !ok {
-			return nil, api.Errorf(api.CodeNotFound, "the shell %s does not exist in jail %q", sh, name).
-				WithHint(s.shellMissing(key, name, sh))
+		if !s.shellInRoot(ctx, key, sh) {
+			return nil, shellNotInstalled(name, sh)
 		}
 		argv = []string{sh}
 	}
@@ -175,8 +172,7 @@ func (s *Service) StartExec(ctx context.Context, name string, req api.ExecReques
 	}
 	lim := s.ExecLimitsOf()
 	s.execMu.Lock()
-	// The setup of the shell holds the jail too, but a session may enter it: it needs no package work of its own.
-	if h := s.holds[key]; s.installing[key] && !h.Shell {
+	if h := s.holds[key]; s.installing[key] {
 		s.execMu.Unlock()
 		return nil, api.Errorf(api.CodeBusy, "jail %q is busy: %s is working on it", name, holdWords(h, s.now())).
 			WithHint("wait for it to end; `jailops op list` shows it")
@@ -197,8 +193,6 @@ func (s *Service) StartExec(ctx context.Context, name string, req api.ExecReques
 			s.execMu.Unlock()
 		})
 	}
-	profs, _ := s.resolveProfiles(p.Meta.Name, j.Spec.Profiles)
-	eff, _ := api.ExpandedConfig(j.Spec, profs)
 	jenv, err := s.jailEnv(eff.Env)
 	if err != nil {
 		release()
@@ -207,7 +201,7 @@ func (s *Service) StartExec(ctx context.Context, name string, req api.ExecReques
 	// what the caller names wins over what the jail declares, and both over the defaults of a shell session
 	var env []string
 	if shellSession {
-		env = shellSessionEnv(req.User)
+		env = shellSessionEnv(req.User, argv[0])
 	}
 	env = append(append(env, jenv...), req.Env...)
 	sess, err := s.d.Execer.Exec(ctx, key, argv, ExecOpts{TTY: req.TTY, Rows: req.Rows, Cols: req.Cols, Env: env, User: req.User})

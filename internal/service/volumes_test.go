@@ -235,7 +235,6 @@ func TestLiveAttachRefusedByTheRenderChangesNothing(t *testing.T) {
 	op, err = s.JailAction(ctx, "desktop", api.JailAction{Action: "start"})
 	mustOp(t, s, op, err)
 	// the first start installs bash in the background; its file writes count as steps of the injector too
-	waitShellSetup(t, s, ctx, "desktop")
 	attach := func() error {
 		op, err := s.AttachVolume(ctx, "desktop", api.VolumeAttachRequest{Volume: "other", Mount: "/srv/o"})
 		if err != nil {

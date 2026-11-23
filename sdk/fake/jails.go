@@ -530,7 +530,7 @@ func (s *Server) jailUpgrade(w http.ResponseWriter, r *http.Request) {
 			return reply{err: notFound("jail", name)}
 		}
 		if j.Spec.OS == api.OSLinux {
-			return reply{err: api.Errorf(api.CodeUnsupported, "in-place upgrades apply to FreeBSD jails; a Linux jail updates through its package manager (jailops update apply)")}
+			return reply{err: api.Errorf(api.CodeUnsupported, "Linux jails look after their own packages: JailOps does not update them").WithHint("run apk or apt in the jail, for instance from its cron")}
 		}
 		if len(up.AddPackages) > 0 {
 			// base packages: the fake keeps no packages

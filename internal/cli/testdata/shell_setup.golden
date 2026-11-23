@@ -13,7 +13,7 @@ $ jailops create bad --image freebsd-15 --network lan --storage default --prompt
 [exit 2]
 
 $ jailops jail shell-setup web
-! busy: jail "web" is not running; the shell is set up inside it
+! busy: jail "web" is not running; the prompt is written inside it
 ! hint: start it first
 [exit 5]
 
@@ -29,8 +29,8 @@ jail/web configuration updated
 $ jailops jail shell-setup web
 jail/web: shell /usr/local/bin/bash, prompt default
   PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '
-  pkg -r ROOT install -y bash
   wrote /usr/local/etc/profile.d/jailops-prompt.sh
+  the shell /usr/local/bin/bash is not installed in jail web; install it with: jailops pkg install web -- bash, or use sh: jailops shell web --shell /bin/sh
 
 $ jailops jail shell-setup web -o json
 {
@@ -39,8 +39,8 @@ $ jailops jail shell-setup web -o json
   "prompt": "default",
   "ps1": "\\[\\e[38;5;39m\\]\\u@\\h\\[\\e[0m\\]${_jailops_where:+ \\[\\e[38;5;245m\\][${_jailops_where}]\\[\\e[0m\\]}:\\w\\$ ",
   "steps": [
-    "pkg -r ROOT install -y bash",
-    "wrote /usr/local/etc/profile.d/jailops-prompt.sh"
+    "wrote /usr/local/etc/profile.d/jailops-prompt.sh",
+    "the shell /usr/local/bin/bash is not installed in jail web; install it with: jailops pkg install web -- bash, or use sh: jailops shell web --shell /bin/sh"
   ]
 }
 

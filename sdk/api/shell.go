@@ -7,12 +7,12 @@ import (
 	"unicode/utf8"
 )
 
-// The shell of a FreeBSD jail and its bash prompt (docs/shell.md).
+// The shell of a FreeBSD jail and its prompt (docs/shell.md).
 //
-// A new FreeBSD jail gets bash, installed from the host with pkg -r into the jail's /usr/local, as the shell of
-// `jailops shell` and the console, and a coloured prompt that bash reads for every user. The prompt lives in one file
-// JailOps owns (PromptFile); the two system start-up files of the FreeBSD bash package source it. A user's own
-// ~/.bashrc, ~/.bash_profile or ~/.profile is read after it and wins.
+// The shell key is the preferred shell of `jailops shell` and the console; JailOps never installs it (an administrator
+// does: `jailops pkg install NAME -- bash`). A new FreeBSD jail gets a coloured prompt that sh and bash read. The
+// prompt lives in one file JailOps owns (PromptFile); root's .shrc and the two system start-up files of the FreeBSD
+// bash package source it. A user's own ~/.bashrc, ~/.bash_profile or ~/.profile is read after it and wins.
 
 // Shell paths and names.
 const (

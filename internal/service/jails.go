@@ -421,11 +421,14 @@ func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, er
 	if spec.OS == api.OSLinux && spec.Prompt != "" {
 		return api.Operation{}, invalid("the prompt key is for FreeBSD jails; a Linux jail keeps the prompt of its distribution")
 	}
+	if err := checkLinuxUpdatePolicy(spec, nil); err != nil {
+		return api.Operation{}, err
+	}
 	if spec.Shell == "" && spec.OS == api.OSFreeBSD && p.Spec.Shell != "" {
 		spec.Shell = p.Spec.Shell // the project's shell for jails that name none (sh or bash)
 	}
 	profs, _ := s.resolveProfiles(proj, spec.Profiles)
-	shellSetup := s.shellDefaults(&spec, profs)
+	s.shellDefaults(&spec, profs)
 	if spec.Hostname == "" {
 		spec.Hostname = name
 	}
@@ -459,10 +462,6 @@ func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, er
 			}
 			if _, err := s.life.CreateJail(ctx, nj, false); err != nil {
 				return nil, err
-			}
-			if shellSetup {
-				// bash and the prompt are set up at the first start, when the root is mounted
-				s.setShellMark(key, shellMark{Pending: true})
 			}
 			if err := s.refreshJail(ctx, key); err != nil {
 				return nil, err
@@ -568,6 +567,9 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 		return api.Jail{}, invalid("the storage of a jail cannot change").WithHint("copy the jail to move it")
 	case spec.OS == api.OSLinux && spec.Prompt != "":
 		return api.Jail{}, invalid("the prompt key is for FreeBSD jails; a Linux jail keeps the prompt of its distribution")
+	}
+	if err := checkLinuxUpdatePolicy(spec, &old.Spec); err != nil {
+		return api.Jail{}, err
 	}
 	if !volumesEqual(spec.Volumes, old.Spec.Volumes) {
 		if spec.Volumes, err = s.attachmentsChanged(ctx, p.Meta.Name, key, spec.Volumes); err != nil {
@@ -763,9 +765,6 @@ func (s *Service) DeleteJail(ctx context.Context, name string, expect int64) (ap
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			_ = h.Bind("destroy/"+key, &opRequest{Kind: "destroy", Jail: key})
-			// pkg of the setup of the shell works on the root of the jail from the host: it is ended before the datasets go (a stop does
-			// the same), or the destroy finds the root busy
-			s.settleShellSetup(ctx, key)
 			if _, err := s.life.DestroyJail(ctx, key, false, false); err != nil {
 				return nil, err
 			}
@@ -825,7 +824,7 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 			}
 			if a.Action != "start" {
 				_ = h.Bind("stop/"+key, &opRequest{Kind: "stop", Jail: key})
-				if err := s.stopJail(ctx, key); err != nil {
+				if err := s.life.StopJail(ctx, key); err != nil {
 					return nil, err
 				}
 			}
@@ -839,7 +838,7 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 				}
 				s.setLocked(key, nil)
 				s.markStartDue(key, false)
-				// A new jail gets its shell and prompt at its first start, before its own provisioning.
+				// A new jail gets its prompt at its first start, before its own provisioning (nothing is installed).
 				_ = h.Timed("shell-setup", func() error { s.shellAtStart(ctx, key); return nil })
 				// A jail that declares provisioning is provisioned at its first start.
 				if err := h.Timed("provisioning", func() error { return s.provisionPending(ctx, key) }); err != nil {
@@ -1288,10 +1287,9 @@ func (s *Service) upgradeRun(ctx context.Context, h *OpHandle, project, name, ke
 	var portsWarn string
 	if cur, err := s.getByKey(ctx, key); err == nil && s.upgradesInPlace(cur) {
 		if !up.DryRun {
-			// one operation changes the packages of the jail at a time, for the whole upgrade: the background setup of
-			// the shell is settled first (a pkg the stop kills leaves the jail dying with its root busy), and no other
-			// package operation or session starts until the upgrade ends
-			release, err := s.holdJailFor(key, "an in-place upgrade", false)
+			// one operation changes the packages of the jail at a time, for the whole upgrade: no other package
+			// operation or session starts until the upgrade ends
+			release, err := s.holdJailFor(key, "an in-place upgrade")
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1361,7 +1359,7 @@ func (s *Service) upgradesInPlace(j api.Jail) bool {
 // reads the catalogue the jail has. A stopped jail has no ports part: pkg -j runs inside it. A catalogue that cannot be read leaves the ports alone and says so. The caller
 // holds the jail (upgradeRun).
 func (s *Service) thickPorts(ctx context.Context, key string, j api.Jail, dryRun bool) (*lifecycle.PortsUpgrade, string) {
-	if !s.jailRunning(ctx, key) || !s.managesPackages(j) {
+	if !s.jailRunning(ctx, key) || s.jailIsLinux(j) {
 		return nil, ""
 	}
 	// a jail without ports packages has no ports part: the ports catalogue (tens of MiB, written into the root) is
@@ -1372,7 +1370,7 @@ func (s *Service) thickPorts(ctx context.Context, key string, j api.Jail, dryRun
 		return &lifecycle.PortsUpgrade{None: true}, ""
 	}
 	if !dryRun {
-		if _, err := s.pkgExec(ctx, key, false, 10*time.Minute, "pkg", "update", "-q"); err != nil {
+		if _, err := s.pkgExec(ctx, key, 10*time.Minute, "pkg", "update", "-q"); err != nil {
 			return nil, "the ports packages were not checked: " + tailText(err.Error(), 200)
 		}
 	}
@@ -1381,14 +1379,14 @@ func (s *Service) thickPorts(ctx context.Context, key string, j api.Jail, dryRun
 		return nil, "the ports packages were not checked: " + tailText(err.Error(), 200)
 	}
 	var names []string
-	for _, p := range parsePackageUpdates(out, false) {
+	for _, p := range parsePackageUpdates(out) {
 		names = append(names, p.Name)
 	}
 	if len(names) == 0 {
 		return nil, ""
 	}
 	return &lifecycle.PortsUpgrade{Pending: names, Run: func(ctx context.Context) error {
-		if _, err := s.pkgUpgrade(ctx, key, false, 60*time.Minute, true); err != nil {
+		if _, err := s.pkgUpgrade(ctx, key, 60*time.Minute, true); err != nil {
 			return fmt.Errorf("pkg upgrade of the ports packages: %w", err)
 		}
 		return nil
@@ -1510,6 +1508,7 @@ func (s *Service) CopyJail(ctx context.Context, src string, req api.JailCopy) (a
 	// accident is not what a copy is for.
 	cspec.Volumes = nil
 	cspec.Expose = nil
+	dropLinuxUpdatePolicy(&cspec)
 	cspec.Network = append([]api.NetworkAttach(nil), cspec.Network...)
 	for i := range cspec.Network {
 		if cspec.Network[i].IPv4 != "none" && cspec.Network[i].IPv4 != "" {

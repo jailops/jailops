@@ -527,7 +527,7 @@ func (s *Service) ConfigureJail(ctx context.Context, name string, ch api.ConfigC
 			now, _ := s.getByKey(ctx, key)
 			if restart && len(keys) > 0 && now.Status.Power == api.PowerRunning {
 				_ = h.Bind("stop/"+key, &opRequest{Kind: "stop", Jail: key})
-				if err := s.stopJail(ctx, key); err != nil {
+				if err := s.life.StopJail(ctx, key); err != nil {
 					return nil, err
 				}
 				_ = h.Bind("start/"+key, &opRequest{Kind: "start", Jail: key})

@@ -155,13 +155,15 @@ const ConditionUnsupportedLayout = "UnsupportedLayout"
 
 // The states of status.shell_setup.
 const (
-	// ShellSetupInstalling: bash is being installed into the running jail in the background; `jailops shell` waits for it.
+	// ShellSetupInstalling is kept for the frozen contract and is never reported: JailOps no longer installs a shell
+	// (it did, in the background, before 0.9.3).
 	ShellSetupInstalling = "installing"
-	// ShellSetupFailed: the latest setup failed; the ShellSetup condition says why.
+	// ShellSetupFailed: the latest writing of the prompt failed; the ShellSetup condition says why.
 	ShellSetupFailed = "failed"
 )
 
-// ShellInstalling is the reason of the ShellSetup condition while bash is being installed.
+// ShellInstalling is kept for the frozen contract and is never reported: it was the reason of the ShellSetup condition
+// while bash was being installed, which JailOps no longer does.
 const ShellInstalling = "Installing"
 
 // Document is the declarative envelope used in YAML files and in the state

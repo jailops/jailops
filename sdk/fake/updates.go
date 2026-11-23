@@ -35,13 +35,20 @@ func (s *Server) SeedUpdateFailure(project, jail string, fail bool) {
 
 func (s *Server) updKey(j *api.Jail) string { return j.Metadata.Project + "/" + j.Metadata.Name }
 
-// updateTargets resolves the jails of a request in the request's project.
+// errLinuxUpdates is the daemon's refusal of updates for a Linux jail.
+func errLinuxUpdates() *api.Error {
+	return api.Errorf(api.CodeUnsupported, "Linux jails look after their own packages: JailOps does not update them").
+		WithHint("run apk or apt in the jail, for instance from its cron")
+}
+
+// updateTargets resolves the jails of a request in the request's project. Linux jails are left out, and one named
+// alone is refused, as the daemon does.
 func (s *Server) updateTargets(rc *reqInfo, names []string, all bool) ([]*api.Jail, *api.Error) {
 	var out []*api.Jail
 	if all {
 		var keys []string
 		for k, j := range s.jails.items {
-			if j.Metadata.Project == rc.project {
+			if j.Metadata.Project == rc.project && j.Spec.OS != api.OSLinux {
 				keys = append(keys, k)
 			}
 		}
@@ -58,6 +65,12 @@ func (s *Server) updateTargets(rc *reqInfo, names []string, all bool) ([]*api.Ja
 		j := s.jails.items[s.jails.keyIn(rc.project, n)]
 		if j == nil {
 			return nil, notFound("jail", n)
+		}
+		if j.Spec.OS == api.OSLinux {
+			if len(names) == 1 {
+				return nil, errLinuxUpdates()
+			}
+			continue
 		}
 		out = append(out, j)
 	}
@@ -199,6 +212,10 @@ func (s *Server) handleUpdateHistory(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, notFound("jail", r.PathValue("name")))
 		return
 	}
+	if j.Spec.OS == api.OSLinux {
+		writeErr(w, errLinuxUpdates())
+		return
+	}
 	if out == nil {
 		out = []api.UpdateRecord{}
 	}
@@ -262,8 +279,9 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 	s.respond(w, rp)
 }
 
-// handleShellSetup answers like the daemon: a running FreeBSD jail gets bash as its shell and the default prompt
-// where its keys are empty, and the steps say what a host would do.
+// handleShellSetup answers like the daemon of a host whose jails.shell is bash: a running FreeBSD jail gets bash as its
+// preferred shell and the default prompt where its keys are empty, nothing is installed, and the steps say what a
+// host would do (the fake jail has no bash).
 func (s *Server) handleShellSetup(w http.ResponseWriter, r *http.Request) {
 	if _, e := decodeOptional[api.ShellSetupRequest](r); e != nil {
 		writeErr(w, e)
@@ -282,9 +300,9 @@ func (s *Server) handleShellSetup(w http.ResponseWriter, r *http.Request) {
 			return reply{err: api.Errorf(api.CodeInvalid, "jail %q is a linux jail: the shell setup is for FreeBSD jails", name)}
 		}
 		if j.Status.Power != api.PowerRunning {
-			return reply{err: api.Errorf(api.CodeBusy, "jail %q is not running; the shell is set up inside it", name).WithHint("start it first")}
+			return reply{err: api.Errorf(api.CodeBusy, "jail %q is not running; the prompt is written inside it", name).WithHint("start it first")}
 		}
-		op := s.startOp(rc.project, "jails.shell-setup", "Set up the shell of jail "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
+		op := s.startOp(rc.project, "jails.shell-setup", "Apply the shell defaults and the prompt of jail "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
 			j := s.jails.items[jk]
 			if j == nil {
 				return nil, notFound("jail", name)
@@ -296,12 +314,12 @@ func (s *Server) handleShellSetup(w http.ResponseWriter, r *http.Request) {
 				j.Spec.Prompt = api.PromptDefault
 			}
 			steps := []string{}
-			if j.Spec.Shell == api.BashPath {
-				steps = append(steps, "pkg -r ROOT install -y bash")
-			}
 			ps1 := api.EffectivePS1(j.Spec.Prompt, api.DefaultPromptColor)
 			if ps1 != "" {
 				steps = append(steps, "wrote "+api.PromptFile)
+			}
+			if j.Spec.Shell == api.BashPath {
+				steps = append(steps, "the shell "+api.BashPath+" is not installed in jail "+name+"; install it with: jailops pkg install "+name+" -- bash, or use sh: jailops shell "+name+" --shell "+api.ShPath)
 			}
 			s.emitIn(rc.project, "jail-shell-set-up", "/api/v1/jails/"+name)
 			return api.ShellSetupResult{Jail: name, Shell: j.Spec.Shell, Prompt: j.Spec.Prompt, PS1: ps1, Steps: steps}, nil

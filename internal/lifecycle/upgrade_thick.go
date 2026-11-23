@@ -468,7 +468,7 @@ func parsePkgPlan(out string) (pkgPlan, error) {
 func (s *Service) planThickUpgrade(ctx context.Context, st *jailState, rec Record, req UpgradeRequest, res *UpgradeResult) (*plan.Plan, *UpgradeResult, error) {
 	name := st.Name
 	if rec.Spec.OS == api.OSLinux {
-		return nil, res, api.Errorf(api.CodeUnsupported, "in-place upgrades apply to FreeBSD jails; a Linux jail updates through its package manager (jailops update apply)")
+		return nil, res, api.Errorf(api.CodeUnsupported, "Linux jails look after their own packages: JailOps does not update them").WithHint("run apk or apt in the jail, for instance from its cron")
 	}
 	for _, v := range rec.Spec.Volumes {
 		if SystemDir(v.Mount) {

@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"jailops.net/jailops/internal/daemon"
 	"jailops.net/jailops/internal/daemon/dtest"
@@ -53,21 +52,6 @@ func shellCond(j api.Jail) *api.Condition {
 	return nil
 }
 
-// waitShellSetup waits until the jail no longer says that its bash is being installed in the background.
-func waitShellSetup(t *testing.T, e *dtest.Env, name string) {
-	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-		j, err := e.Admin.Jails().Get(context.Background(), name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if c := shellCond(j); c == nil || c.Reason != api.ShellInstalling {
-			return
-		}
-	}
-	t.Fatal("the shell of the jail is still being set up")
-}
-
 func installedBash(e *dtest.Env, root string) int {
 	n := 0
 	for _, in := range e.Installed {
@@ -78,9 +62,10 @@ func installedBash(e *dtest.Env, root string) int {
 	return n
 }
 
-// A new FreeBSD jail gets bash and the default prompt at its first start; the prompt key changes the file at once
-// in a running jail, and none removes what JailOps wrote.
-func TestNewJailGetsBashAndThePrompt(t *testing.T) {
+// A new FreeBSD jail gets the default prompt at its first start and no shell is installed: bash is its preferred
+// shell, `jailops shell` refuses until an administrator installs it, and then starts it. The prompt key changes the
+// file at once in a running jail, and none removes what JailOps wrote.
+func TestNewJailGetsThePromptAndNoShellIsInstalled(t *testing.T) {
 	shellT = t
 	e := dtest.New(t, dtest.Options{})
 	e.Seed()
@@ -95,13 +80,8 @@ func TestNewJailGetsBashAndThePrompt(t *testing.T) {
 		t.Fatal("the shell was set up before the first start")
 	}
 	mustOp(e.Admin.Jails().Start(ctx, "web"))
-	// the first start does not wait for a package server: bash goes into the running jail in the background
-	waitShellSetup(t, e, "web")
-	if installedBash(e, webRoot) != 1 {
-		t.Fatalf("bash was not installed: %v %v", e.Installed, sj.cmds)
-	}
-	if !sj.ran("pkg install") {
-		t.Fatalf("pkg did not run inside the jail: %v", sj.cmds)
+	if installedBash(e, webRoot) != 0 || sj.ran("pkg install") {
+		t.Fatalf("a start installed a shell: %v %v", e.Installed, sj.cmds)
 	}
 	want := "PS1='" + api.DefaultPS1(39) + "'"
 	if !strings.Contains(e.File(webRoot+api.PromptFile), want) {
@@ -123,12 +103,23 @@ func TestNewJailGetsBashAndThePrompt(t *testing.T) {
 			t.Fatalf("%s: %q", p, f)
 		}
 	}
-	// a second start sets nothing up again
+	// a second start installs nothing either
 	mustOp(e.Admin.Jails().Restart(ctx, "web"))
-	if installedBash(e, webRoot) != 1 {
-		t.Fatalf("bash was installed twice: %v", e.Installed)
+	if installedBash(e, webRoot) != 0 || sj.ran("pkg install") {
+		t.Fatalf("a restart installed a shell: %v", e.Installed)
 	}
-	// the console and jailops shell start bash
+	// the console and jailops shell refuse a bash that is not installed, and say how to get it
+	_, err := e.Admin.Jails().Exec(ctx, "web", nil, sdk.ExecOptions{Shell: true})
+	var ae *api.Error
+	if !errors.As(err, &ae) || ae.Code != api.CodePreconditionFailed || ae.Message != "the shell /usr/local/bin/bash is not installed in jail web" ||
+		!strings.Contains(ae.Hint, "jailops pkg install web -- bash") {
+		t.Fatalf("a shell that is not installed: %v", err)
+	}
+	for _, c := range []string{"jailops pkg install web -- bash", "jailops shell web --shell /bin/sh"} {
+		assertRealCommand(t, "`"+c+"`")
+	}
+	// the administrator installs bash: the next session starts it, with no restart and no change of the jail
+	e.Files.Put(webRoot+api.BashPath, []byte("x"))
 	sess, err := e.Admin.Jails().Exec(ctx, "web", nil, sdk.ExecOptions{Shell: true})
 	if err != nil {
 		t.Fatal(err)
@@ -225,9 +216,8 @@ func TestShellChoicesAndExistingJails(t *testing.T) {
 		t.Fatalf("%+v", j.Spec)
 	}
 	mustOp(e.Admin.Jails().Start(ctx, "web2"))
-	waitShellSetup(t, e, "web2")
 	root2 := "/jailops/projects/alpha/jails/web2/root"
-	if installedBash(e, root2) != 1 || !strings.Contains(e.File(root2+api.PromptFile), `PS1='\u@\h \$ '`) {
+	if installedBash(e, root2) != 0 || !strings.Contains(e.File(root2+api.PromptFile), `PS1='\u@\h \$ '`) {
 		t.Fatalf("%v %q", e.Installed, e.File(root2+api.PromptFile))
 	}
 	// the same daemon with the default configuration: the old jail is not changed by a start... (the fakes, and
@@ -247,17 +237,18 @@ func TestShellChoicesAndExistingJails(t *testing.T) {
 	}
 	// ... but shell-setup gives it what a new jail gets
 	res := mustOp(e2.Client(api.PermOperator).Project("alpha").Jails().ShellSetup(ctx, "web"))
-	if res.Shell != api.BashPath || res.Prompt != api.PromptDefault || res.PS1 != api.DefaultPS1(39) || len(res.Steps) < 3 {
+	if res.Shell != api.BashPath || res.Prompt != api.PromptDefault || res.PS1 != api.DefaultPS1(39) || len(res.Steps) < 2 {
 		t.Fatalf("%+v", res)
 	}
 	got, _ := e2.Admin.Jails().Get(ctx, "web")
-	if got.Spec.Shell != api.BashPath || got.Spec.Prompt != api.PromptDefault || installedBash(e, webRoot) != 1 || !e2.HasFile(webRoot+api.PromptFile) {
+	if got.Spec.Shell != api.BashPath || got.Spec.Prompt != api.PromptDefault || installedBash(e, webRoot) != 0 || !e2.HasFile(webRoot+api.PromptFile) {
 		t.Fatalf("%+v %v", got.Spec, e.Installed)
 	}
-	// running it again installs nothing
-	res = mustOp(e2.Admin.Jails().ShellSetup(ctx, "web"))
-	if installedBash(e, webRoot) != 1 || !slices.Contains(res.Steps, api.BashPath+" is installed") {
-		t.Fatalf("%+v %v", res, e.Installed)
+	// it installs nothing, and names the shell that is missing with the command that installs it
+	if !slices.ContainsFunc(res.Steps, func(s string) bool {
+		return strings.HasPrefix(s, "the shell /usr/local/bin/bash is not installed in jail web; install it with: jailops pkg install web -- bash")
+	}) {
+		t.Fatalf("%+v", res.Steps)
 	}
 	// a profile's shell wins over the host default
 	if _, err := e2.Admin.Profiles().Create(ctx, api.Profile{Metadata: api.ObjectMeta{Name: "plain"}, Spec: api.ProfileSpec{Config: map[string]string{"shell": "sh"}}}); err != nil {
@@ -289,49 +280,40 @@ func TestShellChoicesAndExistingJails(t *testing.T) {
 	}
 }
 
-// A failed installation does not fail the start: it is a condition, the shell says how to repair it, and
-// shell-setup repairs it. A start-up file whose block was cut by hand is left alone.
+// A prompt that cannot be written does not fail the start: it is a condition that names shell-setup, and
+// shell-setup repairs it once the file is fixed. A start-up file whose block was cut by hand is left alone.
 func TestShellSetupFailureIsReportedAndRepaired(t *testing.T) {
 	shellT = t
 	e := dtest.New(t, dtest.Options{})
 	e.Seed()
 	ctx := context.Background()
 	mustOp(e.Admin.Jails().Create(ctx, dtest.WebJail("web")))
-	e.SetPkgInstallErr(errors.New("pkg: no network"))
-	mustOp(e.Admin.Jails().Start(ctx, "web"))
-	waitShellSetup(t, e, "web") // the start returns while the setup runs in the background
-	got, _ := e.Admin.Jails().Get(ctx, "web")
-	c := shellCond(got)
-	if got.Status.Power != api.PowerRunning || c == nil || c.Status != api.ConditionFalse || !strings.Contains(c.Message, "jailops jail shell-setup web") {
-		t.Fatalf("%+v", got.Status)
-	}
-	_, err := e.Admin.Jails().Exec(ctx, "web", nil, sdk.ExecOptions{Shell: true})
-	var ae *api.Error
-	if !errors.As(err, &ae) || ae.Code != api.CodeNotFound || !strings.Contains(ae.Hint, "jailops jail shell-setup web") {
-		t.Fatalf("%v", err)
-	}
-	assertRealCommand(t, ae.Hint)
-	// the failure is not retried at every start
-	mustOp(e.Admin.Jails().Restart(ctx, "web"))
-	waitShellSetup(t, e, "web")
-	if installedBash(e, webRoot) != 0 {
-		t.Fatal("bash appeared")
-	}
-	e.SetPkgInstallErr(nil)
-	mustOp(e.Admin.Jails().ShellSetup(ctx, "web"))
-	waitShellSetup(t, e, "web")
-	got, _ = e.Admin.Jails().Get(ctx, "web")
-	if shellCond(got) != nil || installedBash(e, webRoot) != 1 {
-		t.Fatalf("%+v %v", got.Status.Conditions, e.Installed)
-	}
-	// a hand edit that cut the block in half: refused with the file named, the file untouched
 	cut := "# BEGIN jailops shell: managed by JailOps\nmy own line\n"
 	e.Files.Put(webRoot+api.BashrcPath, []byte(cut))
+	mustOp(e.Admin.Jails().Start(ctx, "web"))
+	got, _ := e.Admin.Jails().Get(ctx, "web")
+	c := shellCond(got)
+	if got.Status.Power != api.PowerRunning || c == nil || c.Status != api.ConditionFalse || !strings.Contains(c.Message, "jailops jail shell-setup web") ||
+		got.Status.ShellSetup == nil || got.Status.ShellSetup.State != api.ShellSetupFailed {
+		t.Fatalf("%+v", got.Status)
+	}
+	assertRealCommand(t, c.Message)
+	if e.File(webRoot+api.BashrcPath) != cut {
+		t.Fatal("the hand-edited file was changed")
+	}
+	// shell-setup refuses with the file named and leaves it untouched
 	if err := opErr(e.Admin.Jails().ShellSetup(ctx, "web")); err == nil || !strings.Contains(err.Error(), api.BashrcPath) {
 		t.Fatalf("%v", err)
 	}
 	if e.File(webRoot+api.BashrcPath) != cut {
 		t.Fatal("the hand-edited file was changed")
+	}
+	// the file fixed by hand: shell-setup writes the prompt and the condition is gone
+	e.Files.Put(webRoot+api.BashrcPath, []byte("my own line\n"))
+	mustOp(e.Admin.Jails().ShellSetup(ctx, "web"))
+	got, _ = e.Admin.Jails().Get(ctx, "web")
+	if shellCond(got) != nil || got.Status.ShellSetup != nil || len(e.Installed) != 0 {
+		t.Fatalf("%+v %v", got.Status.Conditions, e.Installed)
 	}
 }
 

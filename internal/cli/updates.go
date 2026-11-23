@@ -79,6 +79,9 @@ newer base packages of a FreeBSD jail) and changes nothing; an apply takes a
 snapshot first, updates and runs the jail's health check. Nothing is rolled back
 for you and no jail is stopped. The history keeps the snapshot of every update.
 
+Updates are for FreeBSD jails. Linux jails look after their own packages: they
+are left out of every selection, and one named alone is refused.
+
 Everything acts in the current project (--project, JAILOPS_PROJECT or
 'project switch'). Which jails update on their own is a matter of each jail's
 update policy; these commands are the manual side.`,

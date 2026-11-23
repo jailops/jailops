@@ -179,8 +179,10 @@ func (PkgBase) sets(s api.ImageSpec) []string {
 	// program needs is a base package away (jailops jail base add; the base of a jail is the jail's own). The apps of the
 	// catalogue (PostgreSQL, Valkey) run on this set; an image whose software needs more of the base names the optional
 	// jail set (about 105 packages, 160 MiB) in source.sets, and the development set (compiler and headers, 570 MiB) when
-	// the image builds software.
-	return []string{"FreeBSD-set-minimal-jail"}
+	// the image builds software. Two libraries are added because ports packages link them and the base repository is
+	// disabled on a host that is not installed from packages (the ports repository cannot supply a FreeBSD-* package):
+	// FreeBSD-libexecinfo (PostgreSQL, Valkey) and FreeBSD-kerberos-lib (curl, so git over https in Forgejo).
+	return []string{"FreeBSD-set-minimal-jail", "FreeBSD-libexecinfo", "FreeBSD-kerberos-lib"}
 }
 
 // pkgArgv builds a `pkg -r <root>` argv with a private repository

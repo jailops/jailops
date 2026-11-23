@@ -90,7 +90,8 @@ type UpdatePolicy struct {
 	Mode UpdateMode `json:"mode,omitempty"`
 	// Schedule is a five-field cron expression; required for notify and managed.
 	Schedule string `json:"schedule,omitempty"`
-	// Packages updates the packages inside the jail from the host (pkg or apk).
+	// Packages updates the ports packages of a FreeBSD jail from the host (pkg). A Linux jail carries no update
+	// policy but the health check: it looks after its own packages.
 	Packages bool `json:"packages,omitempty"`
 	// OS upgrades the FreeBSD base of the jail in place, inside its release (as jail upgrade): with mode managed on the
 	// jail's schedule, otherwise on demand by a global administrator. Turning it on together with mode managed needs a
@@ -244,8 +245,8 @@ const (
 	PowerLocked PowerState = "locked"
 )
 
-// ShellSetupStatus is the machine form of the ShellSetup condition: State is ShellSetupInstalling or ShellSetupFailed,
-// Step names the step of an installation (for example "fetching bash").
+// ShellSetupStatus is the machine form of the ShellSetup condition: State is ShellSetupFailed. Step is kept for the
+// frozen contract and is always empty (it named the step of a bash installation, which JailOps no longer does).
 type ShellSetupStatus struct {
 	State string `json:"state"`
 	Step  string `json:"step,omitempty"`
@@ -268,7 +269,7 @@ type JailStatus struct {
 	// Drift lists differences between the rendered and the live system.
 	Drift      []string    `json:"drift,omitempty"`
 	Conditions []Condition `json:"conditions,omitempty"`
-	// ShellSetup is the background setup of the jail's shell; nil when none is running and the latest did not fail.
+	// ShellSetup says that the latest writing of the jail's prompt failed; nil when it did not.
 	ShellSetup *ShellSetupStatus `json:"shell_setup,omitempty"`
 	// ProvisionedAt is when the jail's provisioning last completed; zero when
 	// it has not run (or the jail has none).

@@ -22,7 +22,6 @@ func TestThickPortsSkipsAJailWithoutPortsPackages(t *testing.T) {
 	if err := s.StartJail(ctx, key); err != nil {
 		t.Fatal(err)
 	}
-	waitShellSetup(t, s, ctx, "web")
 	fetched := func() bool {
 		for _, c := range e.Run.Calls() {
 			if c.Cmd.Name == "pkg" && slices.Contains(c.Cmd.Args, "-j") && slices.Contains(c.Cmd.Args, "update") {

@@ -130,8 +130,4 @@ Repeat the checks after the rollback.
 
 ## Alpine and Debian
 
-A Linux jail has no in-place upgrade of its base. For routine package updates of an Alpine jail,
-`apk update` and `apk upgrade` inside the jail, or `jailops update apply web --packages`, which snapshots first and
-records the result. When moving between Alpine releases, follow Alpine's release upgrade procedure for the target
-repositories inside the jail, with a snapshot and the checks above. A Debian jail is updated with `apt-get` inside the
-jail; JailOps never runs `apt`. A new base of either is a new jail: [linux-jails.md](linux-jails.md).
+Linux jails look after their own packages: JailOps does not update them ([linux-jails.md](linux-jails.md#packages)).

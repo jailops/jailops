@@ -244,7 +244,7 @@ func (s *Service) LockVolume(ctx context.Context, name string) (api.Operation, e
 			for _, k := range jails {
 				s.markStartDue(k, false)
 				_ = h.Bind("stop/"+k, &opRequest{Kind: "stop", Jail: k})
-				if err := s.stopJail(ctx, k); err != nil {
+				if err := s.life.StopJail(ctx, k); err != nil {
 					return nil, err
 				}
 				s.markStopped(k)

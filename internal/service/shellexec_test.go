@@ -1,31 +1,22 @@
 package service_test
 
 import (
-	"context"
 	"errors"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"jailops.net/jailops/internal/daemon/dtest"
-	"jailops.net/jailops/internal/service"
-	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/sdk/api"
 )
 
-// While bash is being installed in the background, a session that needs no bash enters the jail at once, the
-// condition names the step and since when, and a package operation of someone else is refused with its name and age.
-func TestASessionWithoutBashEntersWhileTheShellIsSetUp(t *testing.T) {
+// JailOps never installs a shell: a jail whose preferred shell is bash starts without any pkg run for it, a shell
+// session fails with a clear precondition error and runs nothing else, and once the administrator has installed bash
+// the next session gets it, without a restart.
+func TestAShellThatIsNotInstalledIsAnError(t *testing.T) {
 	e, s := tickingEnv(t)
 	alpha := as(globalAdmin, dtest.SeedProject)
-	e.Run.SetHangOn(func(c run.Cmd) bool {
-		return c.Name == "pkg" && slices.Contains(c.Args, "-j") && slices.Contains(c.Args, "install")
-	})
-	defer service.SetShellSetupDeadline(5 * time.Second)()
-	defer service.SetShellSettle(200*time.Millisecond, 200*time.Millisecond)()
-
-	op, err := s.CreateJail(alpha, dtest.WebJail("web"))
+	op, err := s.CreateJail(alpha, dtest.WebJail("web")) // the test host's default shell is bash
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,124 +30,80 @@ func TestASessionWithoutBashEntersWhileTheShellIsSetUp(t *testing.T) {
 	if got := wait(t, s, op); got.Status != api.OpSuccess {
 		t.Fatalf("start: %+v\n%s", got, e.Log())
 	}
-	j, err := s.GetJail(alpha, "web")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cond *api.Condition
-	for i := range j.Status.Conditions {
-		if j.Status.Conditions[i].Type == "ShellSetup" {
-			cond = &j.Status.Conditions[i]
-		}
-	}
-	if cond == nil || cond.Reason != api.ShellInstalling || j.Status.ShellSetup == nil || j.Status.ShellSetup.Step == "" || cond.Since.IsZero() {
-		t.Fatalf("the condition does not name the step and the time: %+v", cond)
-	}
-
-	// a command that needs no bash is not kept out
-	t0 := time.Now()
-	st, err := s.StartExec(alpha, "web", api.ExecRequest{Argv: []string{"/bin/sh", "-c", "true"}})
-	if err != nil {
-		t.Fatalf("a session without bash while the shell is set up: %v", err)
-	}
-	if d := time.Since(t0); d > 4*time.Second {
-		t.Errorf("the session waited %s for the setup", d)
-	}
-	_ = st
-
-	// a package operation of someone else gives the setup of the shell a moment and then ends it; a second one is
-	// refused, with what holds the jail and since when
-	release, err := service.HoldForTest(s, dtest.SeedProject+"_web", "an app installation")
-	if err != nil {
-		t.Fatalf("an app installation does not get the jail from the setup of the shell: %v", err)
-	}
-	defer release()
-	_, err = service.HoldForTest(s, dtest.SeedProject+"_web", "a package update")
-	var ae *api.Error
-	if !errors.As(err, &ae) || ae.Code != api.CodeBusy || !strings.Contains(ae.Message, "an app installation") || !strings.Contains(ae.Message, "started") {
-		t.Errorf("the refusal does not name the operation and its age: %v", err)
-	}
-}
-
-// A stop that comes while pkg hangs in the background setup of the shell gives the setup a moment, then ends it
-// gently (the command carries a grace for SIGTERM and fetch limits that let a dead address family fail fast), and goes
-// on: the jail stops, and the setup is no failure.
-func TestAStopCancelsTheSetupOfTheShellInsteadOfWaitingForIt(t *testing.T) {
-	e, s := tickingEnv(t)
-	alpha := as(globalAdmin, dtest.SeedProject)
-	e.Run.SetHangOn(func(c run.Cmd) bool {
-		return c.Name == "pkg" && slices.Contains(c.Args, "-j") && slices.Contains(c.Args, "install")
-	})
-	defer service.SetShellSetupDeadline(30 * time.Second)()
-	defer service.SetShellSettle(200*time.Millisecond, 200*time.Millisecond)()
-
-	op, err := s.CreateJail(alpha, dtest.WebJail("web"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := wait(t, s, op); got.Status != api.OpSuccess {
-		t.Fatalf("create: %+v\n%s", got, e.Log())
-	}
-	op, err = s.JailAction(alpha, "web", api.JailAction{Action: "start"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := wait(t, s, op); got.Status != api.OpSuccess {
-		t.Fatalf("start: %+v\n%s", got, e.Log())
-	}
-	t0 := time.Now()
-	op, err = s.JailAction(alpha, "web", api.JailAction{Action: "stop"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := wait(t, s, op); got.Status != api.OpSuccess {
-		t.Fatalf("stop: %+v\n%s", got, e.Log())
-	}
-	if d := time.Since(t0); d > 5*time.Second {
-		t.Errorf("the stop waited %s for the setup of the shell", d)
-	}
-	j, err := s.GetJail(alpha, "web")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range j.Status.Conditions {
-		if c.Type == "ShellSetup" {
-			t.Errorf("a cancelled setup is no condition: %+v", c)
-		}
-	}
-	found := false
 	for _, c := range e.Run.Calls() {
-		if c.Cmd.Name == "pkg" && slices.Contains(c.Cmd.Args, "-j") && slices.Contains(c.Cmd.Args, "install") {
-			found = true
-			if c.Cmd.TermGrace != 200*time.Millisecond || !slices.Contains(c.Cmd.Args, "FETCH_TIMEOUT=10") || !slices.Contains(c.Cmd.Args, "FETCH_RETRY=1") {
-				t.Errorf("pkg runs without a gentle end or fetch limits: %+v", c.Cmd)
-			}
+		if c.Cmd.Name == "pkg" && slices.Contains(c.Cmd.Args, "install") && (slices.Contains(c.Cmd.Args, "-j") || slices.Contains(c.Cmd.Args, api.BashPackage)) {
+			t.Errorf("a start ran pkg install: %v", c.Cmd.Args)
 		}
 	}
-	if !found {
-		t.Error("pkg never ran in the jail")
+	j, err := s.GetJail(alpha, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.Spec.Shell != api.BashPath || j.Status.ShellSetup != nil {
+		t.Fatalf("shell %q, setup %+v", j.Spec.Shell, j.Status.ShellSetup)
+	}
+
+	n := len(e.FakeExec.Calls())
+	_, err = s.StartExec(alpha, "web", api.ExecRequest{Shell: true})
+	var ae *api.Error
+	if !errors.As(err, &ae) || ae.Code != api.CodePreconditionFailed || ae.Message != "the shell /usr/local/bin/bash is not installed in jail web" ||
+		!strings.HasPrefix(ae.Hint, "install it with: jailops pkg install web -- bash") {
+		t.Fatalf("a shell that is not installed: %v", err)
+	}
+	if len(e.FakeExec.Calls()) != n {
+		t.Fatal("something ran in place of the missing shell")
+	}
+	// exec is not a shell session
+	if _, err := s.StartExec(alpha, "web", api.ExecRequest{Argv: []string{"pkg", "install", "-y", "bash"}}); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	e.Files.Put("/jailops/projects/alpha/jails/web/root"+api.BashPath, []byte("x"))
+	if _, err := s.StartExec(alpha, "web", api.ExecRequest{Shell: true}); err != nil {
+		t.Fatalf("bash after its installation: %v", err)
+	}
+	calls := e.FakeExec.Calls()
+	last := calls[len(calls)-1]
+	if !slices.Equal(last.Argv, []string{api.BashPath}) || slices.ContainsFunc(last.Opts.Env, func(v string) bool { return strings.HasPrefix(v, "ENV=") }) {
+		t.Fatalf("the session: %v %v", last.Argv, last.Opts.Env)
 	}
 }
 
-// waitShellSetup waits until the jail no longer says that its bash is being installed in the background: the setup
-// writes files through the same fakes as the operation under test, and a test that counts or fails the steps of that
-// operation must not see them.
-func waitShellSetup(t *testing.T, s *service.Service, ctx context.Context, name string) {
-	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		j, err := s.GetJail(ctx, name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		installing := false
-		for _, c := range j.Status.Conditions {
-			if c.Type == "ShellSetup" && c.Reason == api.ShellInstalling {
-				installing = true
-			}
-		}
-		if !installing {
-			return
-		}
+// root's interactive sh reads /root/.shrc, where the prompt is: the session gets ENV, as a login would.
+func TestAnShSessionReadsTheShrc(t *testing.T) {
+	e, s := tickingEnv(t)
+	alpha := as(globalAdmin, dtest.SeedProject)
+	j := dtest.WebJail("web")
+	j.Spec.Shell = api.ShellSh
+	op, err := s.CreateJail(alpha, j)
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Fatal("the shell of the jail is still being set up")
+	if got := wait(t, s, op); got.Status != api.OpSuccess {
+		t.Fatalf("create: %+v\n%s", got, e.Log())
+	}
+	op, err = s.JailAction(alpha, "web", api.JailAction{Action: "start"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := wait(t, s, op); got.Status != api.OpSuccess {
+		t.Fatalf("start: %+v\n%s", got, e.Log())
+	}
+	e.Files.Put("/jailops/projects/alpha/jails/web/root"+api.ShPath, []byte("x"))
+	if _, err := s.StartExec(alpha, "web", api.ExecRequest{Shell: true}); err != nil {
+		t.Fatal(err)
+	}
+	calls := e.FakeExec.Calls()
+	last := calls[len(calls)-1]
+	if !slices.Equal(last.Argv, []string{api.ShPath}) || !slices.Contains(last.Opts.Env, "ENV="+api.ShrcPath) || !slices.Contains(last.Opts.Env, "HOME=/root") {
+		t.Fatalf("the session: %v %v", last.Argv, last.Opts.Env)
+	}
+	// another user's sh is left to its own files
+	if _, err := s.StartExec(alpha, "web", api.ExecRequest{Shell: true, User: "www"}); err != nil {
+		t.Fatal(err)
+	}
+	calls = e.FakeExec.Calls()
+	if slices.ContainsFunc(calls[len(calls)-1].Opts.Env, func(v string) bool { return strings.HasPrefix(v, "ENV=") }) {
+		t.Fatalf("ENV for another user: %v", calls[len(calls)-1].Opts.Env)
+	}
 }

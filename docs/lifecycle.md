@@ -31,14 +31,14 @@ is written out in [automating-updates.md](automating-updates.md).
 | Image | One FreeBSD release, named after it: `freebsd-15-1` is 15.1-RELEASE. Built from pkgbase (`pkg -r ROOT install` of the base packages of `base_release_1`), never with `freebsd-update` | `jailops image list` |
 | Generation | `freebsd-15-1#g3`: one immutable build of the image, a dataset with a `@ro` snapshot. Each `image upgrade` builds the next one with the release's current patch level, for the jails made from then on; JailOps records the FreeBSD version of its `FreeBSD-runtime` (`15.1-RELEASE-p6`). The number counts builds on this host and says nothing about FreeBSD. A new release is a new image, never a generation of the old one | `jailops image generation list freebsd-15-1` (column `FREEBSD`); `jailops list` writes `freebsd-15-1 (g3, p6)` |
 | Jail | An independent system with a root dataset of its own, made by copying a generation (with block cloning, ZFS 2.2 and later, the copy takes next to no space until a file changes). The image is only the seed. A FreeBSD jail's release is the one JailOps installed and recorded on its root (`jailops:freebsd_version`). It is upgraded in place while it runs: `jailops jail upgrade NAME` upgrades the base from the host and the ports packages through the running jail, with a snapshot for a manual rollback and a health check. Inside the jail `pkg install` and `pkg upgrade` handle the ports packages and never touch the base: `FreeBSD-base` stays disabled there, as FreeBSD ships it. What must outlive the root goes in a volume | `jailops jail info web`; `freebsd-version -j PROJECT_JAIL` |
-| Linux jail | Alpine or Debian under the Linuxulator, a jail like any other. Alpine's packages are updated with `apk` by JailOps; Debian keeps its own (`unattended-upgrades`); the base of either is replaced by a new jail, never upgraded | `os: linux` |
+| Linux jail | Alpine or Debian under the Linuxulator, a jail like any other. It looks after its own packages: JailOps does not update them ([linux-jails.md](linux-jails.md#packages)); the base is replaced by a new jail, never upgraded | `os: linux` |
 | JailOps | The packages `jailops`, `jailops-client`, `jailops-apps` and, on a backup node, `jailops-backupd` from the repository `jailops` (`pkg.jailops.net/${ABI}`), built per package ABI. The daemon `jailopsd` and the helper `jailops-priv` are one service | `jailops version` |
 
 **Who does what.**
 
 | JailOps does | You do |
 |---|---|
-| Builds image generations; upgrades jails in place while they run (the base from the host, the ports packages through the running jail) with a snapshot and a health check; runs the nightly image builds you turned on; updates the packages inside FreeBSD and Alpine jails (`pkg -j`, `apk`) on a schedule or on request; converts its own stored state in place when you upgrade it ([upgrade-guarantee.md](upgrade-guarantee.md)) | Upgrade the host's FreeBSD with FreeBSD's tools; upgrade JailOps with `pkg`; decide when a jail moves to a new release; replace a Linux jail for a new release of its distribution; keep backups and test them; run the checks of [section 4](#4-always-test-after) |
+| Builds image generations; upgrades jails in place while they run (the base from the host, the ports packages through the running jail) with a snapshot and a health check; runs the nightly image builds you turned on; updates the packages inside FreeBSD jails (`pkg -j`) on a schedule or on request; converts its own stored state in place when you upgrade it ([upgrade-guarantee.md](upgrade-guarantee.md)) | Upgrade the host's FreeBSD with FreeBSD's tools; upgrade JailOps with `pkg`; decide when a jail moves to a new release; replace a Linux jail for a new release of its distribution; keep backups and test them; run the checks of [section 4](#4-always-test-after) |
 
 ## 2. What works with what
 
@@ -60,7 +60,7 @@ What JailOps refuses, by design, with the error you see:
 | You ask | Answer |
 |---|---|
 | `jail upgrade` of a FreeBSD jail | runs in place ([3.5](#35-a-freebsd-jail)); `forbidden` for anyone but a global administrator |
-| `jail upgrade` of a Linux jail | `unsupported`: its package manager updates it (`jailops update apply`); a new release of its distribution is a new jail |
+| `jail upgrade` of a Linux jail | `unsupported` when you name it: its package manager updates it (`jailops update apply`); a new release of its distribution is a new jail. `jail upgrade`, `jailops pkg` and `jail base` are for FreeBSD jails; a Linux jail is not part of a selection (several names, `-l`, `--all`) and manages its own packages |
 | `jail upgrade --release RELEASE` | `invalid` for a release older than the one installed in the jail ("a jail does not move to an older release"), `version_skew` for one newer than the host's kernel |
 | `image build` of a RELEASE image whose repository serves another release | the build stops at `verify-release` |
 | a daemon older than its database or than a stored object | `version_skew` at start, the data untouched: upgrade the binary, do not downgrade the data |
@@ -357,16 +357,16 @@ delete freebsd-15-1` an image: no jail depends on either.
 
 ### 3.7 A Linux jail
 
-The base of a Linux jail is its image generation, copied in full; a new base is a new jail. Alpine's packages are updated
-by JailOps (`jailops update check`, `jailops update apply web --packages`, or the jail's update policy),
-with a snapshot first; Debian's are the jail's own business (`unattended-upgrades`, or `apt-get` by hand). A release move
+The base of a Linux jail is its image generation, copied in full; a new base is a new jail. Linux jails look after their own
+packages: JailOps does not update them ([linux-jails.md](linux-jails.md#packages)). A release move
 (Alpine 3.22 to 3.23, Debian 13 to 14) is a new image and a new jail: create it next to the old one, move the data with the
 application's own tools, move the addresses or ports, delete the old jail. [linux-jails.md](linux-jails.md).
 
 ### 3.8 Packages inside a jail
 
 Packages live on the jail's root. The ports packages of a FreeBSD jail are updated by the host's `pkg -j PROJECT_JAIL`
-with the jail's own repositories, Alpine's by `apk` in the jail. Off for every jail until you set its mode.
+with the jail's own repositories. Off for every jail until you set its mode. Linux jails look after their own packages
+([linux-jails.md](linux-jails.md#packages)).
 
     jailops config set web --project shop update.mode=managed update.schedule="0 3 * * 0" update.packages=true update.os=true update.healthcheck="/usr/local/bin/check"
     jailops update check --project shop                 # every jail of the project: what could change, nothing changes

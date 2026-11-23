@@ -471,8 +471,8 @@ the Linuxulator, with a compatibility matrix that is a set of automated tests, n
 - No systemd as PID 1. Services are started directly or by a small init wrapper.
 - No netlink: no `ip`, no DHCP client. The host configures the network.
 - Required mounts: devfs with a ruleset, linprocfs, linsysfs, fdescfs, tmpfs on `/dev/shm`.
-- A Linux jail is updated in place (apk or apt inside the jail), snapshot first; a new distribution release is a new
-  jail.
+- A Linux jail looks after its own packages (apk or apt run inside it, from its own cron); JailOps does not update
+  them. A new distribution release is a new jail.
 - Addresses set on an epair **before** it is moved into the jail's vnet are lost. The host configures the interface
   and routes inside the jail after the move with `ifconfig -j <jail>` and `route -j <jail>` (verified, section 18).
 
@@ -836,12 +836,14 @@ updates:
 
 - **Shell.** `jailops shell <jail>` runs `jexec` with a shell chosen in this order: `--shell`, the jail's `shell`
   setting (a path inside the jail, or the names `bash` and `sh`; a management setting that does not touch `/etc/passwd`), then `/bin/sh`. If the
-  chosen shell does not exist in the jail the command fails with a clear error; it never falls back silently.
+  chosen shell is not installed in the jail the command fails (`precondition_failed`, with the command that installs it);
+  it never runs another shell and JailOps never installs one.
   `jailops config set <jail> shell /usr/local/bin/bash` is `config set` for that key and `jailops-sync` can declare it. A shell
-  session starts with the PATH of a login (`/usr/local/bin` included) and root's HOME; from a terminal the CLI passes `TERM`.
-- **Bash and the prompt of a new jail** ([shell.md](shell.md)). A new FreeBSD jail whose request and profiles leave `shell`
-  and `prompt` empty gets `jails.shell` and `jails.prompt` of `jailopsd.yaml` in its spec (sh and `default`). At the
-  first start JailOps installs `bash` into the running jail when the shell is bash (`pkg -j JAIL install -y bash`) and
+  session starts with the PATH of a login (`/usr/local/bin` included) and root's HOME (and for root's sh
+  `ENV=/root/.shrc`); from a terminal the CLI passes `TERM`.
+- **The prompt of a new jail** ([shell.md](shell.md)). A new FreeBSD jail whose request and profiles leave `shell`
+  and `prompt` empty gets `jails.shell` and `jails.prompt` of `jailopsd.yaml` in its spec (sh and `default`). JailOps
+  never installs a shell (bash is the administrator's `jailops pkg install NAME -- bash`). At the first start it
   writes the prompt (for sh through a marked block at the end of `/root/.shrc`):
   one file it owns, `/usr/local/etc/profile.d/jailops-prompt.sh` (a single-quoted `PS1` assignment of a text checked by
   an allow-list, set only in an interactive bash), sourced from a marked block at the top of `/usr/local/etc/profile` and
@@ -1616,8 +1618,8 @@ update` and `apt-get install` work, and the jail has v4 and v6 connectivity. Wha
   generic stream operations (`zfs.send`, `zfs.receive`) keep their old path and are not used by anything that moves
   large data. UNVERIFIED: why that path is slow on the real host.
 
-Not done for Debian: `jailops` managed updates and package provisioning run `apk` only; an upgrade of a debootstrap
-generation is refused (build a new generation).
+Not done for Debian: package provisioning runs `apk` only; an upgrade of a debootstrap generation is refused (build a
+new generation). Linux jails look after their own packages: JailOps does not update them.
 
 ### 18.8 Sealed secrets for jails
 
@@ -1938,8 +1940,8 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
   layer. The key routes are global-admin only; the recovery key is in the creation reply once and nowhere else.
   `POST /api/v1/backups/run` and `/verify` are operations. A restore names the project it goes into (there is no
   default), is admitted like a new jail, and the adopt step writes `spec.json` and `bundle.json` itself.
-- **Updates and provisioning (8.4, 8.5).** Off for every jail until `update.mode` is set. A check runs `pkg update`
-  and `pkg upgrade -n` (`apk update`, `apk upgrade --simulate` on Alpine) inside the jail, and for a running FreeBSD
+- **Updates and provisioning (8.4, 8.5).** Off for every jail until `update.mode` is set. Updates are for FreeBSD jails (a Linux
+  jail looks after its own packages). A check runs `pkg update` and `pkg upgrade -n` for the jail, and for a running
   jail pkg's dry run of its base packages; apply takes one atomic snapshot, updates, health-checks and records the
   result. A failed update is **not** rolled back by itself: the way back is `jail rollback --scope all` to the
   recorded snapshot with the jail stopped, which discards what the jail wrote since. The record says so. The schedule is evaluated by the

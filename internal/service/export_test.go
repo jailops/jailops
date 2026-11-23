@@ -51,13 +51,6 @@ func SeedJailopsRepo(s *Service, ctx context.Context, dir, root string) error {
 	return s.seedJailopsRepo(ctx, root)
 }
 
-// SetShellSetupDeadline shortens the deadline of the setup after a start; the returned function puts it back.
-func SetShellSetupDeadline(d time.Duration) func() {
-	old := shellSetupDeadline
-	shellSetupDeadline = d
-	return func() { shellSetupDeadline = old }
-}
-
 // SetHostDirTimeouts shortens how long a read and a probe wait for a host directory that does not answer, and returns
 // what puts them back.
 func SetHostDirTimeouts(read, probe time.Duration) func() {
@@ -69,15 +62,7 @@ func SetHostDirTimeouts(read, probe time.Duration) func() {
 
 // HoldForTest holds a jail the way an app installation does and returns what lets it go.
 func HoldForTest(s *Service, key, what string) (func(), error) {
-	return s.holdJailFor(key, what, false)
-}
-
-// SetShellSettle shortens how long a stop waits for the setup of the shell and how long pkg has to end after SIGTERM;
-// the returned function puts them back.
-func SetShellSettle(wait, grace time.Duration) func() {
-	w, g := shellSettleWait, shellTermGrace
-	shellSettleWait, shellTermGrace = wait, grace
-	return func() { shellSettleWait, shellTermGrace = w, g }
+	return s.holdJailFor(key, what)
 }
 
 // ApplyForwards is applyForwards: the forwards a load took out of policies and profiles, given to the jails that used them.

@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -337,12 +336,12 @@ func (a *app) jailShell(d *kindDesc[api.Jail]) *cobra.Command {
 hub (--host), with the same trust and project rules, and needs no SSH server
 in the jail.
 
-The shell is chosen in this order: --shell, then the jail's configured "shell"
-key (a path inside the jail, not necessarily the login shell of /etc/passwd;
-new FreeBSD jails get bash, and 'jailops config set NAME shell sh' goes back to
-the system's own sh), then /bin/sh. If the chosen shell does not exist in the jail
-the command fails with a clear error; it never falls back to another shell
-('jailops jail shell-setup NAME' installs bash). The shell starts in / as root
+The shell is chosen in this order: --shell, then the jail's preferred shell
+(its "shell" key: a path inside the jail, not necessarily the login shell of
+/etc/passwd), then /bin/sh. JailOps never installs a shell: if the chosen shell
+is not installed in the jail the command fails with a clear error and runs no
+other shell ('jailops pkg install NAME -- bash' installs bash, and the next
+'jailops shell' uses it). The shell starts in / as root
 with the PATH of a login and HOME=/root; from a terminal TERM is passed on.
 
 Without a terminal on stdin and stdout the shell runs without a pseudo-terminal,
@@ -352,27 +351,6 @@ which is what a pipe such as 'echo id | jailops shell web' needs.`,
 		ValidArgsFunction: completeKind(a, d),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.shell = true
-			if c, err := a.connect(cmd.Context()); err == nil {
-				ctx := cmd.Context()
-				get := func(ctx context.Context) (api.Jail, error) { return c.Jails().Get(ctx, args[0]) }
-				// Only a bash that is on its way is waited for: `--shell /bin/sh` and a jail whose shell is sh open at once.
-				if o.shellPath != "" && o.shellPath != api.BashPath { // a non-bash --shell needs no status
-					return a.runExec(ctx, args[0], nil, o)
-				}
-				if j, err := get(ctx); err == nil && shellInstalling(j) && (o.shellPath == api.BashPath || (o.shellPath == "" && j.Spec.Shell == api.BashPath)) {
-					w := shellWait{out: a.env.Stderr, tty: a.env.IsTTY(a.env.Stderr), now: a.env.Now, sleep: sleepCtx, get: get,
-						poll: time.Second, limit: 70 * time.Second}
-					if err := w.run(ctx, args[0]); err != nil {
-						return err
-					}
-					// The setup ended without bash: say why before the shell answers that it does not exist.
-					if j, err := get(ctx); err == nil {
-						if cd := shellCond(j); cd != nil && cd.Reason == "Failed" {
-							fprintln(a.env.Stderr, cd.Message)
-						}
-					}
-				}
-			}
 			return a.runExec(cmd.Context(), args[0], nil, o)
 		},
 	}

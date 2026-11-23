@@ -160,8 +160,10 @@ const DefaultMaxStates = 10000
 // prompt keys empty. They apply to jails created from now on; an existing jail gets them only through
 // `jailops jail shell-setup`.
 type JailsConf struct {
-	// Shell is sh (the default: FreeBSD's own shell, nothing is installed) or bash (installed at the jail's first
-	// start and started by `jailops shell` and the console). A project can say bash for its jails (project set --shell).
+	// Shell is the preferred shell of `jailops shell` and the console in a new jail: sh (the default: FreeBSD's own
+	// shell, always there) or bash. JailOps never installs it: until an administrator installs bash in the jail
+	// (`jailops pkg install NAME -- bash`), `jailops shell` fails with that hint. A project can say bash for its jails
+	// (project set --shell).
 	Shell string `yaml:"shell"`
 	// Prompt is the prompt of a new jail: default (the default), short, none, or a PS1 text. bash shows it to every user;
 	// sh shows it to root (the block at the end of /root/.shrc).

@@ -11,32 +11,34 @@ hand for the common cases, and everything can be changed or removed.
 
 ## What a new jail gets
 
-When the request (and the jail's profiles) do not say otherwise, the daemon fills two keys of a new FreeBSD jail from
-`jailopsd.yaml`, so `jailops config show NAME` shows what it got:
+When the request (and the jail's profiles) do not say otherwise, the daemon fills the `prompt` key of a new FreeBSD jail
+from `jailopsd.yaml`, and the `shell` key when the host's default is bash, so `jailops config show NAME` shows what it
+got:
 
 | Key | Default | Meaning |
 |---|---|---|
-| `shell` | `/bin/sh` | the shell of `jailops shell` and the console: `sh`, `bash` or a path inside the jail (`jails.shell` of `jailopsd.yaml`, or `project set --shell` for a project's new jails) |
+| `shell` | unset (`/bin/sh`) | the preferred shell of `jailops shell` and the console: `sh`, `bash` or a path inside the jail (`jails.shell` of `jailopsd.yaml`, or `project set --shell` for a project's new jails) |
 | `prompt` | `default` | the prompt: `default`, `short`, `none`, or a PS1 text |
 
-With sh nothing is installed: the prompt is written at the first start. With bash, a new jail still starts at once: its
-**first start** never waits for a package server. JailOps installs the `bash` package into the running jail in the
-background (`pkg -j JAIL install -y bash`, over the jail's own network) and writes the prompt; `jailops start`
-says so, the jail shows a `ShellSetup` condition with the reason `Installing` meanwhile (the step it is in and since when), and
-`jailops shell` waits up to a minute for the bash and shows what it waits for, with a line that moves (the seconds and the
-step); Ctrl-C stops the waiting, not the setup. A command that needs no bash (`jailops exec JAIL -- COMMAND`, `jailops shell
---shell /bin/sh`) works at once. The package downloads of the setup give up after ten seconds for an address, so that a dead
-IPv6 or IPv4 path fails fast and pkg goes on to the other family. A stop, a restart, an update or an app installation gives the
-setup a few seconds and then ends it gently (SIGTERM to pkg, SIGKILL three seconds later); it stays due and the next start
-tries again, with an event `jail-shell-setup-cancelled`. A later start, while bash is still missing, tries again inside the
-running jail; the host never installs it into the root of a jail that has run. When the installation fails, `jailops shell` says in which step and why (when pkg's output shows that the package server did
-not answer: which commands tell the address family that does not work) and which command fixes it (`jailops jail shell-setup NAME`), and
-`jailops config set NAME shell sh` uses FreeBSD's own shell instead. Bash and the prompt files live below `/usr/local`
-on the jail's root, and the in-place upgrade keeps them. App installations do the same right after the app's packages.
+The prompt is written at every start where it changed, and at once into a running jail when the key changes.
 
-If the host cannot reach its package repository, the start still succeeds: the jail shows a `ShellSetup` condition
-(`jailops jail show NAME`, and a notice on the jail's page in the console), `jailops shell` says how to repair it, and
-`jailops jail shell-setup NAME` tries again.
+**JailOps never installs a shell.** sh is always there. A jail whose preferred shell is bash gets bash when you install
+it in the jail:
+
+    jailops pkg install web -- bash
+
+The next `jailops shell web` starts it, with no restart and no change of the jail; the prompt files are already in
+place. Until then `jailops shell` and the console refuse with the reason and both ways out:
+
+    the shell /usr/local/bin/bash is not installed in jail web
+    hint: install it with: jailops pkg install web -- bash, or use sh: jailops shell web --shell /bin/sh
+
+No other shell is started in its place. `jailops exec` runs a command and needs no shell. Bash and the prompt files live
+below `/usr/local` on the jail's root, and the in-place upgrade keeps them.
+
+When the prompt cannot be written (a start-up file whose JailOps block was cut by hand), the start still succeeds: the
+jail shows a `ShellSetup` condition (`jailops jail show NAME`, and a notice on the jail's page in the console), and
+`jailops jail shell-setup NAME` writes it again once the file is fixed.
 
 Linux jails are left alone: they keep the shell and prompt of their distribution, and the prompt key is refused for them.
 
@@ -158,14 +160,13 @@ jails:
     jailops config set web shell sh              # jailops shell and the console start /bin/sh again
 
 A running jail gets a new prompt at once, a stopped one at its next start. The console's Configuration tab has both keys.
-To drop bash itself, set the shell to `sh` and remove the package by hand (`pkg delete bash`
-in the jail if it has `pkg`); JailOps does not install it again on its own.
+To drop bash itself, set the shell to `sh` and remove the package (`jailops pkg remove web -- bash`).
 
 **For all new jails of a host** (`/usr/local/etc/jailops/jailopsd.yaml`, read at the daemon's start):
 
 ```yaml
 jails:
-  shell: bash          # or sh: nothing is installed, and the prompt key stays empty
+  shell: bash          # or sh (the default); the preferred shell, never installed by JailOps
   prompt: default      # default, short, none, or a PS1 text
   prompt_color: 39     # 256-colour number of user@jail (39 light blue, 40 green, 196 red)
 ```
@@ -183,10 +184,10 @@ upgrade. Ask for it:
 
     jailops jail shell-setup web
 
-It fills the keys the jail does not set from the host's defaults, installs bash when it is the shell and missing, and
-writes the prompt; it prints the `PS1` it wrote and what it did. Running it again repairs the files and installs
-nothing. The jail must run. In the console, a jail whose shell is bash but has no bash offers the same on its Console
-tab (**Install bash and the prompt**).
+It fills the keys the jail does not set from the host's defaults and writes the prompt; it prints the `PS1` it wrote and
+what it did, and names a preferred shell that is not installed with the command that installs it. It installs nothing.
+Running it again repairs the files. The jail must run. In the console, a jail whose preferred shell is not installed
+says how to install it on its Console tab and can open sh for the session (**Open sh**).
 
 ## What a prompt may contain
 
@@ -209,7 +210,8 @@ branch, the exit status) belongs in your own `~/.bashrc`.
 `jailops shell` and the console run the shell through `jexec` without a login: bash starts as an interactive shell that
 is not a login shell (it reads `bash.bashrc` and `~/.bashrc`), in `/`, as root. The session gets
 `PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin` (the path of a login, so what packages install is
-found) and `HOME=/root`; the jail's own `env.*` keys and what the caller sends come after and win. From a terminal,
+found) and `HOME=/root`, and root's sh also `ENV=/root/.shrc`, which an interactive sh reads (so the prompt shows as in a
+login); the jail's own `env.*` keys and what the caller sends come after and win. From a terminal,
 `jailops shell` and `jailops exec -t` pass the terminal's `TERM`, so bash edits lines as it does in a login (without it,
 bash assumes a dumb terminal). The console's terminal understands a small part of what a terminal does and sends no
 `TERM`; bash then works line by line, and the coloured prompt shows (the console draws the 256 colours).
@@ -234,6 +236,6 @@ The green prompt on the host is the same mechanism, written once by hand (JailOp
 
 ## bash instead of sh
 
-`jailops project set shop --shell bash` makes bash the shell of the new FreeBSD jails of the project (`--shell sh` goes back);
-`jailops create --shell bash` and `jailops config set web shell bash` do it for one jail, and `jails.shell` in `jailopsd.yaml`
-for the host. Bash is installed in the jail in the background at its first start, and `jailops shell` waits for it.
+`jailops project set shop --shell bash` makes bash the preferred shell of the new FreeBSD jails of the project (`--shell
+sh` goes back); `jailops create --shell bash` and `jailops config set web shell bash` do it for one jail, and `jails.shell`
+in `jailopsd.yaml` for the host. Install bash in each such jail (`jailops pkg install web -- bash`); JailOps never does.

@@ -3,6 +3,8 @@ package cli_test
 import (
 	"strings"
 	"testing"
+
+	"jailops.net/jailops/sdk/api"
 )
 
 func TestPkgRunsPkgInTheJails(t *testing.T) {
@@ -48,5 +50,50 @@ func TestPkgUsage(t *testing.T) {
 		if _, _, code := h.run("", args...); code != 2 {
 			t.Errorf("%s: exit %d", name, code)
 		}
+	}
+}
+
+// pkg(8) is FreeBSD's: a Linux jail is silently not part of a selection, a named Linux jail is refused, and a
+// selection with nothing but Linux jails runs nothing and succeeds.
+func TestPkgLeavesLinuxJailsOut(t *testing.T) {
+	h := manyHarness(t)
+	h.srv.SeedImage(api.Image{Metadata: api.ObjectMeta{Name: "alpine-3"},
+		Spec: api.ImageSpec{OS: api.OSLinux, Release: "3.22", Arch: "amd64", Source: api.ImageSource{Type: "minirootfs"}}})
+	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "alp", Project: "main", Labels: map[string]string{"role": "web", "os": "linux"}},
+		Spec: api.JailSpec{Image: "alpine-3", OS: api.OSLinux}, Status: api.JailStatus{Power: api.PowerRunning}})
+	ran := func() []string {
+		var out []string
+		for _, c := range h.srv.ExecCalls() {
+			out = append(out, c.Jail)
+		}
+		return out
+	}
+	inLinux := func() bool {
+		for _, j := range ran() {
+			if j == "alp" {
+				return true
+			}
+		}
+		return false
+	}
+
+	out, errs, _ := h.run("", "pkg", "upgrade", "-l", "role=web")
+	if inLinux() || strings.Contains(out+errs, "alp") || strings.Contains(out+errs, "Linux") {
+		t.Fatalf("selector: %v %q %q", ran(), out, errs)
+	}
+	n := len(ran())
+	out, errs, _ = h.run("", "pkg", "info", "alp", "web1")
+	if inLinux() || strings.Contains(out+errs, "Linux") || len(ran()) != n+1 {
+		t.Fatalf("several names: %v %q %q", ran(), out, errs)
+	}
+
+	_, errs, code := h.run("", "pkg", "install", "alp", "--", "nginx")
+	if code == 0 || !strings.Contains(errs, "jail alp is a Linux jail: pkg is FreeBSD's package manager; use the distribution's own with jailops exec") || inLinux() {
+		t.Fatalf("named: %d %q", code, errs)
+	}
+
+	n = len(ran())
+	if _, errs, code := h.run("", "pkg", "upgrade", "-l", "os=linux"); code != 0 || strings.Contains(errs, "Linux") || len(ran()) != n {
+		t.Fatalf("only Linux: %d %q", code, errs)
 	}
 }

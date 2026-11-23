@@ -359,8 +359,7 @@ type Service struct {
 	wg        sync.WaitGroup
 	// trackMu orders the start of a tracked goroutine against Close: once Close has begun nothing new is added to wg,
 	// so the wait of Close is a guarantee that no work of the service runs after it (a start that the reconcile loop
-	// still had in flight could otherwise begin a background shell setup that writes into the state after the daemon
-	// closed it).
+	// still had in flight could otherwise begin work that writes into the state after the daemon closed it).
 	trackMu sync.Mutex
 	closed  bool
 }

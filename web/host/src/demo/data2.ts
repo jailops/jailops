@@ -85,7 +85,8 @@ export function profiles(): { project: Profile[]; host: Profile[] } {
 }
 
 export function updateReports(jails: Jail[]): UpdateReport[] {
-  return jails.map((j): UpdateReport => {
+  // Linux jails look after their own packages: JailOps checks none
+  return jails.filter((j) => j.spec.os !== 'linux').map((j): UpdateReport => {
     const name = j.metadata.name
     const base = { jail: name, project: j.metadata.project ?? 'web', mode: j.spec.update?.mode ?? 'manual', checked_at: ago(3600), available: false }
     if (name === 'web') return { ...base, available: true, packages: [{ name: 'nginx', from: '1.26.1', to: '1.26.3' }, { name: 'openssl', from: '3.0.15', to: '3.0.16' }], os: { from: '15.1-RELEASE-p6', to: '15.1-RELEASE-p7' } }

@@ -85,8 +85,13 @@ func TestExecStreamsAuditsAndRespectsProjects(t *testing.T) {
 	if _, err := e.Admin.Project("other").Jails().Exec(c, "web", []string{"ls"}, sdk.ExecOptions{}); !api.IsCode(err, api.CodeNotFound) {
 		t.Fatal(err)
 	}
-	// No command means the jail's shell: bash, which a new jail gets at its first start (docs/shell.md), with the
-	// PATH of a login and root's HOME before what the caller sends.
+	// No command means the jail's preferred shell: bash, once it is installed in the jail (JailOps never installs it,
+	// docs/shell.md), with the PATH of a login and root's HOME before what the caller sends.
+	_, err = e.Admin.Jails().Exec(c, "web", nil, sdk.ExecOptions{})
+	if !api.IsCode(err, api.CodePreconditionFailed) || !strings.Contains(err.Error(), "the shell /usr/local/bin/bash is not installed in jail web") {
+		t.Fatalf("a shell that is not installed: %v", err)
+	}
+	e.Files.Put("/jailops/projects/alpha/jails/web/root"+api.BashPath, []byte("x"))
 	s, err = e.Admin.Jails().Exec(c, "web", nil, sdk.ExecOptions{Env: []string{"HOME=/elsewhere"}})
 	if err != nil {
 		t.Fatal(err)
@@ -96,8 +101,8 @@ func TestExecStreamsAuditsAndRespectsProjects(t *testing.T) {
 	if last := calls[len(calls)-1]; !slices.Equal(last.Argv, []string{api.BashPath}) || !slices.Equal(last.Opts.Env, []string{"PATH=" + service.ShellPATH, "HOME=/root", "HOME=/elsewhere"}) {
 		t.Fatalf("%+v", last)
 	}
-	// A shell the jail does not have is not found, and never replaced by another one.
-	if _, err := e.Admin.Jails().Exec(c, "web", nil, sdk.ExecOptions{Shell: true, ShellPath: "/usr/local/bin/zsh"}); !api.IsCode(err, api.CodeNotFound) {
+	// A shell the jail does not have is an error, and never replaced by another one.
+	if _, err := e.Admin.Jails().Exec(c, "web", nil, sdk.ExecOptions{Shell: true, ShellPath: "/usr/local/bin/zsh"}); !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Fatal(err)
 	}
 	// A read-only identity cannot exec.
