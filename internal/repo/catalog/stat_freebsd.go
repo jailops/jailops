@@ -25,6 +25,18 @@ func mknod(path string, mode uint32, major, minor uint32) error {
 	return unix.Mknod(path, mode, unix.Mkdev(major, minor))
 }
 
+// clearFlags takes every file flag off path itself (lchflags: a symlink is not followed).
+func clearFlags(path string) error {
+	p, err := syscall.BytePtrFromString(path)
+	if err != nil {
+		return err
+	}
+	if _, _, e := syscall.Syscall(unix.SYS_LCHFLAGS, uintptr(unsafe.Pointer(p)), 0, 0); e != 0 {
+		return e
+	}
+	return nil
+}
+
 // setFlags applies chflags(2) flags: chflags for files and directories,
 // lchflags for symlinks (the flags of the link itself).
 func setFlags(path string, flags uint32, link bool) (applied bool, err error) {

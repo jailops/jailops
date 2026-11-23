@@ -179,7 +179,7 @@ func verifyRestore(ctx context.Context, snap *Snapshot, o VerifyOptions, res *Ve
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(scratch)
+	defer catalog.RemoveAll(scratch)
 	root := os.Geteuid() == 0
 	for i := range snap.Manifest.Streams {
 		st := &snap.Manifest.Streams[i]
@@ -188,7 +188,10 @@ func verifyRestore(ctx context.Context, snap *Snapshot, o VerifyOptions, res *Ve
 			return err
 		}
 		skips := &catalog.Skips{}
-		eo := catalog.ExtractOptions{NoChown: o.Mode == VerifyExtract || !root, Lenient: o.Mode == VerifyFull, Skips: skips, Attrs: o.Attrs, SkipDevices: !root}
+		// extract checks content only: no file flags, which only root may set and which would keep the tree from
+		// being removed
+		eo := catalog.ExtractOptions{NoChown: o.Mode == VerifyExtract || !root, Lenient: o.Mode == VerifyFull, Skips: skips, Attrs: o.Attrs,
+			SkipDevices: !root, NoFlags: o.Mode == VerifyExtract}
 		tree, err := snap.restoreWhole(ctx, st, catalog.LocalSink(dest, o.Attrs), eo, o.Workers, o.Window)
 		if err != nil {
 			res.Problems = append(res.Problems, fmt.Sprintf("stream %s: restore failed: %v", st.Name, err))

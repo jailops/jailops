@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -751,3 +752,113 @@ func TestScanErrors(t *testing.T) {
 }
 
 var _ = io.EOF
+
+// recordingSink records the operations of an extraction, as a kernel would see them: once an entry got its flags,
+// a hard link to it or a new entry in it is refused, as for an immutable file or directory.
+type recordingSink struct {
+	ops     []string
+	flagged map[string]bool
+}
+
+func (s *recordingSink) refuse(rel string) error {
+	if s.flagged[rel] || s.flagged[path.Dir(rel)] {
+		return fmt.Errorf("%s: %w", rel, unix.EPERM)
+	}
+	return nil
+}
+func (s *recordingSink) Begin() error { return nil }
+func (s *recordingSink) Mkdir(rel string) error {
+	s.ops = append(s.ops, "mkdir "+rel)
+	return s.refuse(rel)
+}
+func (s *recordingSink) WriteFile(rel string, _ uint64, _ *[32]byte, r io.Reader) error {
+	_, _ = io.Copy(io.Discard, r)
+	s.ops = append(s.ops, "write "+rel)
+	return s.refuse(rel)
+}
+func (s *recordingSink) Symlink(rel, _ string) error {
+	s.ops = append(s.ops, "symlink "+rel)
+	return s.refuse(rel)
+}
+func (s *recordingSink) Link(rel, target string) error {
+	s.ops = append(s.ops, "link "+rel)
+	if err := s.refuse(rel); err != nil {
+		return err
+	}
+	return s.refuse(target)
+}
+func (s *recordingSink) Mknod(rel string, _, _, _ uint32) error {
+	s.ops = append(s.ops, "mknod "+rel)
+	return s.refuse(rel)
+}
+func (s *recordingSink) Apply(rel string, e *Entry, _ bool, _ MetaOptions) ([]string, error) {
+	s.ops = append(s.ops, fmt.Sprintf("apply %s %#x", rel, e.Flags))
+	if e.Flags != 0 {
+		s.flagged[rel] = true
+	}
+	return nil, nil
+}
+
+// An immutable file takes no further hard link and an immutable directory no new entry (a pkgbase root has both):
+// the flags are set once the whole tree exists, and NoFlags sets none.
+func TestExtractSetsFileFlagsLast(t *testing.T) {
+	const schg = 0x20000
+	data := []byte("libc")
+	tree := &Tree{Root: &Entry{Kind: KDir, Mode: 0o755, Children: []*Entry{
+		{Kind: KDir, Name: "lib", Mode: 0o755, Children: []*Entry{
+			{Kind: KFile, Name: "libc.so.7", Mode: 0o444, Flags: schg, Size: 4, Sum: sha256.Sum256(data)},
+			{Kind: KHardlink, Name: "libc.so.7.link", Mode: 0o444, Link: "lib/libc.so.7"},
+		}},
+		{Kind: KDir, Name: "var", Mode: 0o755, Children: []*Entry{
+			{Kind: KDir, Name: "empty", Mode: 0o555, Flags: schg},
+			{Kind: KFile, Name: "zz", Mode: 0o644},
+		}},
+	}}, Count: 7}
+	pay := FromReaderAt(bytes.NewReader(data))
+	s := &recordingSink{flagged: map[string]bool{}}
+	if err := tree.ExtractTo(s, pay, ExtractOptions{NoChown: true}); err != nil {
+		t.Fatalf("%v\n%s", err, strings.Join(s.ops, "\n"))
+	}
+	n := len(s.ops)
+	if want := []string{"apply lib/libc.so.7 0x20000", "apply var/empty 0x20000"}; s.ops[n-2] != want[0] || s.ops[n-1] != want[1] {
+		t.Fatalf("the flagged entries were not applied last:\n%s", strings.Join(s.ops, "\n"))
+	}
+	s = &recordingSink{flagged: map[string]bool{}}
+	if err := tree.ExtractTo(s, pay, ExtractOptions{NoChown: true, NoFlags: true}); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.flagged) != 0 || len(s.ops) != n {
+		t.Fatalf("NoFlags: flags set on %v\n%s", s.flagged, strings.Join(s.ops, "\n"))
+	}
+}
+
+// On FreeBSD as root: an immutable file with a second hard link is restored with its flag, and RemoveAll removes
+// the tree.
+func TestExtractImmutableHardLinkAndRemoveAll(t *testing.T) {
+	if runtime.GOOS != "freebsd" || os.Geteuid() != 0 {
+		t.Skip("needs FreeBSD and root")
+	}
+	const schg = 0x20000
+	data := []byte("libc")
+	tree := &Tree{Root: &Entry{Kind: KDir, Mode: 0o755, Children: []*Entry{
+		{Kind: KFile, Name: "a", Mode: 0o444, Flags: schg, Size: 4, Sum: sha256.Sum256(data)},
+		{Kind: KHardlink, Name: "b", Mode: 0o444, Link: "a"},
+	}}, Count: 3}
+	dest := filepath.Join(t.TempDir(), "t")
+	if err := os.Mkdir(dest, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Extract(dest, FromReaderAt(bytes.NewReader(data)), ExtractOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	si, err := lstat(filepath.Join(dest, "b"))
+	if err != nil || si.Flags&schg == 0 || si.Nlink != 2 {
+		t.Fatalf("%+v %v", si, err)
+	}
+	if err := RemoveAll(dest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+		t.Fatalf("the tree is still there: %v", err)
+	}
+}

@@ -22,4 +22,6 @@ func kindOf(path string, si statInfo, e *Entry) error             { return errUn
 func mknod(path string, mode uint32, major, minor uint32) error   { return errUnsupportedOS }
 func setFlags(path string, flags uint32, link bool) (bool, error) { return false, errUnsupportedOS }
 
+func clearFlags(path string) error { return errUnsupportedOS }
+
 func typeBits(k Kind) uint32 { return 0 }

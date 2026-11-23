@@ -13,6 +13,7 @@ import (
 
 	"jailops.net/jailops/internal/backup"
 	"jailops.net/jailops/internal/node/wire"
+	"jailops.net/jailops/internal/repo/catalog"
 	"jailops.net/jailops/internal/repo/engine"
 	"jailops.net/jailops/internal/sys/zfs"
 	"jailops.net/jailops/sdk/api"
@@ -138,7 +139,7 @@ func (e *drillEnv) RemoveScratchDir(_ context.Context, p backup.DrillPlan) error
 	if err := e.checkScratchDir(p.Scratch); err != nil {
 		return err
 	}
-	return os.RemoveAll(p.Scratch)
+	return catalog.RemoveAll(p.Scratch)
 }
 
 func (e *drillEnv) scratchPlacement(p backup.DrillPlan) Placement {

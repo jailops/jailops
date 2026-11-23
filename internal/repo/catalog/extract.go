@@ -98,6 +98,9 @@ type ExtractOptions struct {
 	Skips *Skips
 	// Attrs applies extended attributes and ACLs (nil = the platform's).
 	Attrs Attrs
+	// NoFlags sets no file flags: for a scratch tree that is only read back and then removed (an immutable file
+	// could not be removed, and only root may set the system flags).
+	NoFlags bool
 }
 
 // Skips records the metadata operations an extraction did not perform: how
@@ -263,12 +266,32 @@ func (t *Tree) ExtractTo(sink Sink, pay Payload, o ExtractOptions) error {
 		}
 		return false
 	})
-	apply := func(rel string, e *Entry, link bool) error {
+	type pending struct {
+		rel  string
+		e    *Entry
+		link bool
+	}
+	var flagged []pending
+	sinkApply := func(rel string, e *Entry, link bool) error {
 		skipped, err := sink.Apply(rel, e, link, mo)
 		for _, m := range skipped {
 			o.Skips.add(m)
 		}
 		return err
+	}
+	apply := func(rel string, e *Entry, link bool) error {
+		if e.Flags != 0 && o.NoFlags {
+			cp := *e
+			cp.Flags = 0
+			e = &cp
+		}
+		if e.Flags != 0 {
+			// An immutable or append-only file takes no further hard link (EPERM) and an immutable directory no
+			// new entry: the metadata of an entry with flags is applied once the whole tree exists.
+			flagged = append(flagged, pending{rel, e, link})
+			return nil
+		}
+		return sinkApply(rel, e, link)
 	}
 	var dirs []item
 	for _, it := range items {
@@ -341,6 +364,12 @@ func (t *Tree) ExtractTo(sink Sink, pay Payload, o ExtractOptions) error {
 			if err := apply(dirs[i].rel, dirs[i].e, false); err != nil {
 				return err
 			}
+		}
+	}
+	// then the entries with flags, in the same order (children before their directory)
+	for _, f := range flagged {
+		if err := sinkApply(f.rel, f.e, f.link); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -547,6 +576,22 @@ func applyMeta(p string, e *Entry, link bool, o MetaOptions, attrs Attrs, skip f
 		}
 	}
 	return nil
+}
+
+// RemoveAll removes dir and everything below it like os.RemoveAll, also a tree an extraction left immutable or
+// append-only entries in: when the first attempt fails, the flags of every entry are cleared (the system flags
+// only by root) and it tries again.
+func RemoveAll(dir string) error {
+	if err := os.RemoveAll(dir); err == nil {
+		return nil
+	}
+	_ = filepath.WalkDir(dir, func(p string, _ fs.DirEntry, err error) error {
+		if err == nil {
+			_ = clearFlags(p)
+		}
+		return nil
+	})
+	return os.RemoveAll(dir)
 }
 
 func fileMode(m uint32) os.FileMode {

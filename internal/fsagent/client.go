@@ -296,7 +296,10 @@ func (c *Client) Mknod(rel string, mode uint32, major, minor uint32) error {
 
 // Apply implements catalog.Sink.
 func (c *Client) Apply(rel string, e *catalog.Entry, link bool, o catalog.MetaOptions) ([]string, error) {
-	eb, err := json.Marshal(e)
+	// the metadata of the entry itself: the subtree of a directory (a whole root) would not fit in a frame
+	cp := *e
+	cp.Children = nil
+	eb, err := json.Marshal(&cp)
 	if err != nil {
 		return nil, err
 	}

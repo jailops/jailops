@@ -2246,7 +2246,7 @@ check "and rename it back" $J rename web-renamed web --project demo -y
 # the run history of the nightly upgrade moves with the image; it exists when the block of the automatic upgrade ran before (shard 3 checks it there)
 had_history=0; if $J image show "$img" | grep -q 'Automatic upgrades'; then had_history=1; fi
 check "rename the image while a jail on it runs" $J image rename "$img" e2e-img -y
-expect "the jails follow" 'web-restored +running +e2e-img' $J jail list --project demo
+expect "the jails follow" 'web-restored +running +e2e-img' $J jail list --project demo -c name,state,image
 expect "the root of the jail is no clone of a generation" '^-$' zfs get -H -o value origin "$pool/jailops/projects/demo/jails/web-restored/root"
 expect "the generations are mounted under the new name" "^$mount/images/e2e-img/g1\$" zfs get -H -o value mountpoint "$pool/jailops/images/e2e-img/g1"
 if [ $had_history = 1 ]; then expect "the nightly runs moved with it" 'Automatic upgrades' $J image show e2e-img; fi
