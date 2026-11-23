@@ -29,7 +29,7 @@ func TestDoctorBlockCloning(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 	e.ZFS.SetFeatureState("tank", "block_cloning", "disabled")
-	if c, _ := row(); c.Status != api.DoctorWarn || c.Message != "pool tank has not enabled block cloning: every new jail is a full copy of its image (about 75 MB each). 'zpool upgrade tank' enables it; after that, systems older than OpenZFS 2.2 cannot import the pool." {
+	if c, _ := row(); c.Status != api.DoctorWarn || c.Message != "pool tank has not enabled block cloning: every new jail is a full copy of its image (about 50 MB each). 'zpool upgrade tank' enables it; after that, systems older than OpenZFS 2.2 cannot import the pool." {
 		t.Fatalf("%+v", c)
 	}
 	// a ZFS that does not know the feature: nothing is said
