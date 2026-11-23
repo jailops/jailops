@@ -190,8 +190,10 @@ release-pr VERSION:
     git show-ref --verify -q "refs/heads/release/v{{VERSION}}" && \
         { echo "x local branch release/v{{VERSION}} left over from a failed run: git checkout master && git branch -D release/v{{VERSION}}"; exit 1; }
     # what can be checked before anything is touched is checked here: the Unreleased notes on master
-    git show origin/master:CHANGELOG.md | grep -Eq '^## \[?Unreleased\]?' || { echo "x CHANGELOG.md on master has no Unreleased section"; exit 1; }
-    [ -n "$(git show origin/master:CHANGELOG.md | awk '/^## \[?Unreleased\]?/{f=1;next} /^## /{f=0} f' | tr -d '[:space:]')" ] || \
+    # (read into a variable and grep a here-string: `git show | grep -q` fails under pipefail, grep quits first and git gets SIGPIPE)
+    master_cl=$(git show origin/master:CHANGELOG.md)
+    grep -Eq '^## \[?Unreleased\]?' <<<"$master_cl" || { echo "x CHANGELOG.md on master has no Unreleased section"; exit 1; }
+    [ -n "$(awk '/^## \[?Unreleased\]?/{f=1;next} /^## /{f=0} f' <<<"$master_cl" | tr -d '[:space:]')" ] || \
         { echo "x the Unreleased section of CHANGELOG.md on master is empty: write the notes first"; exit 1; }
     # a failure from here on leaves nothing behind: the branch's changes (version.txt, a fixture) are thrown away with it
     trap 'git checkout -f master 2>/dev/null; git clean -fdq internal/store/testdata/upgrade 2>/dev/null; git branch -D "release/v{{VERSION}}" 2>/dev/null || true' EXIT
