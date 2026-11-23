@@ -17,6 +17,8 @@ func mknod(path string, mode uint32, major, minor uint32) error {
 	return unix.Mknod(path, mode, int(unix.Mkdev(major, minor)))
 }
 
+func clearFlags(path string) error { return nil }
+
 // setFlags applies file flags. Linux has no chflags(2); flags recorded on
 // another platform cannot be applied here.
 func setFlags(path string, flags uint32, link bool) (applied bool, err error) {

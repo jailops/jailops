@@ -379,3 +379,29 @@ func FuzzServeRead(f *testing.F) {
 		a.Close()
 	})
 }
+
+// Applying the metadata of a directory sends the entry alone, never its subtree: the root of a jail has far more
+// entries than fit in a frame.
+func TestApplyOfALargeDirectoryFitsInAFrame(t *testing.T) {
+	dest := t.TempDir()
+	c := start(t, ModeWrite, dest)
+	if err := c.Begin(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Mkdir("usr"); err != nil {
+		t.Fatal(err)
+	}
+	dir := &catalog.Entry{Kind: catalog.KDir, Name: "usr", Mode: 0o755}
+	for i := 0; len(dir.Children)*100 < 2*MaxFrame; i++ {
+		dir.Children = append(dir.Children, &catalog.Entry{Kind: catalog.KFile, Name: fmt.Sprintf("file-with-a-long-name-%06d", i), Mode: 0o644})
+	}
+	if _, err := c.Apply("usr", dir, false, catalog.MetaOptions{NoChown: true}); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(filepath.Join(dest, "usr")); err != nil || fi.Mode().Perm() != 0o755 {
+		t.Fatalf("%v %v", fi, err)
+	}
+	if len(dir.Children) == 0 {
+		t.Fatal("the caller's entry lost its children")
+	}
+}
