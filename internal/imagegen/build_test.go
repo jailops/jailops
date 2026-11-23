@@ -39,6 +39,10 @@ func TestBuildFirstAndNext(t *testing.T) {
 	if b, _ := w.Files.ReadFile(bg, "/jailops/images/fb/staging-g1/usr/local/etc/pkg/repos/FreeBSD-base.conf"); !strings.Contains(string(b), "FreeBSD-base: { enabled: no }") {
 		t.Fatalf("%q", b)
 	}
+	// the minimal jail set ships no /home: the image makes it
+	if ok, _ := w.Files.Exists(bg, "/jailops/images/fb/staging-g1/home"); !ok {
+		t.Fatal("the generation has no /home")
+	}
 	w.repoVersion = "15.0p2"
 	r2, err := w.M.Build(bg, "fb", api.ImageBuild{FromGeneration: 1})
 	if err != nil {

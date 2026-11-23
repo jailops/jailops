@@ -411,7 +411,7 @@ func (p PkgBase) Install(b *Build) ([]plan.Step, error) {
 		r.step("pkg-install", append([]string{"install", "-y", "-r", "jailops"}, p.sets(b.Spec)...)...),
 		r.verifyReleaseStep(),
 		r.step("pkg-clean", "clean", "-y"),
-		p.rcConfStep(b), p.periodicConfStep(b), p.pkgReposStep(b), p.baseRepoOffStep(b), p.lockRootStep(b))
+		p.homeStep(b), p.rcConfStep(b), p.periodicConfStep(b), p.pkgReposStep(b), p.baseRepoOffStep(b), p.lockRootStep(b))
 	return steps, nil
 }
 
@@ -436,6 +436,14 @@ func (PkgBase) cacheStep(b *Build) plan.Step {
 			return m.ZFS.DestroyRecursive(ctx, ds)
 		},
 		UndoOnFail: true}
+}
+
+// homeStep makes /home: the minimal jail set ships no /home, and a jail wants it for the home directories of its users
+// (adduser, the data an administrator keeps there) as a FreeBSD system has it. An existing directory is kept.
+func (PkgBase) homeStep(b *Build) plan.Step {
+	m, dir := b.M, path.Join(b.Root, "home")
+	return plan.Step{Name: "ensure-home", Describe: "mkdir " + dir + " (the minimal jail set has no /home) unless it exists",
+		Do: func(ctx context.Context) error { return m.Files.MkdirAll(ctx, dir) }}
 }
 
 // jailRcConf is the /etc/rc.conf a new generation starts with (the base ships none): what a jail wants of rc
@@ -553,7 +561,7 @@ func (p PkgBase) Upgrade(b *Build) ([]plan.Step, error) {
 		r.verifyReleaseStep(),
 		r.step("pkg-clean", "clean", "-y"),
 		// a generation of an image made before JailOps wrote the file gets it with its next generation
-		p.baseRepoOffStep(b)), nil
+		p.homeStep(b), p.baseRepoOffStep(b)), nil
 }
 
 func (p PkgBase) Check(b *Build) []plan.Step {
