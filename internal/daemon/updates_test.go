@@ -118,7 +118,6 @@ func runningWeb(t *testing.T, e *dtest.Env) {
 	if _, err := so.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}
-	waitShellSetup(t, e, "web") // the bash of a new jail is installed in the background and holds the jail until it is done
 }
 
 // update.reboot=auto is kept in the API but reports, as manual does: JailOps never stops or restarts a running jail for
@@ -146,7 +145,6 @@ func TestPackageUpdateNeverRestarts(t *testing.T) {
 	if _, err := so.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}
-	waitShellSetup(t, e, "web")
 	before, err := e.Admin.Jails().Get(ctx, "web")
 	if err != nil || before.Spec.Update.Reboot != api.RebootAuto || before.Status.JID == 0 {
 		t.Fatalf("%+v %v", before, err)
@@ -502,7 +500,7 @@ func TestPackageUpdateHoldsTheJailAgainstSessions(t *testing.T) {
 	ctx := context.Background()
 	var during error
 	e.Jails.SetExecFn(sj.fn)
-	runningWeb(t, e) // its bash is installed in the background first, and that runs ldconfig too
+	runningWeb(t, e)
 	e.Jails.SetExecFn(func(jail string, o jailos.ExecOpts) (run.Result, error) {
 		// the library cache is refreshed right after the upgrade, while the update still holds the jail
 		if o.Argv[0] == "/sbin/ldconfig" && during == nil {
@@ -558,7 +556,6 @@ func TestScheduledPolicyUpgradesTheBaseInPlace(t *testing.T) {
 	if _, err := so.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}
-	waitShellSetup(t, e, "web")
 	now.Lock()
 	now.t = now.t.Add(30 * time.Hour)
 	now.Unlock()

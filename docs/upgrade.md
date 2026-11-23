@@ -280,8 +280,8 @@ JailOps never stops or restarts a running jail for an update, and the record nam
   ("restart pending: nginx (pid 812)"); restart them, or the jail, when it suits you.
 - The packages of a FreeBSD jail are checked and upgraded by the host's `pkg -j PROJECT_JAIL`, which enters the jail and
   reads the repositories configured in it; only the packages that are not part of the base (`FreeBSD-*`) are named: the
-  base is upgraded from the host. After the upgrade `ldconfig -m /usr/local/lib` runs in the jail. An Alpine jail runs
-  `apk` itself. **A Debian jail keeps its own packages**: JailOps never runs `apt` in it.
+  base is upgraded from the host. After the upgrade `ldconfig -m /usr/local/lib` runs in the jail. Linux jails look after
+  their own packages: JailOps does not update them ([linux-jails.md](linux-jails.md#packages)).
 - `jailops-sync` rollouts stage upgrades across hosts (canary, batches, a health gate); see [fleet-sync.md](fleet-sync.md).
 
 ## Leftovers of the bridge layout

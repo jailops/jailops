@@ -203,6 +203,7 @@ func (s *Service) checkImport(ctx context.Context, p project, m api.ExportManife
 	chg("the new jail gets a new uuid and does not start at boot")
 	spec := jsonCopy(m.Bundle.Spec)
 	spec.OS = m.OS
+	dropLinuxUpdatePolicy(&spec)
 	root := false
 	for _, pt := range m.Parts {
 		root = root || pt.Kind == api.PartRoot

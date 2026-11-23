@@ -2764,7 +2764,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "shell",
     "type": "string",
-    "description": "Shell that `jailops shell` and the console start: bash, sh or a path inside the jail (/bin/sh when empty). New FreeBSD jails get bash. A management setting; /etc/passwd is not touched. `jailops jail shell-setup` installs bash when it is missing.",
+    "description": "Preferred shell of `jailops shell` and the console: bash, sh or a path inside the jail (/bin/sh when empty). JailOps never installs it: a shell that is not installed in the jail is an error until it is (`jailops pkg install NAME -- bash`). A management setting; /etc/passwd is not touched.",
     "example": "bash",
     "restart_required": false,
     "profile": true,
@@ -2805,7 +2805,7 @@ export const configKeys: readonly ConfigKey[] = [
       "notify",
       "managed"
     ],
-    "description": "manual: nothing happens unless you run it. notify: check on the schedule and report. managed: check and apply on the schedule. Off (manual) by default.",
+    "description": "manual: nothing happens unless you run it. notify: check on the schedule and report. managed: check and apply on the schedule. Off (manual) by default. FreeBSD jails only: Linux jails look after their own packages.",
     "example": "notify",
     "restart_required": false,
     "profile": true,
@@ -2823,7 +2823,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "update.packages",
     "type": "bool",
-    "description": "Update the packages inside the jail (pkg or apk, from the host).",
+    "description": "Update the ports packages of a FreeBSD jail (pkg, from the host). Linux jails look after their own packages.",
     "example": "true",
     "restart_required": false,
     "profile": true,

@@ -16,7 +16,6 @@ func TestCopyJailWithItsData(t *testing.T) {
 	j.Metadata.Labels = map[string]string{"tier": "front"}
 	op, err := s.CreateJail(admin, j)
 	mustOp(t, s, op, err)
-	waitShellSetup(t, s, admin, "web")
 	op, err = s.CreateSnapshot(admin, "web", api.JailSnapshot{Metadata: api.ObjectMeta{Name: "before"}})
 	mustOp(t, s, op, err)
 

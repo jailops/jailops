@@ -280,27 +280,7 @@ func (a *app) jailStartFlag(cmd *cobra.Command) func(ctx context.Context, name s
 		if err != nil {
 			return err
 		}
-		if err := a.finishOp(ctx, h, "jail", name, "started", nil); err != nil {
-			return err
-		}
-		a.noteShellInstalling(ctx, c, name)
-		return nil
-	}
-}
-
-// shellInstalling says whether the jail's bash is being installed in the background (status.shell_setup).
-func shellInstalling(j api.Jail) bool {
-	return j.Status.ShellSetup != nil && j.Status.ShellSetup.State == api.ShellSetupInstalling
-}
-
-// noteShellInstalling tells, after a start, that the shell of a new jail is on its way: the start does not wait for
-// the package server, and `jailops shell` waits for bash instead. It says nothing in machine-readable output.
-func (a *app) noteShellInstalling(ctx context.Context, c *sdk.Client, name string) {
-	if a.format != fmtTable {
-		return
-	}
-	if j, err := c.Jails().Get(ctx, name); err == nil && shellInstalling(j) {
-		fprintln(a.env.Stderr, "bash is being installed in the background; jailops shell waits for it")
+		return a.finishOp(ctx, h, "jail", name, "started", nil)
 	}
 }
 
@@ -345,21 +325,31 @@ func (a *app) jailForceFlag(cmd *cobra.Command) func(ctx context.Context, name s
 // several jails and returns the resolver of the names: the arguments, or the
 // jails the selector matches (a bulk action).
 func (a *app) jailTargets(cmd *cobra.Command) func(ctx context.Context, args []string) ([]string, bool, error) {
+	targets := a.jailTargetsOS(cmd)
+	return func(ctx context.Context, args []string) ([]string, bool, error) {
+		names, _, bulk, err := targets(ctx, args)
+		return names, bulk, err
+	}
+}
+
+// jailTargetsOS is jailTargets that also returns the OS of the selected jails, from the one list a selector reads
+// (nil for named jails, which are not looked up).
+func (a *app) jailTargetsOS(cmd *cobra.Command) func(ctx context.Context, args []string) ([]string, map[string]api.OS, bool, error) {
 	var selectors []string
 	var all bool
 	cmd.Flags().StringArrayVarP(&selectors, "selector", "l", nil, "act on the jails carrying these labels, key=value (comma separated or repeated), instead of naming them (--label is the same)")
 	cmd.Flags().BoolVar(&all, "all", false, "act on every jail of the project")
-	return func(ctx context.Context, args []string) ([]string, bool, error) {
+	return func(ctx context.Context, args []string) ([]string, map[string]api.OS, bool, error) {
 		switch {
 		case !all && len(selectors) == 0:
 			if len(args) == 0 {
-				return nil, false, usagef("name the jails, or select them with -l key=value or --all")
+				return nil, nil, false, usagef("name the jails, or select them with -l key=value or --all")
 			}
-			return args, false, nil
+			return args, nil, false, nil
 		case len(args) > 0:
-			return nil, false, usagef("name jails or select them with -l or --all, not both")
+			return nil, nil, false, usagef("name jails or select them with -l or --all, not both")
 		case all && len(selectors) > 0:
-			return nil, false, usagef("use -l or --all, not both")
+			return nil, nil, false, usagef("use -l or --all, not both")
 		}
 		var labels []string
 		for _, s := range selectors {
@@ -367,21 +357,23 @@ func (a *app) jailTargets(cmd *cobra.Command) func(ctx context.Context, args []s
 		}
 		opts, err := labelOpts(labels)
 		if err != nil {
-			return nil, false, err
+			return nil, nil, false, err
 		}
 		c, err := a.connect(ctx)
 		if err != nil {
-			return nil, false, err
+			return nil, nil, false, err
 		}
 		jails, err := collect(c.Jails().List(ctx, opts...))
 		if err != nil {
-			return nil, false, err
+			return nil, nil, false, err
 		}
 		var names []string
+		oses := map[string]api.OS{}
 		for _, j := range jails {
 			names = append(names, j.Metadata.Name)
+			oses[j.Metadata.Name] = j.Spec.OS
 		}
-		return names, true, nil
+		return names, oses, true, nil
 	}
 }
 
@@ -648,9 +640,6 @@ The jails are named, or selected by label with -l (the same key=value labels as
 			}
 			if err := a.finishOp(cmd.Context(), h, "jail", name, past, nil); err != nil {
 				return err
-			}
-			if verb != "stop" {
-				a.noteShellInstalling(cmd.Context(), c, name)
 			}
 		}
 		return nil
@@ -1017,8 +1006,8 @@ scripts of the base packages do runs inside the jail, the ports packages are upg
 services keep running their old files until they are restarted: the result lists them ("restart pending"). A failure
 is reported and left as it is (the jail runs on; running the upgrade again completes it); nothing is rolled back on its
 own. 'jailops jail rollback NAME' returns the root to the snapshot, with the jail stopped by its administrator.
---no-packages leaves the ports packages alone. A stopped jail is not upgraded, and a Linux jail is updated by its
-package manager ('jailops update apply').
+--no-packages leaves the ports packages alone. A stopped jail is not upgraded. These commands are for FreeBSD jails;
+a Linux jail is not part of a selection and manages its own packages.
 
 Before pkg works on a jail's root, JailOps checks it for what only an attack on host-side pkg plants there (a link out of
 the root, a link among pkg's own files, a pkg configuration with plugins). A jail with a finding is not upgraded: it is
@@ -1030,8 +1019,8 @@ not newer than the host's kernel. Without it the release never changes.
 
 Several jails are named, selected by label with -l, or all of the project with --all; each is upgraded on its own, one
 after the other, a failure is reported for that jail and the run goes on (--stop-on-error stops it). A summary table
-follows (upgraded, nothing to upgrade, failed, skipped) and the exit code is non-zero if any jail failed. Selected by -l
-or --all, a Linux jail is skipped. With --dry-run every jail is checked and nothing changes.
+follows (upgraded, nothing to upgrade, failed, skipped) and the exit code is non-zero if any jail failed. With --dry-run
+every jail is checked and nothing changes.
 
 The order of the steps for the host and its jails, the checks to run after an upgrade and the way back are in docs/lifecycle.md.`,
 		Example: `jailops jail upgrade web --dry-run
@@ -1043,12 +1032,19 @@ jailops jail upgrade web --no-packages`,
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeKind(a, d),
 	}
-	resolve := a.jailTargets(cmd)
+	resolve := a.jailTargetsOS(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		names, bulk, err := resolve(ctx, args)
+		names, oses, bulk, err := resolve(ctx, args)
 		if err != nil {
 			return err
+		}
+		if bulk || len(names) > 1 {
+			// a Linux jail is not part of a selection: it manages its own packages (one named jail is the server's to refuse)
+			if names, err = a.freebsdJails(ctx, names, oses, true); err != nil {
+				return err
+			}
+			bulk = true
 		}
 		if bulk && len(names) == 0 {
 			fprintln(a.env.Stderr, "No jails match.")
@@ -1062,7 +1058,7 @@ jailops jail upgrade web --no-packages`,
 		var results []upgradeResult
 		failed := 0
 		for _, name := range names {
-			r, err := a.upgradeOne(ctx, c, name, release, noPackages, force, bulk)
+			r, err := a.upgradeInPlace(ctx, c, name, release, noPackages, force)
 			if !many {
 				return err
 			}
@@ -1152,21 +1148,6 @@ func (a *app) emitUpgradeSummary(results []upgradeResult) error {
 		}
 		return n
 	})
-}
-
-// upgradeOne upgrades one jail in place and prints what happened; bulk says the jail was picked as one of several (a
-// Linux jail selected by -l or --all is skipped).
-func (a *app) upgradeOne(ctx context.Context, c *sdk.Client, name, release string, noPackages, force, bulk bool) (upgradeResult, error) {
-	res := upgradeResult{Jail: name}
-	j, err := c.Jails().Get(ctx, name)
-	if err != nil {
-		return res, err
-	}
-	if j.Spec.OS == api.OSLinux && bulk {
-		res.Result, res.Reason = "skipped", "a Linux jail is updated by its package manager"
-		return res, nil
-	}
-	return a.upgradeInPlace(ctx, c, name, release, noPackages, force)
 }
 
 // upgradeInPlace upgrades a jail in place and says what the server did.

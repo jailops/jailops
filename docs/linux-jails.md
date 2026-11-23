@@ -23,8 +23,8 @@ Linux jail (the Linuxulator has no `ICMP6_FILTER`; use tcp), and the network nee
 resolver (the network's `dns` list is written to `resolv.conf`; `network create` has no flag for it, use a file or
 `network edit`); `jailops doctor` warns (`network.dns`) about a network in use without one.
 
-Not covered: other glibc distributions, behaviour under load, **managed updates and package provisioning for Debian**
-(they run `apk` only; an upgrade of a debootstrap generation is refused, build a new one).
+Not covered: other glibc distributions, behaviour under load, **package provisioning for Debian** (it runs `apk` only;
+an upgrade of a debootstrap generation is refused, build a new one).
 
 ## Host prerequisites
 
@@ -95,8 +95,18 @@ With an Alpine jail:
   (see [Devices](security-model.md#devices)).
 - **Network:** a Linux userland has no tooling that works here, so the host configures the jail with the `-j` forms
   (`ifconfig -j`, `route -j`) after the epair moved. Linux sees the interface as `eth0`.
-- **Updates** are in place (`apk` inside the jail), with a snapshot first.
+- **Packages** are the jail's own: see [Packages](#packages).
 - **The shell** `jailops shell` starts is `/bin/sh` unless the jail's `shell` key says otherwise.
+
+## Packages
+
+Linux jails look after their own packages; JailOps does not update them. Run `apk upgrade` (Alpine) or `apt-get upgrade`
+(Debian) in the jail, for instance from the jail's own cron, and take a snapshot first when you want a way back
+(`jailops jail snapshot create NAME SNAPSHOT`). `jailops update`, `jailops jail upgrade`, `jailops pkg` and `jailops jail base` are for
+FreeBSD jails: a selection leaves Linux jails out, and a Linux jail named alone is refused, as is an update policy
+(`update.mode`, `update.schedule`, `update.packages`, `update.os`, `update.reboot`) set on one. A policy that an earlier
+release stored on a Linux jail stays in its record and is ignored; a copy, an import or a restore of the jail leaves it
+out. A new release of the distribution is a new jail from a new image.
 
 ## Limits to keep in mind
 

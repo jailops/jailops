@@ -126,8 +126,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (cmd.startsWith('echo ')) return { out: cmd.slice(5).replace(/^(["'])(.*)\1$/, '$2') + '\n', code: 0 }
     return { out: `sh: ${cmd.split(' ')[0]}: not found\n`, code: 127 }
   }
-  // The jails of the demo that have bash in them: those created here (a new FreeBSD jail gets it at its first start)
-  // and those set up with shell-setup. The seeded jails are older and have none.
+  // The jails of the demo that have bash in them. JailOps never installs a shell, and no demo jail has bash: a
+  // console whose preferred shell is bash is refused with how to install it, and sh opens instead on request.
   const bashReady = new Set<string>()
   const BASH = '/usr/local/bin/bash'
   const shellPath = (v: string) => (v === 'bash' ? BASH : v === 'sh' ? '/bin/sh' : v)
@@ -510,10 +510,9 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       const spec = { ...body.spec } as Jail['spec']
       if (spec.prompt && promptProblem(spec.prompt)) return fail(400, { code: 'invalid', message: 'prompt: ' + promptProblem(spec.prompt), detail: { field: 'prompt' } })
       if (freebsdImage(spec.image)) {
-        // jails.shell and jails.prompt of the demo host: bash and the default prompt
-        spec.shell = shellPath(spec.shell || 'bash')
-        if (!spec.prompt && spec.shell === BASH) spec.prompt = 'default'
-        if (spec.shell === BASH) bashReady.add(name)
+        // jails.shell and jails.prompt of the demo host: sh (left unset) and the default prompt
+        if (spec.shell) spec.shell = shellPath(spec.shell)
+        if (!spec.prompt) spec.prompt = 'default'
       }
       const labels = (body.metadata?.labels ?? undefined) as Record<string, string> | undefined
       if (labels && labelsProblem(labels)) return fail(400, { code: 'invalid', message: `the labels are invalid (${labelsProblem(labels)})` })
@@ -1449,13 +1448,12 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           return startOp(`Provision ${name}`, { jails: [src] }, 1500, () => { j.status.provisioned_at = new Date().toISOString() }, { jail: name, provisioned_at: new Date().toISOString(), steps: ['packages', 'files', 'services'] })
         }
         if (seg[2] === 'shell-setup' && m === 'POST') {
-          if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `jail "${name}" is not running; the shell is set up inside it`, hint: 'start it first' })
-          const had = bashReady.has(name)
-          return startOp(`Set up the shell of jail ${name}`, { jails: [src] }, 1200, () => {
-            if (!j.spec.shell) j.spec.shell = BASH
-            if (!j.spec.prompt && j.spec.shell === BASH) j.spec.prompt = 'default'
-            if (j.spec.shell === BASH) bashReady.add(name)
-          }, { jail: name, shell: j.spec.shell || BASH, prompt: j.spec.prompt || 'default', ps1: '\\[\\e[38;5;39m\\]\\u@\\h:\\w\\$\\[\\e[0m\\] ', steps: [had ? `${BASH} is installed` : 'pkg -r ROOT install -y bash', 'wrote /usr/local/etc/profile.d/jailops-prompt.sh'] })
+          if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `jail "${name}" is not running; the prompt is written inside it`, hint: 'start it first' })
+          const sh = j.spec.shell || '/bin/sh'
+          const missing = sh === BASH && !bashReady.has(name) ? [`the shell ${BASH} is not installed in jail ${name}; install it with: jailops pkg install ${name} -- bash, or use sh: jailops shell ${name} --shell /bin/sh`] : []
+          return startOp(`Apply the shell defaults and the prompt of jail ${name}`, { jails: [src] }, 1200, () => {
+            if (!j.spec.prompt) j.spec.prompt = 'default'
+          }, { jail: name, shell: sh, prompt: j.spec.prompt || 'default', ps1: '\\[\\e[38;5;39m\\]\\u@\\h:\\w\\$\\[\\e[0m\\] ', steps: ['wrote /usr/local/etc/profile.d/jailops-prompt.sh', ...missing] })
         }
         if (seg[2] === 'files' && seg.length > 3) {
           if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `jail "${name}" is not mounted`, hint: `start the jail, or mount its root dataset on the host: zfs mount tank/jailops/${project}/${name}/root` })
@@ -1480,9 +1478,9 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (seg[2] === 'console') {
           if (m === 'POST' && seg.length === 3) {
             if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `Jail ${name} is not running.` })
-            const sh = (j.spec as unknown as { shell?: string }).shell
-            if (sh === BASH && !bashReady.has(name)) return fail(404, { code: 'not_found', message: `the shell ${BASH} does not exist in jail "${name}"`, hint: `install it with \`jailops jail shell-setup ${name}\`, or use FreeBSD's own shell: \`jailops config set ${name} shell sh\`` })
-            if (sh && sh !== '/bin/sh' && sh !== BASH) return fail(404, { code: 'not_found', message: `The shell ${sh} does not exist in the jail.`, hint: 'Set a shell that exists, or clear the setting to use /bin/sh.' })
+            const sh = (typeof body.shell_path === 'string' && body.shell_path) || (j.spec as unknown as { shell?: string }).shell || '/bin/sh'
+            if (sh === BASH && !bashReady.has(name)) return fail(412, { code: 'precondition_failed', message: `the shell ${BASH} is not installed in jail ${name}`, hint: `install it with: jailops pkg install ${name} -- bash, or use sh: jailops shell ${name} --shell /bin/sh` })
+            if (sh !== '/bin/sh' && sh !== BASH) return fail(412, { code: 'precondition_failed', message: `the shell ${sh} is not installed in jail ${name}`, hint: `install it in the jail, or use sh: jailops shell ${name} --shell /bin/sh` })
             const id = 'x' + ++seq
             const argv = Array.isArray(body.argv) ? (body.argv as string[]) : []
             shells.set(id, { h: undefined as never, line: '', jail: name, run: argv[1] === '-c' ? String(argv[2] ?? '') : argv.length ? argv.join(' ') : undefined })
@@ -1541,10 +1539,9 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (taken) return fail(409, { code: 'already_exists', message: `volume "${taken.name}" already exists`, hint: `an earlier jail of this name left it: delete it with jailops volume delete ${taken.name}` })
     const j: Jail = {
       metadata: { name: jail, scope: 'host', project, generation: 1, created_at: new Date().toISOString(), labels: { [da.LABEL]: a.name, [`${da.LABEL}.hash`]: det.hash, [`${da.LABEL}.version`]: version } },
-      spec: { image, storage: sto, network: [{ network: net, ipv4: addr }], volumes: appVolumes.map((x) => ({ volume: x.name, mount: x.mount })), resources: limits, boot: { autostart: true }, shell: BASH, prompt: 'default' },
+      spec: { image, storage: sto, network: [{ network: net, ipv4: addr }], volumes: appVolumes.map((x) => ({ volume: x.name, mount: x.mount })), resources: limits, boot: { autostart: true }, prompt: 'default' },
       status: { power: 'running', jid: 120 + db.jails.length, image_generation: 'freebsd-15-1#g4', addresses: [`${addr}/${subnet.split('/')[1] ?? '24'}`], started_at: new Date().toISOString(), conditions: [d.readyCond('running')] },
     }
-    bashReady.add(jail)
     const result = {
       app: a.name, hash: det.hash, version, jail: j, addresses: j.status.addresses, ports: (a.ports ?? []).map((x) => ({ ...x, endpoint: `${addr}:${x.port}` })),
       data: a.data, config: a.config, logs: a.logs, notes: a.notes, snapshot: 'app-installed', steps,
@@ -1576,10 +1573,10 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   }
 
   const PLAIN = '\x1b[32mroot@jail\x1b[0m:\x1b[34m~\x1b[0m# '
-  /** What the demo shell shows: the default prompt of JailOps (38;5;39, light blue) in a jail with bash and it. */
+  /** What the demo shell shows: the default prompt of JailOps (38;5;39, light blue) in a jail that has it, in sh or bash. */
   function promptOf(jail: string): string {
     const j = db.jails.find((x) => x.metadata.name === jail)
-    return j?.spec.shell === BASH && bashReady.has(jail) && j.spec.prompt === 'default' ? `\x1b[38;5;39mroot@${jail}:/#\x1b[0m ` : PLAIN
+    return j?.spec.prompt === 'default' ? `\x1b[38;5;39mroot@${jail}:/#\x1b[0m ` : PLAIN
   }
   function shellOut(id: string, text: string): void {
     const s = shells.get(id)

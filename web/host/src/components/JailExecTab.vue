@@ -11,8 +11,7 @@ import Callout from '@jailops/shared/components/Callout.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import Icon from '@jailops/shared/components/Icon.vue'
 import { Screen, keyToBytes, xtermColor, type Cell } from '@/lib/vt100'
-import { runOp } from '@jailops/shared/composables/ops'
-import type { Jail, ShellSetupResult } from '@jailops/shared/api/types'
+import type { Jail } from '@jailops/shared/api/types'
 
 // `connect` asks for a session: a new number connects once the jail runs (the Shell buttons and /jails/NAME/shell).
 const props = defineProps<{ jail: Jail; connect?: number }>()
@@ -121,7 +120,7 @@ async function connect(): Promise<void> {
   fit()
   const { cols, rows } = measure()
   try {
-    const r = await api.exec.open(name.value, { shell: true, tty: true, cols, rows })
+    const r = await api.exec.open(name.value, { shell: true, tty: true, cols, rows, ...(shPath.value ? { shell_path: shPath.value } : {}) })
     sessionId = (r.kind === 'sync' ? (r.data as { id: string }).id : '') || ''
     state.phase = 'open'
     stream = api.exec.output(name.value, sessionId, {
@@ -138,22 +137,14 @@ async function connect(): Promise<void> {
     error.value = e instanceof ApiError ? e : new ApiError({ message: String(e) })
   }
 }
-// A jail whose shell is bash but has none (an older jail, or a first start without the package repository) can be
-// given it here: the shell setup installs bash and the prompt, then the shell opens.
-const bashMissing = computed(() => error.value?.code === 'not_found' && shell.value === '/usr/local/bin/bash' && hasExt('jail_shell_setup'))
-const settingUp = ref(false)
-async function setUpShell(): Promise<void> {
-  settingUp.value = true
-  try {
-    await runOp<ShellSetupResult>(s.exec.setupTitle(name.value), () => api.shellSetup.run(name.value))
-    error.value = null
-    emit('changed')
-    await connect()
-  } catch (e) {
-    error.value = e instanceof ApiError ? e : new ApiError({ message: String(e) })
-  } finally {
-    settingUp.value = false
-  }
+// JailOps never installs a shell: a jail whose preferred shell is not installed in it refuses the console with how to
+// install it. FreeBSD's own sh is always there and can be opened instead, for this session.
+const shPath = ref('')
+const shownShell = computed(() => shPath.value || shell.value)
+const shellMissing = computed(() => error.value?.code === 'precondition_failed' && /is not installed in jail/.test(error.value.message ?? '') && !shPath.value)
+async function openSh(): Promise<void> {
+  shPath.value = '/bin/sh'
+  await connect()
 }
 function end(code: number | undefined): void {
   if (state.phase === 'closed') return
@@ -249,15 +240,15 @@ defineExpose({ screen, write })
         <button v-else class="btn" type="button" data-test="exec-close" @click="disconnect">{{ s.exec.disconnect }}</button>
         <button class="btn" type="button" :disabled="state.phase !== 'open'" @click="paste">{{ s.exec.paste }}</button>
         <button class="btn" type="button" data-test="exec-copy" @click="copy">{{ copied ? s.exec.copied : s.exec.copy }}</button>
-        <span class="faint mono" :title="s.exec.shellTitle" data-test="exec-shell">{{ s.exec.asUser(shell) }} · {{ s.exec.size(screen.cols, screen.rows) }}</span>
+        <span class="faint mono" :title="s.exec.shellTitle" data-test="exec-shell">{{ s.exec.asUser(shownShell) }} · {{ s.exec.size(screen.cols, screen.rows) }}</span>
         <span v-if="state.phase === 'connecting'" class="pill info pulse">{{ s.exec.connecting }}</span>
         <span v-else-if="state.phase === 'open'" class="pill ok">{{ s.exec.connected }}</span>
         <span v-else-if="state.phase === 'closed'" class="pill">{{ s.exec.closed(state.exit) }}</span>
       </div>
       <ErrorPanel v-if="error" :error="error" />
-      <Callout v-if="bashMissing" tone="info" data-test="exec-setup">
-        <p>{{ s.exec.setupText }}</p>
-        <div class="row"><button class="btn btn-primary btn-sm" type="button" :disabled="settingUp" data-test="exec-setup-go" @click="setUpShell">{{ settingUp ? s.exec.settingUp : s.exec.setup }}</button></div>
+      <Callout v-if="shellMissing" tone="info" data-test="exec-setup">
+        <p>{{ s.exec.setupText(name) }}</p>
+        <div class="row"><button class="btn btn-sm" type="button" data-test="exec-setup-go" @click="openSh">{{ s.exec.setup }}</button></div>
       </Callout>
     </template>
     <div ref="term" class="term" tabindex="0" role="textbox" aria-multiline="true" :aria-label="s.exec.terminal" data-test="terminal" @keydown="onKey" @paste="onPaste">

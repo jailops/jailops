@@ -33,7 +33,7 @@ register of what is settled and what is open.
 | [testing-on-freebsd.md](testing-on-freebsd.md) | Running the end-to-end and PF scripts on a VM of your own, one run at a time with the VM lock |
 | [linux-jails.md](linux-jails.md) | Alpine and Debian jails under the Linuxulator: limits and prerequisites |
 | [fleet-sync.md](fleet-sync.md) | A git repository of YAML across hosts, what it can declare, secrets with age and SOPS, rollouts |
-| [shell.md](shell.md) | The shell of a jail: bash and its coloured prompt, the files, overriding and removing them, existing jails, the host's prompt |
+| [shell.md](shell.md) | The shell of a jail: sh or bash and the coloured prompt, the files, overriding and removing them, existing jails, the host's prompt |
 | [provisioning.md](provisioning.md) | A fresh VM to a running fleet; the `provision:` step of a jail |
 | [logging.md](logging.md) | The logs of all jails merged by time, and forwarding them to a syslog server or a webhook: what is read, the format, delivery, security |
 | [apps.md](apps.md) | The application catalog: signed definitions of jails that run packages, the format, and how an installation will work |

@@ -7,7 +7,7 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// Once Close has begun it is the last word: an operation or a background shell setup that is asked for afterwards (the
+// Once Close has begun it is the last word: an operation that is asked for afterwards (the
 // reconcile loop of the daemon may still have a start in flight) starts nothing, so nothing of the service writes into the
 // state after the daemon has closed it.
 func TestNothingStartsAfterClose(t *testing.T) {
@@ -29,11 +29,4 @@ func TestNothingStartsAfterClose(t *testing.T) {
 		t.Fatal("the refused operation kept its lock")
 	}
 
-	s.setUpShellInBackground("p/x", "p", "x")
-	s.shellM.mu.Lock()
-	left := len(s.shellM.bg) + len(s.shellM.prog)
-	s.shellM.mu.Unlock()
-	if left != 0 {
-		t.Fatalf("a shell setup was registered after Close: %d entries", left)
-	}
 }

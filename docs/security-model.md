@@ -534,8 +534,7 @@ package or an archive.
   base system of its image. An `operator` may install. The app installation uses the host's own repository
   configuration (root's files), not one the daemon writes. For a package from the JailOps repository the host's
   configuration of that repository and its key are copied into the jail, so that its packages are updated from it later.
-- **Package updates, the bash of a jail whose shell is bash, the ports packages of a jail's upgrade and the app
-  draft of a running jail** run `pkg -j <jail>`: `pkg` attaches
+- **Package updates, the ports packages of a jail's upgrade and the app draft of a running jail** run `pkg -j <jail>`: `pkg` attaches
   to the jail before it does anything, so what it writes and the scripts it runs are the jail's own, with the jail's
   rights. The helper allows `-j` for a running jail JailOps manages, with none of the options that name a directory of
   the host. `pkg` then reads the repository configuration, the keys and the cache inside the jail, and fetches from the

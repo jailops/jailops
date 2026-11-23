@@ -121,17 +121,6 @@ fail() {
 	grep -E 'pkg|shell|setup|bash' /var/log/messages 2>/dev/null | tail -n 200 >&2 || true
 	exit 1
 }
-bash_in() { # bash_in JAIL: bash is in the root of the jail within 120 s; a setup that lost against a slow mirror stays due, and the next start fetches bash from the host, out of its warm cache (tried at most three times)
-	j=$1; f=$mount/projects/demo/jails/$j/root/usr/local/bin/bash; n=0
-	while :; do
-		end=$(( $(date +%s) + 120 ))
-		until [ -x "$f" ] || [ "$(date +%s)" -ge "$end" ]; do sleep 1; done # sleep-ok: poll of a condition
-		[ -x "$f" ] && return 0
-		n=$((n + 1)); [ $n -gt 3 ] && fail "bash is in the jail $j (not after $n tries)"
-		check "stop $j (bash is not in it after 120 s)" $J stop "$j" --project demo
-		check "start $j (the host fetches the bash it lacks)" $J start "$j" --project demo
-	done
-}
 check() { # check DESCRIPTION COMMAND...: the command must succeed
 	desc=$1; shift
 	"$@" >"$work/check.out" 2>&1 || { cat "$work/check.out" >&2; fail "$desc"; }
@@ -914,7 +903,6 @@ run_linux() {
 }
 
 step "image, network, project"
-[ "$part" = linux ] || check_net "the host holds bash and what it needs in the package cache of the jail roots (a jail fetches it from there, whatever the mirror does later)" pkg fetch -y -d -o PKG_CACHEDIR=$mount/cache/pkg bash
 uplink=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
 [ -n "$uplink" ] || uplink=$(ifconfig -l | tr ' ' '\n' | grep -v -E '^(lo0|pflog0)$' | head -1)
 jarch=$goarch
@@ -1035,8 +1023,6 @@ expect "the root clone has none" '^(0|none|-)$' zfs get -Hp -o value quota "$poo
 [ "$racct" != 1 ] || expect "the CPU rule is on the running jail" 'jail:demo_lim:pcpu:deny=100' sh -c 'rctl 2>&1'
 [ "$racct" != 1 ] || expect "an allocation beyond the memory limit fails" 'out of (memory|space)' sh -c "$J exec --project demo lim -- /usr/bin/awk 'BEGIN{s=\"x\"; for(i=0;i<29;i++) s=s s; print length(s)}' 2>&1 | head -c 300; true"
 [ "$racct" != 1 ] || expect "fork fails beyond the process limit" 'Cannot fork|Resource temporarily unavailable' sh -c "$J exec --project demo lim -- /bin/sh -c 'i=0; while [ \$i -lt 150 ]; do sleep 6 & i=\$((i+1)); done; wait' 2>&1 | head -c 600; true"
-# the first start of a jail installs bash into the running jail in the background and the jail is busy until that is over (the rctl checks above are skipped without racct, so nothing has waited for it)
-waitfor "the package step of the first start is over" 120 $J exec --project demo lim -- true
 expect "a write beyond the quota fails outside the root clone too" 'quota exceeded' sh -c "$J exec --project demo lim -- /bin/dd if=/dev/random of=/var/db/fill bs=1m count=700 2>&1 | head -c 600; true"
 check "remove the file" $J exec --project demo lim -- /bin/rm -f /var/db/fill
 expect_retry "the default state limit is on the pass rules of the jail's anchor" 'keep state \([^)]*max 10000[,)]' pfctl -a jailops/demo/lim -sr
@@ -1090,9 +1076,9 @@ expect "its service finished" '^done$' cat "$(zfs get -H -o value mountpoint "$p
 for j in slow10 slow30; do check "delete $j" $J delete --confirm-data-loss $j --project demo; done
 for v in sto10 sto30; do check "delete volume $v" $J volume delete $v --project demo --confirm-data-loss; done
 
-step "a jail that cannot reach the package servers starts at once; the host fetches bash for it, a start never waits long for a mirror"
+step "a jail that cannot reach the package servers starts at once; nothing installs a shell, and a missing bash is refused with the fix"
 check "a policy that denies everything outbound" $J firewall policy create closed --project demo --default-in deny --default-out deny
-check "a jail under it" $J create closedj --project demo --image "$img" --network lan --storage default
+check "a jail under it, whose shell is bash" $J create closedj --project demo --image "$img" --network lan --storage default --shell bash
 expect "a policy no jail names says so" 'Used by: +none' $J firewall policy show closed --project demo
 check "it uses the policy" $J firewall policy attach closed closedj --project demo
 expect "attached twice it says so and changes nothing" 'policy closed is attached already' $J firewall policy attach closed closedj --project demo
@@ -1102,43 +1088,42 @@ expect "the jail without a policy says how to attach one" 'attach one: jailops f
 check "attach it again" $J firewall policy attach closed closedj --project demo
 expect "the policy says which jail uses it" 'Used by: +closedj' $J firewall policy show closed --project demo
 expect "and the list has the jail in USED BY" 'closed +deny +deny +0 +no +closedj' $J firewall policy list --project demo
-startbound() { # a start takes a minute at most, whatever the mirror does (the host gives bash 20 s, the jail's own network is never waited for)
+startbound() { # a start takes a minute at most, whatever the mirror does (a start fetches nothing, the jail's own network is never waited for)
 	t0=$(date +%s)
 	check "$1" $J start closedj --project demo
 	[ $(( $(date +%s) - t0 )) -le 60 ] || fail "the start of a jail without network took $(( $(date +%s) - t0 )) s"
 }
 startbound "start it"
-check "a shell is there whatever the mirror did" $J exec --project demo closedj -- /bin/sh -c true
+check "sh is there" $J exec --project demo closedj -- /bin/sh -c true
 expect "its shell is bash" '^/usr/local/bin/bash$' $J config get closedj shell --project demo
-# what the host could not fetch in time it fetches at the next start (the cache keeps what it has)
-for n in 1 2 3 4 5; do
-	$J exec --project demo closedj -- test -x /usr/local/bin/bash >/dev/null 2>&1 && break
-	check "stop it ($n)" $J stop closedj --project demo
-	startbound "start it again ($n): the host fetches what it still lacks"
-done
-check "bash is in the jail" $J exec --project demo closedj -- test -x /usr/local/bin/bash
+expect_refused "nothing installed bash into the jail" $J exec --project demo closedj -- test -e /usr/local/bin/bash
+# jailops shell with a shell that is not in the jail fails and says how to get it; exec needs no shell of the jail
+expect_refused "jailops shell refuses a bash the jail does not have" sh -c "echo exit | $J shell closedj --project demo"
+expect "the refusal names the missing shell" '/usr/local/bin/bash is not installed in jail closedj' sh -c "echo exit | $J shell closedj --project demo 2>&1; true"
+check "stop it" $J stop closedj --project demo
+startbound "start it again: a later start fetches nothing either"
+expect_refused "bash is still not in the jail" $J exec --project demo closedj -- test -e /usr/local/bin/bash
 check "delete it" $J delete --confirm-data-loss --stop closedj --project demo
 check "delete the policy" $J firewall policy delete closed --project demo -y
 
 step "packages of a running jail change inside it (pkg -j); what a process of the jail plants cannot make the host write"
 check "a jail that runs" $J create pkgj --project demo --image "$img" --network lan --storage default --start
-bash_in pkgj
 expect "the check of its packages runs pkg inside the jail" 'pkgj' $J update check pkgj --project demo
 check "the jail plants a link where pkg keeps its cache" $J exec --project demo pkgj -- sh -c 'rm -rf /var/cache/pkg; ln -s /jopsci-escape /var/cache/pkg; mkdir -p /usr/local/etc/pkg/repos; ln -s /jopsci-escape /usr/local/etc/pkg/repos/escape.conf'
 $J update apply pkgj --project demo --packages -y >/dev/null 2>&1 || true
 [ ! -e /jopsci-escape ] || fail "pkg wrote through a link of a running jail onto the host"
 check "delete it" $J delete --confirm-data-loss --stop pkgj --project demo
 
-step "the jail's shell and prompt (docs/shell.md): bash and the default prompt, an override, non-interactive commands"
+step "the jail's shell and prompt (docs/shell.md): sh and the default prompt, bash installed by hand, an override, non-interactive commands"
 webroot=$mount/projects/demo/jails/web/root
 # the short name of the host as the daemon writes it into the prompt: the first label, lower case, letters, digits, hyphens
 shorthost=$(hostname | cut -d. -f1 | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9-' | sed 's/^-*//; s/-*$//')
 # DefaultPS1: user@jail in the colour, the grey tag [project/host] from the variables the prompt file derives it from, :dir and # or $, a space
 ps1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '
-expect "a new jail's shell is bash" '^/usr/local/bin/bash$' $J config get --project demo web shell
+expect "a new jail names no shell of its own: the host's default (sh)" 'not set' sh -c "$J config get --project demo web shell 2>&1; true"
 expect "a new jail's prompt is the default" '^default$' $J config get --project demo web prompt
-bash_in web
-expect "bash is a package of the jail" '^bash-' pkg -j demo_web info bash
+expect_refused "nothing installed bash into a new jail" test -e "$webroot/usr/local/bin/bash"
+expect "jailops shell of a jail that names no shell runs sh" 'sh-shell=/bin/sh' sh -c "printf 'echo sh-shell=\$0; exit\n' | $J shell --project demo web"
 check_retry "the prompt file is JailOps'" grep -F -x "	PS1='$ps1'" "$webroot/usr/local/etc/profile.d/jailops-prompt.sh"
 check_retry "the variables script is JailOps'" grep -F "sysctl -n security.jail.env" "$webroot/usr/local/etc/profile.d/jailops-env.sh"
 check "the variables script holds no name of the project" sh -c '! grep -q demo "$1"' sh "$webroot/usr/local/etc/profile.d/jailops-env.sh"
@@ -1149,6 +1134,19 @@ expect "the jail knows its host" "^jailops_host=$shorthost\$" $J exec --project 
 for f in profile bash.bashrc; do
 	expect_retry "/usr/local/etc/$f sources them" '^# BEGIN jailops shell' head -1 "$webroot/usr/local/etc/$f"
 done
+# sh: root's .shrc sets FreeBSD's PS1, so the block that sources the prompt file is at its end
+expect_retry "root's .shrc ends with the JailOps block" '^# END jailops shell$' tail -n 1 "$webroot/root/.shrc"
+check "the block of root's .shrc sources the prompt file" grep -F -x 'if [ -r /usr/local/etc/profile.d/jailops-prompt.sh ]; then . /usr/local/etc/profile.d/jailops-prompt.sh; fi' "$webroot/root/.shrc"
+# jailops shell starts root's sh with ENV=/root/.shrc, so the prompt shows as in a login
+(sleep 2; printf 'echo "SHPS1=[$PS1]"\n'; sleep 1; printf 'exit\n'; sleep 1) | TERM=xterm timeout -s KILL 60 script -q "$work/shell-sh.out" $J shell --project demo web >/dev/null 2>&1 || true
+grep -a -q -F "SHPS1=[$ps1]" "$work/shell-sh.out" || { cat -v "$work/shell-sh.out" >&2; fail "jailops shell (sh) has the JailOps prompt"; }
+# bash is never installed by JailOps: the administrator installs it, and the prompt files written at the first start apply to it
+# jailops pkg install lets the bootstrapper fetch pkg itself in a jail that has none yet (ASSUME_ALWAYS_YES=yes)
+check_net "install bash in the jail by hand" $J pkg install web --project demo -- bash
+check "the library cache of the running jail knows /usr/local/lib" $J exec --project demo web -- /sbin/ldconfig -m /usr/local/lib
+expect "bash is a package of the jail" '^bash-' pkg -j demo_web info bash
+check "bash is the jail's shell from now on" $J config set --project demo web shell bash
+expect "its shell is bash" '^/usr/local/bin/bash$' $J config get --project demo web shell
 # bash reads /usr/local/etc/bash.bashrc in an interactive shell and /usr/local/etc/profile in a login shell (the
 # package is built with SYSBASHRC); both lead to the prompt file. An interactive bash needs a terminal (without one
 # bash -i stops itself): script(1) inside the jail gives it one, and the exec itself stays a plain pipe.
@@ -1166,7 +1164,7 @@ same "an interactive bash has the variables" "JAILOPS=[demo web $shorthost]" in_
 same "an interactive login bash has the variables" "JAILOPS=[demo web $shorthost]" last_line in_pty web /usr/local/bin/bash -lic 'echo "JAILOPS=[$JAILOPS_PROJECT $JAILOPS_JAIL $JAILOPS_HOST]"'
 same "a bash script is not affected" "PS1=[unset]" $J exec --project demo web -- /usr/local/bin/bash -c 'echo "PS1=[${PS1-unset}]"'
 same "a login bash running a command is not affected" "PS1=[unset]" $J exec --project demo web -- /usr/local/bin/bash -lc 'echo "PS1=[${PS1-unset}]"'
-same "a login sh keeps FreeBSD's own prompt" 'PS1=[\u@\h:\w \$ ]' last_line in_pty web env HOME=/root sh -lic 'echo "PS1=[$PS1]"'
+same "a login sh of root has the prompt (the end of root's .shrc)" "PS1=[$ps1]" last_line in_pty web env HOME=/root sh -lic 'echo "PS1=[$PS1]"'
 # the prompt as a terminal shows it: jailops shell (bash, the jail's shell) in a pseudo-terminal, typed into once bash
 # is up (bash drops what was typed before it set the terminal up)
 (sleep 3; printf 'echo "E2E PATH=$PATH HOME=$HOME"\n'; sleep 2; printf 'exit\n'; sleep 1) | TERM=xterm timeout -s KILL 60 script -q "$work/shell.out" $J shell --project demo web >/dev/null 2>&1 || true
@@ -1186,7 +1184,9 @@ check "short has no tag" grep -F -x "	PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]:\w\\$ '
 check "prompt none" $J config set --project demo web prompt none
 if [ -e "$webroot/usr/local/etc/profile.d/jailops-prompt.sh" ]; then fail "prompt none left the prompt file"; fi
 check "prompt none keeps the variables" test -e "$webroot/usr/local/etc/profile.d/jailops-env.sh"
+expect_refused "prompt none takes the block out of root's .shrc" grep -q 'jailops shell' "$webroot/root/.shrc"
 check "the default prompt again" $J config set --project demo web prompt default
+check "the default prompt puts the block back at the end of root's .shrc" sh -c "tail -n 1 '$webroot/root/.shrc' | grep -qx '# END jailops shell'"
 check "shell-setup on a jail that has everything changes nothing" $J jail shell-setup --project demo web
 expect "the shell setup left no condition" '^$' sh -c "$J jail show --project demo web -o json | grep ShellSetup || true"
 
@@ -1787,8 +1787,7 @@ fi
 
 if shard_on 3; then # shard 3: generations, in-place upgrades, image upgrades, devices and the apps of the catalog
 step "a second jail, and a second generation of its image: new jails are copied from it, no jail moves to it"
-expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image "$img" --shell bash --start
-bash_in up
+expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image "$img" --start
 check "a file that must survive" $J exec --project demo up -- sh -c 'echo ci-keep > /root/keep'
 check "a second generation of the image" $J image build "$img" --from-generation g1
 expect "the jail stays on the generation it was copied from" 'up +running.*#g1' $J jail list --project demo

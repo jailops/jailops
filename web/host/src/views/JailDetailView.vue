@@ -98,7 +98,8 @@ const tabList = computed(() => ([
   ['notes', s.notes.tab, true],
   ['config', s.config.tab, true],
   ['devices', s.devices.tab, true],
-  ['updates', s.updates.tab, hasExt('updates')],
+  // updates are for FreeBSD jails: a Linux jail looks after its own packages
+  ['updates', s.updates.tab, hasExt('updates') && jail.value?.spec.os !== 'linux'],
   ['logs', s.logs.tab, hasExt('jail_logs')],
   // what reaches the jail and why, for every jail
   ['reach', s.reach.tab, hasExt('jail_reach')],
@@ -151,8 +152,9 @@ watch(() => jail.value?.metadata.name, (n) => { if (n) pushRecent({ id: jailId(p
 const rollbackOpen = ref(false)
 const rollbackSnap = ref<string | undefined>()
 const upgradeOpen = ref(false)
-// an in-place upgrade of a FreeBSD jail runs pkg as root of the host against the jail's root: a global administrator's
-const mayUpgrade = computed(() => jail.value?.spec.os === 'linux' || isGlobalAdmin())
+// an in-place upgrade of a FreeBSD jail runs pkg as root of the host against the jail's root: a global administrator's.
+// A Linux jail looks after its own packages and is never upgraded by JailOps.
+const mayUpgrade = computed(() => !!jail.value && jail.value.spec.os !== 'linux' && isGlobalAdmin())
 const unlockOpen = ref(false)
 const attachOpen = ref(false)
 function detach(volume: string): void {
@@ -311,7 +313,7 @@ const attentionItems = computed(() => {
                   <td class="mono" :data-label="s.jail.status">{{ r.status }}<span v-if="r.diff && hasDrift" class="pill warn" style="margin-left: 8px">{{ s.jails.drift }}</span></td>
                 </tr>
                 <tr><th scope="row">{{ s.jail.hostname }}</th><td class="mono" :data-label="s.jail.spec">{{ jail.spec.hostname || jail.metadata.name }}</td><td class="faint" :data-label="s.jail.status">-</td></tr>
-                <tr><th scope="row">{{ s.jail.update }}</th><td :data-label="s.jail.spec">{{ jail.spec.update?.mode || 'manual' }}<span v-if="jail.spec.update?.schedule" class="faint"> · {{ jail.spec.update.schedule }}</span></td><td class="faint" :data-label="s.jail.status">-</td></tr>
+                <tr v-if="jail.spec.os !== 'linux'"><th scope="row">{{ s.jail.update }}</th><td :data-label="s.jail.spec">{{ jail.spec.update?.mode || 'manual' }}<span v-if="jail.spec.update?.schedule" class="faint"> · {{ jail.spec.update.schedule }}</span></td><td class="faint" :data-label="s.jail.status">-</td></tr>
                 <tr>
                   <th scope="row">{{ s.jail.resources }}</th>
                   <td class="mono" :data-label="s.jail.spec">{{ [jail.spec.resources?.cpu ? `cpu ${jail.spec.resources.cpu}` : '', jail.spec.resources?.memory ? `mem ${jail.spec.resources.memory}` : '', jail.spec.resources?.disk ? `disk ${jail.spec.resources.disk}` : '', jail.spec.resources?.pids ? `pids ${jail.spec.resources.pids}` : ''].filter(Boolean).join(' · ') || '-' }}</td>

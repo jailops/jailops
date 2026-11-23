@@ -265,9 +265,9 @@ release is `jailops jail upgrade --release` for the jails and a new image for ne
 Without an image, `jailops app install` and `jailops create` are refused with a hint that names the two commands
 above, with the host's release filled in.
 
-`jailops shell web` (or the console's Console tab) opens bash in the jail with a light blue `root@web:/#` prompt:
-a new FreeBSD jail gets bash from the package repository in the background right after its first start (`jailops shell` waits for it). `--shell sh` keeps FreeBSD's own
-shell, `jailops config set web prompt ...` changes the prompt, your own `~/.bashrc` wins over it, and `jails:` in
+`jailops shell web` (or the console's Console tab) opens the jail's shell with a light blue `root@web:/#` prompt:
+FreeBSD's sh unless the jail prefers bash, which you install yourself (`jailops pkg install web -- bash`; JailOps never
+installs a shell). `jailops config set web prompt ...` changes the prompt, your own `~/.bashrc` wins over it, and `jails:` in
 `jailopsd.yaml` changes the defaults of the host ([shell.md](shell.md), also for the green prompt of the host).
 
 An application from the catalog is one command more. The definitions came with the `jailops` package, under

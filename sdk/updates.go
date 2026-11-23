@@ -69,8 +69,9 @@ func (j *JailClient) Provision(ctx context.Context, name string, again bool) (*O
 	return op, err
 }
 
-// ShellSetup gives a FreeBSD jail the shell and prompt a new jail gets (docs/shell.md): bash installed when it is
-// the jail's shell and missing, and the prompt written. The jail must run.
+// ShellSetup gives a FreeBSD jail the shell key and prompt a new jail gets (docs/shell.md): the keys filled from the
+// host's defaults and the prompt written. It installs nothing; a preferred shell the jail lacks is named in the steps.
+// The jail must run.
 func (j *JailClient) ShellSetup(ctx context.Context, name string) (*Operation[api.ShellSetupResult], error) {
 	if err := j.c.need("jail_shell_setup"); err != nil {
 		return nil, err

@@ -70,6 +70,7 @@ func (s *Service) AppDraft(ctx context.Context, name string) (api.AppDraft, erro
 	}
 	f.Packages = res.Stdout
 	if j.Spec.Shell == api.BashPath {
+		// the jail's preferred shell, which its administrator installed, is not part of the app
 		f.Packages = dropLines(f.Packages, func(l string) bool { return strings.HasPrefix(l, api.BashPackage+" ") })
 	}
 	if b, err := s.d.Files.ReadFile(ctx, apps.RcConfPath(root)); err == nil {

@@ -301,7 +301,7 @@ func New(t testing.TB, o Options) *Env {
 		e.Host = newHostSim(t, filepath.Join(e.Dir, "host"), o.HostManage)
 	}
 	e.Cfg = daemon.Defaults()
-	// the tests of the shell machinery are about bash (installed in the background, the prompt files): the host default
+	// the tests of the shell machinery are about bash (the preferred shell, the prompt files): the host default
 	// of a real daemon is sh, and a test that wants it says so with Mutate
 	e.Cfg.Jails.Shell = api.ShellBash
 	e.Cfg.Pool = "tank"

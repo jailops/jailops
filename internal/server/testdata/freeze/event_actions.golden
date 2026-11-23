@@ -19,7 +19,6 @@ jail-provisioned
 jail-restarted
 jail-rolled-back
 jail-shell-set-up
-jail-shell-setup-cancelled
 jail-shell-setup-failed
 jail-snapshot-created
 jail-snapshot-deleted

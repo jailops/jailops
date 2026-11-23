@@ -154,7 +154,7 @@ Otherwise the root is snapshotted while the jail runs (`jo-pre-upgrade-<time>`, 
 from the host with `pkg -r`, the ports packages inside the jail with `pkg -j`, and one health check runs. The jail is
 never stopped, started or restarted: the result lists the services that still run replaced files ("restart pending"),
 and you restart them in a window of your choosing. A failure is reported, the jail runs on as pkg left it and the next
-night completes it; nothing rolls back on its own. A stopped jail is not upgraded, and a Linux jail is skipped. A
+night completes it; nothing rolls back on its own. A stopped jail is not upgraded. A Linux jail is not part of a selection: it looks after its own packages. A
 summary table ends the run (`upgraded`, `nothing to upgrade`, `failed`, `skipped`), and the exit status is 1 when a
 jail failed. Each jail is an operation of its own (`jailops op list`) and a record in its update history (`jailops
 update history web --project shop`). The token of the script is a global administrator's: only a global administrator
@@ -165,8 +165,8 @@ project and there is no default project. It takes every jail of the project and 
 after the base step: the base first and the packages on top of it, the order the daemon itself uses in one update. A
 jail whose base had nothing newer still gets its ports packages here. For a FreeBSD jail the host runs `pkg -j shop_web` with the
 jail's own repositories and names the jail's own packages, so a `FreeBSD-*` package never comes in this way (a jail with
-no ports packages fetches no catalogue: "no ports packages: nothing to update"); an
-Alpine jail runs `apk upgrade`; a Debian jail keeps its own packages, and the record says that nothing was run.
+no ports packages fetches no catalogue: "no ports packages: nothing to update"). Linux jails look after their own
+packages and are left out ([linux-jails.md](linux-jails.md#packages)).
 What one jail gets:
 
 | The jail | What happens |

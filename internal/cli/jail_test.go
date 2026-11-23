@@ -528,11 +528,18 @@ func TestJailUpgradeInPlaceAndBulk(t *testing.T) {
 	if up.Release != "" || up.NoPackages {
 		t.Fatalf("request: %+v", up)
 	}
+	// a Linux jail is not part of a selection: no row, no reason, no request
+	h.srv.SeedImage(api.Image{Metadata: api.ObjectMeta{Name: "alpine-3"},
+		Spec: api.ImageSpec{OS: api.OSLinux, Release: "3.22", Arch: "amd64", Source: api.ImageSource{Type: "minirootfs"}}})
+	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "alp", Project: "main"}, Spec: api.JailSpec{Image: "alpine-3", OS: api.OSLinux}})
 	out := tr.ok("jail", "upgrade", "--all", "--no-packages")
 	for _, want := range []string{"JAIL", "web", "db", "nothing to upgrade"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("summary lacks %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "alp") || strings.Contains(out, "skipped") || h.lastBody("POST", "/api/v1/jails/alp/upgrade") != nil {
+		t.Fatalf("the Linux jail is in the run:\n%s", out)
 	}
 	_ = json.Unmarshal(h.lastBody("POST", "/api/v1/jails/web/upgrade"), &up)
 	if !up.NoPackages {

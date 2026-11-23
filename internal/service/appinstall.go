@@ -292,8 +292,6 @@ func (s *Service) appInstallRun(ctx context.Context, h *OpHandle, p project, e a
 		res.Steps = s.appInstallPlan(h, nj, app, &installState{}, func() {}).Describe()
 		return res, nil
 	}
-	// The setup of the shell that runs in the background gets a moment and is then cancelled: pkg is not run twice.
-	s.settleShellSetup(ctx, key)
 	// No exec session may enter the jail while pkg works on its root from the host.
 	s.execMu.Lock()
 	s.installing[key] = true
@@ -486,17 +484,6 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 				Do: func(ctx context.Context) error { return s.seedJailopsRepo(ctx, root) }})
 		}
 	}
-	if nj.Spec.OS == api.OSFreeBSD && nj.Spec.Shell == api.BashPath {
-		// the jail's shell goes in with the packages, while nothing runs in the root (docs/shell.md)
-		argv := apps.PkgInstallCachedArgv(root, "ports", s.pkgCache(), []string{api.BashPackage})
-		pl.Add(plan.Step{Name: "install-bash", Describe: strings.Join(argv, " ") + ", the shell of the jail",
-			Do: func(ctx context.Context) error {
-				if ok, _ := s.d.Files.Exists(ctx, root+api.BashPath); ok {
-					return nil
-				}
-				return s.runHost(ctx, 30*time.Minute, argv)
-			}})
-	}
 	first := app.Packages[0].Name
 	pl.Add(plan.Step{Name: "record-version", Describe: strings.Join(apps.PkgVersionArgv(root, first), " ") + ", then label " + api.LabelAppVersion,
 		Do: func(ctx context.Context) error {
@@ -526,7 +513,7 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 			return nil
 		},
 		Undo: func(ctx context.Context) error {
-			if err := s.stopJail(ctx, key); err != nil {
+			if err := s.life.StopJail(ctx, key); err != nil {
 				return err
 			}
 			s.markStopped(key)
@@ -534,12 +521,12 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 			return nil
 		}, UndoOnFail: true})
 	if desc := s.shellStepDescribe(key, nj.Spec); desc != "" {
-		// like a jail created by hand: bash and the prompt (docs/shell.md). A failure does not stop the
+		// like a jail created by hand: the prompt (docs/shell.md); no shell is installed. A failure does not stop the
 		// installation; it is the jail's ShellSetup condition and `jailops jail shell-setup` tries again.
 		pl.Add(plan.Step{Name: "set-up-shell", Describe: desc,
 			Do: func(ctx context.Context) error {
-				if _, err := s.setUpShell(ctx, key, nj.Spec, true); err != nil {
-					s.log.Warn("shell setup", "jail", key, "err", err)
+				if _, err := s.setUpPrompt(ctx, key, nj.Spec); err != nil {
+					s.log.Warn("prompt", "jail", key, "err", err)
 				}
 				return nil
 			}})
@@ -656,16 +643,6 @@ func (s *Service) dropCreatedJail(ctx context.Context, proj, key string) error {
 // production, which checks it against its allow-list).
 func (s *Service) runHost(ctx context.Context, timeout time.Duration, argv []string) error {
 	res, err := s.d.Run.Run(ctx, run.Cmd{Name: argv[0], Args: argv[1:], Timeout: timeout})
-	if err != nil {
-		return fmt.Errorf("%s: %w: %s", strings.Join(argv, " "), err, tailOf(append(res.Stdout, res.Stderr...)))
-	}
-	return nil
-}
-
-// runHostGrace is runHost for a command that ends gently: SIGTERM to its process group when the time or the context
-// runs out, SIGKILL grace later.
-func (s *Service) runHostGrace(ctx context.Context, timeout time.Duration, argv []string, grace time.Duration) error {
-	res, err := s.d.Run.Run(ctx, run.Cmd{Name: argv[0], Args: argv[1:], Timeout: timeout, TermGrace: grace})
 	if err != nil {
 		return fmt.Errorf("%s: %w: %s", strings.Join(argv, " "), err, tailOf(append(res.Stdout, res.Stderr...)))
 	}

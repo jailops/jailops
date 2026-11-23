@@ -339,7 +339,7 @@ func buildRegistry() []ckey {
 	str("update.healthcheck", "update.healthcheck", "Command run in the jail after an update.", "/usr/local/bin/check", false, true,
 		func(s *JailSpec) *string { return &s.Update.Healthcheck }, nil)
 	add(ckey{ConfigKey: ConfigKey{Name: "shell", Type: "string", Example: "bash", Profile: true, Path: "shell",
-		Description: "Shell that `jailops shell` and the console start: bash, sh or a path inside the jail (/bin/sh when empty). New FreeBSD jails get bash. A management setting; /etc/passwd is not touched. `jailops jail shell-setup` installs bash when it is missing."},
+		Description: "Preferred shell of `jailops shell` and the console: bash, sh or a path inside the jail (/bin/sh when empty). JailOps never installs it: a shell that is not installed in the jail is an error until it is (`jailops pkg install NAME -- bash`). A management setting; /etc/passwd is not touched."},
 		get: func(s *JailSpec, _ string) (string, bool) { return s.Shell, s.Shell != "" },
 		set: func(s *JailSpec, _, v string) error {
 			v = ShellPath(v)
@@ -353,7 +353,7 @@ func buildRegistry() []ckey {
 	str("prompt", "prompt", "Bash prompt of a FreeBSD jail, for every user: default (user@jail in colour, then in grey [project/host], then the directory), short (the same without the grey tag), none (no prompt, the variables stay), or a PS1 text such as \\u@\\h [{project}/{host}]:\\w\\$ with bash's escapes (no ', ` or $ other than \\$: nothing in it runs; \\e or \\033 start a colour) and the words {jail}, {project} and {host}, which read the variables JAILOPS_JAIL, JAILOPS_PROJECT and JAILOPS_HOST that every interactive bash of the jail has. A user's own ~/.bashrc wins. Written into "+PromptFile+" at once in a running jail, else at its next start.", "default", false, true,
 		func(s *JailSpec) *string { return &s.Prompt }, CheckPrompt)
 	add(ckey{ConfigKey: ConfigKey{Name: "update.mode", Type: "enum", Values: []string{"manual", "notify", "managed"}, Profile: true, Path: "update.mode",
-		Description: "manual: nothing happens unless you run it. notify: check on the schedule and report. managed: check and apply on the schedule. Off (manual) by default.", Example: "notify"},
+		Description: "manual: nothing happens unless you run it. notify: check on the schedule and report. managed: check and apply on the schedule. Off (manual) by default. FreeBSD jails only: Linux jails look after their own packages.", Example: "notify"},
 		get: func(s *JailSpec, _ string) (string, bool) { return string(s.Update.Mode), s.Update.Mode != "" },
 		set: func(s *JailSpec, _, v string) error {
 			switch UpdateMode(v) {
@@ -399,7 +399,7 @@ func buildRegistry() []ckey {
 			return err
 		},
 		unset: func(s *JailSpec, _ string) { s.Delegate = false }})
-	boolKey("update.packages", "update.packages", "Update the packages inside the jail (pkg or apk, from the host).", func(s *JailSpec) *bool { return &s.Update.Packages })
+	boolKey("update.packages", "update.packages", "Update the ports packages of a FreeBSD jail (pkg, from the host). Linux jails look after their own packages.", func(s *JailSpec) *bool { return &s.Update.Packages })
 	boolKey("update.os", "update.os", "Upgrade the FreeBSD base of the jail in place, inside its release: on the schedule of a managed jail (a global administrator turns that on), or on demand by a global administrator.", func(s *JailSpec) *bool { return &s.Update.OS })
 	add(ckey{ConfigKey: ConfigKey{Name: "update.reboot", Type: "enum", Values: []string{"manual", "auto"}, Profile: true, Path: "update.reboot",
 		Description: "Kept for compatibility: JailOps never stops or restarts a running jail for an update, so auto behaves as manual (the default) and the update record names the processes whose restart is pending.", Example: "manual"},

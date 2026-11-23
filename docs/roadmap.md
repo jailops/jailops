@@ -56,7 +56,6 @@ Planned beside the list above, none of it a promise for 1.x releases before 16.0
 - A permission for opening a shell in a jail that is separate from the one for starting and stopping it.
 - Restart a service or a jail when one of its packages was upgraded (the update record already lists what changed).
 - A ready-made installation image of FreeBSD with JailOps, if people ask for one.
-- `jailops jail upgrade` for an Alpine jail: the release move with apk inside one snapshot, as a FreeBSD jail has it.
 
 ## Gaps found by the workflow walkthrough
 

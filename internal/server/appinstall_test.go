@@ -200,7 +200,7 @@ func TestAppInstall(t *testing.T) {
 	if len(res.Data) != 2 || len(res.Config) != 1 || len(res.Logs) != 1 || !strings.Contains(res.Notes, "/usr/local/www/web") {
 		t.Fatalf("%+v", res)
 	}
-	wantSteps := []string{"create-volume-web-var-db-web", "create-volume-web-usr-local-www-web", "create-jail", "mount-jail", "bind-volumes", "install-packages-ports", "install-packages-jailops", "seed-jailops-repo", "install-bash", "record-version", "unbind-volumes", "start-jail", "set-up-shell", "refresh-library-cache", "write-rc-conf", "setup-1", "setup-2", "start-service-web", "health-check", "close-firewall", "snapshot", "enable-autostart"}
+	wantSteps := []string{"create-volume-web-var-db-web", "create-volume-web-usr-local-www-web", "create-jail", "mount-jail", "bind-volumes", "install-packages-ports", "install-packages-jailops", "seed-jailops-repo", "record-version", "unbind-volumes", "start-jail", "set-up-shell", "refresh-library-cache", "write-rc-conf", "setup-1", "setup-2", "start-service-web", "health-check", "close-firewall", "snapshot", "enable-autostart"}
 	var steps []string
 	for _, s := range res.Steps {
 		_, rest, _ := strings.Cut(s, " ")
@@ -211,10 +211,9 @@ func TestAppInstall(t *testing.T) {
 		t.Fatalf("steps %v", res.Steps)
 	}
 	// The packages went in from the host with pkg -r while the jail had never run, the FreeBSD ones and the jailops
-	// ones apart, and bash with them.
+	// ones apart; no shell is installed (docs/shell.md).
 	root := "/jailops/projects/alpha/jails/web/root"
-	// bash, the jail's shell, came in after the app's packages (docs/shell.md)
-	if !slices.Equal(e.Installed, []string{root + " web-server", root + " web-tool", root + " bash"}) {
+	if !slices.Equal(e.Installed, []string{root + " web-server", root + " web-tool"}) {
 		t.Fatalf("installed %v", e.Installed)
 	}
 	// The fake pkg accepts any argv with -r: the calls must be exactly what the argv builders make, the
@@ -228,12 +227,11 @@ func TestAppInstall(t *testing.T) {
 	const cache = "/jailops/cache/pkg" // the download cache the host shares between installs
 	want := []string{strings.Join(apps.PkgInstallCachedArgv(root, "ports", cache, []string{"web-server"}), " "),
 		strings.Join(apps.PkgInstallCachedArgv(root, apps.JailopsRepo, cache, []string{"web-tool"}), " "),
-		strings.Join(apps.PkgInstallCachedArgv(root, "ports", cache, []string{api.BashPackage}), " "),
 		strings.Join(apps.PkgVersionArgv(root, "web-server"), " ")}
 	if !slices.Equal(pkgCalls, want) || want[0] != "pkg -r "+root+" -o PKG_CACHEDIR="+cache+" install -y web-server" {
 		t.Fatalf("pkg calls %q, want %q", pkgCalls, want)
 	}
-	// The jail's bash prompt, sourced by both start-up files of bash.
+	// The jail's prompt, sourced by both start-up files of bash.
 	if !strings.Contains(e.File(root+api.PromptFile), `PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '`) || !strings.Contains(e.File(root+api.BashrcPath), api.PromptFile) || !strings.Contains(e.File(root+api.ProfilePath), api.PromptFile) {
 		t.Fatalf("prompt files: %v", e.Files.Paths())
 	}
@@ -343,10 +341,10 @@ func TestAppInstallDryRunAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := op.Wait(c)
-	if err != nil || !res.DryRun || len(res.Steps) != 12 || res.Snapshot != "" || res.Jail.Metadata.Name != "" {
+	if err != nil || !res.DryRun || len(res.Steps) != 11 || res.Snapshot != "" || res.Jail.Metadata.Name != "" {
 		t.Fatalf("%v %+v", err, res)
 	}
-	if !strings.Contains(res.Steps[0], "fb151") || !strings.Contains(res.Steps[6], "install -y bash") || !strings.Contains(res.Steps[8], "/usr/local/bin/tool --ping") {
+	if !strings.Contains(res.Steps[0], "fb151") || strings.Contains(strings.Join(res.Steps, "\n"), "bash ") || !strings.Contains(res.Steps[7], "/usr/local/bin/tool --ping") {
 		t.Fatalf("%v", res.Steps)
 	}
 	if _, err := e.Admin.Jails().Get(c, "tool"); !api.IsCode(err, api.CodeNotFound) {
@@ -895,7 +893,7 @@ func TestAppInstallReferenceCatalog(t *testing.T) {
 			want = append(want, "bind-volumes")
 		}
 		want = append(want, repos...)
-		want = append(want, "install-bash", "record-version")
+		want = append(want, "record-version")
 		if len(def.Data) > 0 {
 			want = append(want, "unbind-volumes")
 		}

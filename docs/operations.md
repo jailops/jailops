@@ -322,7 +322,10 @@ the summary; a stopped jail you named yourself is a failure. `--parallel N` boun
 
 `jailops pkg install|upgrade|remove|info [NAME...] [-l KEY=VALUE | --all] -- PACKAGE...` is exec of the jail's own
 `pkg`, nothing more: `jailops pkg install -l role=web -- nginx` is `jailops exec -l role=web -- pkg install -y nginx`.
-Jails whose packages JailOps manages (the base of a jail, an app) are changed by `jailops update` and `jailops app`.
+`install` also sets `ASSUME_ALWAYS_YES=yes`, so FreeBSD's bootstrapper `/usr/sbin/pkg` fetches pkg itself in a jail that
+does not have it yet. Jails whose packages JailOps manages (the base of a jail, an app) are changed by `jailops update`
+and `jailops app`. These commands are for FreeBSD jails; a Linux jail is not part of a selection and manages its own
+packages, and one you name is refused.
 
 The console does the same: select jails in the jail list and choose Run a command. Each jail gets its own block with
 the output and the exit status, and the stopped ones are named.

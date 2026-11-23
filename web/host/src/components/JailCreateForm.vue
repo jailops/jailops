@@ -48,7 +48,7 @@ const netNames = computed(() => {
 })
 const volUsed = computed(() => !!vol.name)
 /** The shell is a FreeBSD choice: a Linux jail keeps the shell of its distribution. Empty: the host's default
- *  (jails.shell of jailopsd.yaml, bash unless the host says sh). */
+ *  (jails.shell of jailopsd.yaml, sh unless the host says bash). JailOps never installs the shell. */
 const freebsd = computed(() => (props.images.find((i) => i.metadata.name === f.image)?.spec.os ?? 'freebsd') === 'freebsd')
 
 // Field id -> problem, in the order of the form: the first one is named next to Create and focused on submit.
