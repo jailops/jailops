@@ -13,9 +13,9 @@ import (
 	"syscall"
 
 	"jailops.net/jailops/internal/hostdir"
+	"jailops.net/jailops/internal/jailaudit"
 	"jailops.net/jailops/internal/mounts"
 	"jailops.net/jailops/internal/priv"
-	"jailops.net/jailops/internal/sys/zfs"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -79,6 +79,17 @@ func (f privFiles) StaleMounts(ctx context.Context) ([]mounts.Stale, error) {
 	}
 	return out, err
 }
+
+// CheckRoot asks the helper to look at a jail root before pkg upgrades its base.
+func (f privFiles) CheckRoot(ctx context.Context, root string, paths []string) error {
+	return f.h.CheckRoot(ctx, priv.RootCheckReq{Root: root, Paths: paths})
+}
+
+// AuditRoot asks the helper to read a jail root for its audit (lifecycle.AuditRoot).
+func (f privFiles) AuditRoot(ctx context.Context, root string, files []jailaudit.File) (jailaudit.Facts, error) {
+	return f.h.AuditRoot(ctx, priv.RootAuditReq{Root: root, Files: files})
+}
+
 func (f privFiles) HealJail(ctx context.Context, jail string) (mounts.Healed, error) {
 	r, err := f.h.HealJail(ctx, jail)
 	return mounts.Healed{Unmounted: r.Unmounted, Left: r.Left, Errors: r.Errors}, err
@@ -110,12 +121,7 @@ func (f privFiles) SeedKeys(ctx context.Context, root string) error {
 	return err
 }
 
-// TreeDiff compares a directory with another one through the helper.
-func (f privFiles) TreeDiff(ctx context.Context, dir, base string, limit int) (zfs.DiffResult, error) {
-	return f.h.TreeDiff(ctx, priv.TreeDiffReq{Dir: dir, Base: base, Limit: limit})
-}
-
-// CopyTree seeds a persistent dataset from the image through the helper.
+// CopyTree copies the files of an image generation into the root of a new jail through the helper.
 func (f privFiles) CopyTree(ctx context.Context, src, dst string) error {
 	_, err := f.h.CopyTree(ctx, src, dst, priv.CopyOpts{})
 	return err
@@ -190,7 +196,10 @@ func (osFiles) SetOwner(_ context.Context, path string, uid, gid int, mode uint3
 // StaleMounts, HealJail and HealNetwork of a daemon without the helper: there is no table of mounts to read and nothing to take off.
 func (osFiles) StaleMounts(context.Context) ([]mounts.Stale, error)     { return nil, nil }
 func (osFiles) HealJail(context.Context, string) (mounts.Healed, error) { return mounts.Healed{}, nil }
-func (osFiles) HealNetwork(context.Context) (mounts.NetHealed, error)   { return mounts.NetHealed{}, nil }
+
+// CheckRoot of a daemon without the helper: nothing runs pkg on a jail root there.
+func (osFiles) CheckRoot(context.Context, string, []string) error     { return nil }
+func (osFiles) HealNetwork(context.Context) (mounts.NetHealed, error) { return mounts.NetHealed{}, nil }
 func (osFiles) DNSUnbound(context.Context, bool) (mounts.UnboundState, error) {
 	return mounts.UnboundState{}, nil
 }

@@ -133,19 +133,21 @@ func TestJailWithAMissingVolumeDoesNotStart(t *testing.T) {
 
 func TestCheckVolumes(t *testing.T) {
 	w := newWorld(t)
-	ok := []api.VolumeAttach{{Name: "maildir", Mount: "/var/mail/vhosts"}, {Name: "docs", Mount: "/srv/docs", ReadOnly: true}, {Name: "x", Mount: "/devices"}}
-	if got, err := w.S.Cfg.CheckVolumes(ok); err != nil || len(got) != 3 {
-		t.Fatalf("a path below a persistent dataset is fine: %v", err)
+	ok := []api.VolumeAttach{{Name: "maildir", Mount: "/var/mail"}, {Name: "docs", Mount: "/srv/docs", ReadOnly: true}, {Name: "x", Mount: "/devices"},
+		{Name: "pg", Mount: "/var/db/postgres"}, {Name: "home", Mount: "/home"}}
+	if got, err := w.S.Cfg.CheckVolumes(ok); err != nil || len(got) != 5 {
+		t.Fatalf("a path below a directory of the system is fine: %v", err)
 	}
 	for name, vs := range map[string][]api.VolumeAttach{
-		"over a persistent dataset":  {{Name: "a", Mount: "/var/mail"}},
+		"over /etc":                  {{Name: "a", Mount: "/etc"}},
+		"over /var/db":               {{Name: "a", Mount: "/var/db"}},
 		"twice":                      {{Name: "a", Mount: "/x"}, {Name: "a", Mount: "/y"}},
 		"one path twice":             {{Name: "a", Mount: "/x"}, {Name: "b", Mount: "/x"}},
 		"relative":                   {{Name: "a", Mount: "x"}},
 		"dotdot":                     {{Name: "a", Mount: "/x/../etc"}},
 		"root":                       {{Name: "a", Mount: "/"}},
 		"bad name":                   {{Name: "a b", Mount: "/x"}},
-		"above a persistent path":    {{Name: "a", Mount: "/var"}},
+		"over /var":                  {{Name: "a", Mount: "/var"}},
 		"above /usr/local":           {{Name: "a", Mount: "/usr"}},
 		"devfs":                      {{Name: "a", Mount: "/dev/x"}},
 		"proc":                       {{Name: "a", Mount: "/proc"}},
@@ -382,8 +384,8 @@ func TestBindVolumesIntoAStoppedJail(t *testing.T) {
 	}
 	cmds := strings.Join(w.Exec.Commands(), "\n")
 	for _, want := range []string{
-		"mount -t nullfs /jailops/projects/alpha/volumes/www /jailops/projects/alpha/jails/web/root/usr/local/www",
-		"mount -t nullfs /jailops/projects/alpha/volumes/data /jailops/projects/alpha/jails/web/root/var/db/web",
+		"mount -t nullfs -o nosuid /jailops/projects/alpha/volumes/www /jailops/projects/alpha/jails/web/root/usr/local/www",
+		"mount -t nullfs -o nosuid /jailops/projects/alpha/volumes/data /jailops/projects/alpha/jails/web/root/var/db/web",
 	} {
 		if !strings.Contains(cmds, want) {
 			t.Errorf("no %q in\n%s", want, cmds)
@@ -474,8 +476,8 @@ func TestRemountOfAHostDirectoryOfALinuxJailDoesBothMounts(t *testing.T) {
 	want := []string{
 		"umount -f " + root + "/compat/linux/srv/box",
 		"umount -f " + root + "/srv/box",
-		"mount -t nullfs -o ro /mnt/box/backups " + root + "/srv/box",
-		"mount -t nullfs -o ro /mnt/box/backups " + root + "/compat/linux/srv/box",
+		"mount -t nullfs -o ro,nosuid /mnt/box/backups " + root + "/srv/box",
+		"mount -t nullfs -o ro,nosuid /mnt/box/backups " + root + "/compat/linux/srv/box",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -511,8 +513,8 @@ func TestVolumesOfARunningJail(t *testing.T) {
 	}
 	cmds := strings.Join(w.Exec.Commands(), "\n")
 	for _, want := range []string{
-		"mount -t nullfs -o ro /jailops/projects/alpha/volumes/www " + root + "/usr/local/www",
-		"mount -t nullfs /jailops/projects/alpha/volumes/data " + root + "/var/db/web",
+		"mount -t nullfs -o ro,nosuid /jailops/projects/alpha/volumes/www " + root + "/usr/local/www",
+		"mount -t nullfs -o nosuid /jailops/projects/alpha/volumes/data " + root + "/var/db/web",
 	} {
 		if !strings.Contains(cmds, want) {
 			t.Errorf("no %q in\n%s", want, cmds)
@@ -533,7 +535,7 @@ func TestVolumesOfARunningJail(t *testing.T) {
 	}
 	after := strings.Join(w.Exec.Commands()[before:], "\n")
 	// the first goes, the second is in use, and the first is mounted again (read-only as it was)
-	if !strings.Contains(after, "umount "+root+"/usr/local/www") || !strings.Contains(after, "mount -t nullfs -o ro /jailops/projects/alpha/volumes/www "+root+"/usr/local/www") {
+	if !strings.Contains(after, "umount "+root+"/usr/local/www") || !strings.Contains(after, "mount -t nullfs -o ro,nosuid /jailops/projects/alpha/volumes/www "+root+"/usr/local/www") {
 		t.Fatalf("the volume taken off before the refusal was not mounted again:\n%s", after)
 	}
 	// a mount that is not there is fine
@@ -568,8 +570,8 @@ func TestVolumesOfARunningLinuxJail(t *testing.T) {
 		}
 	}
 	want := []string{
-		"mount -t nullfs -o ro /jailops/projects/alpha/volumes/mail " + root + "/srv/mail",
-		"mount -t nullfs -o ro /jailops/projects/alpha/volumes/mail " + root + "/compat/linux/srv/mail",
+		"mount -t nullfs -o ro,nosuid /jailops/projects/alpha/volumes/mail " + root + "/srv/mail",
+		"mount -t nullfs -o ro,nosuid /jailops/projects/alpha/volumes/mail " + root + "/compat/linux/srv/mail",
 	}
 	if strings.Join(mounts, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("mounts:\n%s\nwant:\n%s", strings.Join(mounts, "\n"), strings.Join(want, "\n"))
@@ -603,7 +605,7 @@ func TestVolumesOfARunningLinuxJail(t *testing.T) {
 		t.Fatalf("a mount in use is not busy: %v", err)
 	}
 	after := strings.Join(w.Exec.Commands()[before:], "\n")
-	if !strings.Contains(after, "mount -t nullfs -o ro /jailops/projects/alpha/volumes/mail "+root+"/compat/linux/srv/mail") {
+	if !strings.Contains(after, "mount -t nullfs -o ro,nosuid /jailops/projects/alpha/volumes/mail "+root+"/compat/linux/srv/mail") {
 		t.Fatalf("the mount below the mirror was not made again:\n%s", after)
 	}
 

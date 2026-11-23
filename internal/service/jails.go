@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"slices"
@@ -10,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"jailops.net/jailops/internal/imagegen"
 	"jailops.net/jailops/internal/lifecycle"
+	"jailops.net/jailops/internal/plan"
 	"jailops.net/jailops/internal/store"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
@@ -48,7 +51,10 @@ func (s *Service) RefreshJails(ctx context.Context) error {
 		if j.Spec.Storage == "" {
 			j.Spec.Storage = f.Storage.Name
 		}
-		m[f.Key] = &jailEntry{jail: j, problems: r.Problems, locked: r.Locked}
+		m[f.Key] = &jailEntry{jail: j, problems: r.Problems, locked: r.Locked, incomplete: s.life.UpgradeIncomplete(ctx, f.Key), suspected: s.life.Suspected(ctx, f.Key), unsupported: r.UnsupportedLayout}
+		if r.UnsupportedLayout {
+			s.log.Warn("jail has a root layout this release does not support: it does not start; a running one can be stopped, and it can be deleted", "jail", f.Key)
+		}
 	}
 	s.mu.Lock()
 	s.jails = m
@@ -68,8 +74,9 @@ func (s *Service) refreshJail(ctx context.Context, key string) error {
 			j.Spec.Storage = si.Name
 		}
 	}
+	inc, sus := s.life.UpgradeIncomplete(ctx, key), s.life.Suspected(ctx, key)
 	s.mu.Lock()
-	s.jails[key] = &jailEntry{jail: j, problems: r.Problems, locked: r.Locked}
+	s.jails[key] = &jailEntry{jail: j, problems: r.Problems, locked: r.Locked, incomplete: inc, suspected: sus, unsupported: r.UnsupportedLayout}
 	s.mu.Unlock()
 	s.unplace(key)
 	return nil
@@ -129,7 +136,10 @@ func (s *Service) view(ctx context.Context, e *jailEntry, running map[string]int
 	j := cloneJail(e.jail)
 	name := jailKey(j)
 	st := api.JailStatus{Power: api.PowerStopped, ImageGeneration: e.jail.Status.ImageGeneration}
-	st.FreeBSDVersion = s.generationFreeBSD(ctx, st.ImageGeneration)
+	// a jail is at the release installed in it (its generation is where it came from)
+	if st.FreeBSDVersion = e.jail.Status.FreeBSDVersion; st.FreeBSDVersion == "" {
+		st.FreeBSDVersion = s.generationFreeBSD(ctx, st.ImageGeneration)
+	}
 	jid, up := 0, false
 	if running != nil {
 		jid, up = running[name], false
@@ -164,9 +174,17 @@ func (s *Service) view(ctx context.Context, e *jailEntry, running map[string]int
 	shellConds, shellSetup := s.shellCondition(name)
 	st.Conditions = append(st.Conditions, shellConds...)
 	st.ShellSetup = shellSetup
-	if rt.basePackages != "" {
-		st.Conditions = append(st.Conditions, api.Condition{Type: "BasePackages", Status: api.ConditionFalse, Reason: "OutOfStep", Since: s.now().UTC(),
-			Message: rt.basePackages + "; try again with `jailops jail repair-packages " + name + "`"})
+	if e.unsupported {
+		st.Conditions = append(st.Conditions, api.Condition{Type: api.ConditionUnsupportedLayout, Status: api.ConditionTrue, Reason: "EarlierRelease", Since: s.now().UTC(),
+			Message: unsupportedLayoutMessage(j.Metadata.Name)})
+	}
+	if e.incomplete != "" {
+		st.Conditions = append(st.Conditions, api.Condition{Type: "UpgradeIncomplete", Status: api.ConditionTrue, Reason: "RollbackFailed", Since: s.now().UTC(),
+			Message: e.incomplete + "; recover it with `jailops jail rollback " + j.Metadata.Name + " --project " + j.Metadata.Project + " --confirm-data-loss`"})
+	}
+	if e.suspected != "" {
+		st.Conditions = append(st.Conditions, api.Condition{Type: "SuspectedCompromised", Status: api.ConditionTrue, Reason: "PreflightFinding", Since: s.now().UTC(),
+			Message: "the root holds what only an attack on host-side pkg puts there: " + e.suspected + "; the jail is not upgraded until a check finds nothing"})
 	}
 	if len(e.problems) > 0 {
 		st.Conditions = append(st.Conditions, api.Condition{Type: "Healthy", Status: api.ConditionFalse, Reason: "Degraded",
@@ -251,9 +269,6 @@ func (s *Service) GetJail(ctx context.Context, name string) (api.Jail, error) {
 	j, err := s.getByKey(ctx, key)
 	if err == nil {
 		j.Status.DiskUsed = s.jailsDiskUsed(ctx, []string{key})[key]
-		if due, ok := s.life.RollbackExpiresAt(ctx, key); ok {
-			j.Status.RollbackExpiresAt = due
-		}
 		if refs, rerr := s.allRefs(j.Metadata.Project); rerr == nil {
 			j.Status.Exposed = s.exposedOf(ctx, j, refs)
 		}
@@ -403,17 +418,11 @@ func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, er
 		return api.Operation{}, err
 	}
 	spec.OS = im.Spec.OS
-	if err := validate.LayoutFits(spec); err != nil {
-		return api.Operation{}, err
-	}
-	if spec.Layout == "" {
-		spec.Layout = api.LayoutThin
-		if spec.OS == api.OSLinux {
-			spec.Layout = api.LayoutThick
-		}
-	}
 	if spec.OS == api.OSLinux && spec.Prompt != "" {
 		return api.Operation{}, invalid("the prompt key is for FreeBSD jails; a Linux jail keeps the prompt of its distribution")
+	}
+	if spec.Shell == "" && spec.OS == api.OSFreeBSD && p.Spec.Shell != "" {
+		spec.Shell = p.Spec.Shell // the project's shell for jails that name none (sh or bash)
 	}
 	profs, _ := s.resolveProfiles(proj, spec.Profiles)
 	shellSetup := s.shellDefaults(&spec, profs)
@@ -534,9 +543,6 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	if spec.OS == "" {
 		spec.OS = old.Spec.OS
 	}
-	if spec.Layout == "" {
-		spec.Layout = old.Spec.Layout
-	}
 	if spec.Hostname == "" {
 		spec.Hostname = old.Spec.Hostname
 	}
@@ -554,8 +560,8 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	switch {
 	case nref.Name != oref.Name:
 		return api.Jail{}, invalid("the image of a jail cannot change").WithHint("create a new jail from the other image")
-	case spec.Layout != old.Spec.Layout, spec.OS != old.Spec.OS:
-		return api.Jail{}, invalid("layout and os cannot change")
+	case spec.OS != old.Spec.OS:
+		return api.Jail{}, invalid("the os of a jail cannot change")
 	case spec.Encrypted != old.Spec.Encrypted:
 		return api.Jail{}, invalid("encryption cannot change")
 	case spec.Storage != old.Spec.Storage:
@@ -646,6 +652,7 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 		s.mu.Lock()
 		if e := s.jails[key]; e != nil {
 			j.Status.ImageGeneration = e.jail.Status.ImageGeneration
+			j.Status.FreeBSDVersion = e.jail.Status.FreeBSDVersion
 			e.jail = j
 		}
 		s.mu.Unlock()
@@ -796,6 +803,12 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 	if a.TimeoutSeconds < 0 {
 		return api.Operation{}, invalid("timeout must not be negative")
 	}
+	if a.Action != "stop" {
+		// refused before anything runs: a restart must not stop a jail that cannot start again
+		if err := s.refuseUnsupported(key); err != nil {
+			return api.Operation{}, err
+		}
+	}
 	if l := s.lockedOf(key); a.Action != "stop" && len(l) > 0 {
 		return api.Operation{}, lifecycle.LockedError(key, l)
 	}
@@ -818,7 +831,6 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 			}
 			if a.Action != "stop" {
 				_ = h.Bind("start/"+key, &opRequest{Kind: "start", Jail: key})
-				_ = h.Timed("bash-from-the-host", func() error { s.installBashFromTheHost(ctx, key); return nil })
 				if err := s.life.StartJail(ctx, key); err != nil {
 					if api.IsCode(err, api.CodeLocked) {
 						s.observeLocked(ctx, key)
@@ -851,7 +863,6 @@ func (s *Service) StartJail(ctx context.Context, key string) error {
 	}
 	defer unlock()
 	project, name := validate.SplitQualified(key)
-	s.installBashFromTheHost(ctx, key)
 	err = s.life.StartJail(ctx, key)
 	if api.IsCode(err, api.CodeLocked) {
 		// Skipped, not failed: the unlock starts it (volkeys.go).
@@ -891,9 +902,9 @@ func (s *Service) Housekeeping(ctx context.Context) {
 			continue
 		}
 		if done, err := s.life.CleanupRootOld(ctx, n); err != nil {
-			s.log.Warn("cleaning up root.old failed", "jail", n, "err", err)
+			s.log.Warn("removing expired upgrade snapshots or a root.old failed", "jail", n, "err", err)
 		} else if done {
-			s.log.Info("removed root.old", "jail", n)
+			s.log.Info("removed expired upgrade snapshots or a root.old", "jail", n)
 		}
 		unlock()
 	}
@@ -1049,27 +1060,45 @@ type ActionResult struct {
 	Upgrade *UpgradeInfo `json:"upgrade,omitempty"`
 }
 
-// UpgradeInfo is what a root switch of a thin jail changes: the generations it goes from and to, the releases of
-// the two, whether it moves the jail to another image (a new release), and what the move keeps.
+// UpgradeInfo is what an in-place upgrade changes: what is installed before and after, the releases, and what it keeps.
 type UpgradeInfo struct {
-	From        string `json:"from,omitempty"`
-	To          string `json:"to,omitempty"`
-	FromRelease string `json:"from_release,omitempty"`
-	ToRelease   string `json:"to_release,omitempty"`
-	// Image is the image the jail follows afterwards, set for a move to another image.
-	Image    string   `json:"image,omitempty"`
-	Snapshot string   `json:"snapshot,omitempty"`
-	Kept     []string `json:"kept,omitempty"`
+	From        string   `json:"from,omitempty"`
+	To          string   `json:"to,omitempty"`
+	FromRelease string   `json:"from_release,omitempty"`
+	ToRelease   string   `json:"to_release,omitempty"`
+	Snapshot    string   `json:"snapshot,omitempty"`
+	Kept        []string `json:"kept,omitempty"`
+	// Nothing says the jail has nothing newer (nothing was stopped, snapshotted or written); Installed is the
+	// release installed in it, BasePending and PortsPending the packages that were newer.
+	Nothing      bool     `json:"nothing_to_upgrade,omitempty"`
+	Installed    string   `json:"installed,omitempty"`
+	BasePending  []string `json:"base_packages,omitempty"`
+	PortsPending []string `json:"ports_packages,omitempty"`
+	// BaseChanges are the base packages that change ("name old -> new"), Checks the pre-flight checks that passed and
+	// HealthCheck the command that decides whether the upgraded jail is good.
+	BaseChanges []string `json:"base_changes,omitempty"`
+	Checks      []string `json:"checks,omitempty"`
+	HealthCheck string   `json:"health_check,omitempty"`
+	// Failed are the pre-flight checks that failed (a dry run lists them all), Download and DiskDelta the bytes pkg said
+	// it fetches (0 when it did not say) and the growth of the root, Pkgsave the *.pkgsave files the upgrade left
+	// (information).
+	Failed    []string `json:"failed_checks,omitempty"`
+	Download  int64    `json:"download_bytes,omitempty"`
+	DiskDelta int64    `json:"disk_delta_bytes,omitempty"`
+	Pkgsave   []string `json:"pkgsave,omitempty"`
+	// RestartPending are the processes that still run files the upgrade replaced; nothing restarts them.
+	RestartPending []string `json:"restart_pending,omitempty"`
 }
 
 func upgradeInfo(res *lifecycle.UpgradeResult) *UpgradeInfo {
+	if res != nil && res.Nothing {
+		return &UpgradeInfo{Nothing: true, Installed: res.Installed, FromRelease: res.FromRelease}
+	}
 	if res == nil || !res.Changed {
 		return nil
 	}
-	u := &UpgradeInfo{From: res.From, To: res.To, FromRelease: res.FromRelease, ToRelease: res.ToRelease, Snapshot: res.Snapshot, Kept: res.Kept}
-	if res.Rebase {
-		u.Image, _, _ = strings.Cut(res.To, "#")
-	}
+	u := &UpgradeInfo{From: res.From, To: res.To, FromRelease: res.FromRelease, ToRelease: res.ToRelease, Snapshot: res.Snapshot, Kept: res.Kept,
+		Installed: res.Installed, BasePending: res.BasePending, PortsPending: res.PortsPending, BaseChanges: res.BaseChanges, Checks: res.Checks, HealthCheck: res.HealthCheck, Failed: res.Failed, Download: res.Download, DiskDelta: res.DiskDelta, Pkgsave: res.Pkgsave, RestartPending: res.RestartPending}
 	return u
 }
 
@@ -1104,18 +1133,15 @@ func (s *Service) RollbackJail(ctx context.Context, name string, rb api.JailRoll
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			var ar ActionResult
+			started := s.now().UTC()
 			if opts.Scope == api.RollbackRoot {
-				pl, ur, err := s.life.PlanRollbackRoot(ctx, key, opts, 0)
+				pl, ur, err := s.life.PlanRollbackRoot(ctx, key, opts)
 				if err != nil {
 					return nil, err
 				}
 				if pl != nil {
 					st := ur.State
-					target := 0
-					if _, rest, ok := cutImage(ur.To); ok {
-						target, _ = strconv.Atoi(strings.TrimPrefix(rest, "g"))
-					}
-					if err := h.Bind("rollback/"+key, &opRequest{Kind: "rollback", Jail: key, Stamp: opts.Stamp, Rollback: &opts, State: &st, TargetGen: target}); err != nil {
+					if err := h.Bind("rollback/"+key, &opRequest{Kind: "rollback", Jail: key, Stamp: opts.Stamp, Rollback: &opts, State: &st}); err != nil {
 						return nil, err
 					}
 					if err := s.life.Executor.Run(ctx, "rollback/"+key, pl); err != nil {
@@ -1123,6 +1149,10 @@ func (s *Service) RollbackJail(ctx context.Context, name string, rb api.JailRoll
 					}
 					s.life.FinishSwitch(ctx, key, ur)
 					ar.Plan, ar.Warnings = ur.Plan, ur.Warnings
+					now := s.now().UTC()
+					s.appendHistory(api.UpdateRecord{ID: "upd-" + s.stamp() + "-" + randHex(3), Jail: name, Project: p.Meta.Name, Kind: api.UpdateKindOS,
+						StartedAt: started, FinishedAt: now, Snapshot: ur.Snapshot, From: ur.From, To: ur.To, Result: api.UpdateSuccess,
+						Note: "rolled back the in-place upgrade to the state of snapshot " + ur.Snapshot})
 				}
 			} else {
 				_ = h.Bind("rollback/"+key, &opRequest{Kind: "rollback", Jail: key, Stamp: opts.Stamp, Rollback: &opts})
@@ -1142,8 +1172,22 @@ func (s *Service) RollbackJail(ctx context.Context, name string, rb api.JailRoll
 	})
 }
 
-// UpgradeJail moves a jail to a newer generation of its image as an operation.
-// With DryRun the operation returns the plan and changes nothing.
+// requireUpgradeRights: the in-place upgrade of a FreeBSD jail runs pkg on the host as root against the jail's own root
+// (package scripts and all), and that root belongs to whoever holds the jail: a project administrator could plant what
+// the next upgrade runs as root of the host. Only a global administrator, and the system itself (the nightly upgrade,
+// which a global administrator turned on), may do it.
+func (s *Service) requireUpgradeRights(ctx context.Context, j api.Jail) error {
+	if j.Spec.OS == api.OSLinux {
+		return nil
+	}
+	if !isGlobalAdmin(ActorFrom(ctx)) {
+		return api.Errorf(api.CodeForbidden, "upgrading a jail in place (pkg runs as root of the host against the jail's own root) needs a global administrator")
+	}
+	return nil
+}
+
+// UpgradeJail upgrades a jail in place as an operation: its FreeBSD base from the host and its ports packages inside
+// it. With DryRun the operation returns the plan and changes nothing.
 func (s *Service) UpgradeJail(ctx context.Context, name string, up api.JailUpgrade) (api.Operation, error) {
 	if err := s.requireHost("upgrade"); err != nil {
 		return api.Operation{}, err
@@ -1152,86 +1196,63 @@ func (s *Service) UpgradeJail(ctx context.Context, name string, up api.JailUpgra
 	if err != nil {
 		return api.Operation{}, err
 	}
-	if _, err := s.getByKey(ctx, key); err != nil {
+	cur0, err := s.getByKey(ctx, key)
+	if err != nil {
+		return api.Operation{}, err
+	}
+	if err := s.requireUpgradeRights(ctx, cur0); err != nil {
 		return api.Operation{}, err
 	}
 	req := lifecycle.UpgradeRequest{JailUpgrade: up, Stamp: s.stamp()}
-	locks := []string{jailLock(key), anchorLock(key)}
-	run := func(ctx context.Context, h *OpHandle) (any, error) {
-		return s.upgradeBody(ctx, h, p.Meta.Name, name, key, up, req)
-	}
-	if up.Image != "" {
-		cur, err := s.getByKey(ctx, key)
-		if err != nil {
-			return api.Operation{}, err
-		}
-		il, err := s.checkMoveRequest(ctx, p, key, cur, up.Image)
-		if err != nil {
-			return api.Operation{}, err
-		}
-		locks = append(locks, il...)
-		run = func(ctx context.Context, h *OpHandle) (any, error) {
-			return s.moveBody(ctx, h, p.Meta.Name, name, key, up, req)
-		}
-	}
 	return s.Submit(ctx, OpSpec{
-		Action: api.OpJailUpgrade, Description: "Upgrade jail " + name, Locks: locks, Project: p.Meta.Name,
+		Action: api.OpJailUpgrade, Description: "Upgrade jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
-		Run:       run,
+		Run: func(ctx context.Context, h *OpHandle) (any, error) {
+			// the upgrade (and the addition of base packages) is written to the update history
+			out, _, _, err := s.upgradeRecorded(ctx, h, p.Meta.Name, name, key, up, req)
+			return out, err
+		},
 	})
 }
 
-// checkMoveRequest checks a move of a jail to another image before anything is submitted: the image is one the
-// project may use, of the same OS and architecture as the jail's. It returns the locks of the image (the first use of an
-// image on a pool builds or receives its generation there). The release order and the host kernel are the
-// lifecycle's checks, made with the plan.
-func (s *Service) checkMoveRequest(ctx context.Context, p project, key string, j api.Jail, image string) ([]string, error) {
-	ref, err := validate.ParseImageRef(strings.TrimSpace(image))
+// BaseList lists the base packages (FreeBSD-*) installed in a FreeBSD jail, running or stopped, from a copy of its
+// package database: pkg on the host never reads the jail's own files (lifecycle.BasePackages).
+func (s *Service) BaseList(ctx context.Context, name string) (api.JailBase, error) {
+	_, key, err := s.jailRef(ctx, name)
 	if err != nil {
-		return nil, err
+		return api.JailBase{}, err
 	}
-	if ref.Pinned {
-		return nil, invalid("image %q names an image, not a generation: name the generation with generation", image)
+	if _, err := s.getByKey(ctx, key); err != nil {
+		return api.JailBase{}, err
 	}
-	if !imageAllowed(p.Spec, ref.Name) || !s.imgKind.exists(ref.Name) {
-		return nil, notFound("image", ref.Name)
-	}
-	curRef, err := validate.ParseImageRef(j.Spec.Image)
-	if err != nil || curRef.Name == ref.Name {
-		return nil, nil
-	}
-	to, err := s.imgKind.get(ref.Name)
+	// a stopped jail's root is mounted for the read: no operation may start or change the jail meanwhile
+	unlock, err := s.locks.lockPatient(ctx, "base list "+key, jailLock(key))
 	if err != nil {
-		return nil, notFound("image", ref.Name)
+		return api.JailBase{}, err
 	}
-	if from, err := s.imgKind.get(curRef.Name); err == nil {
-		switch {
-		case from.Spec.OS != to.Spec.OS:
-			return nil, invalid("jail %s runs %s and image %s is %s: a jail moves between releases of one OS", j.Metadata.Name, from.Spec.OS, ref.Name, to.Spec.OS).
-				WithHint("create a new jail from the image instead")
-		case from.Spec.Arch != to.Spec.Arch:
-			return nil, invalid("jail %s runs on %s and image %s is %s", j.Metadata.Name, from.Spec.Arch, ref.Name, to.Spec.Arch).
-				WithHint("create a new jail from the image instead")
-		}
+	defer unlock()
+	pk, err := s.life.BasePackages(ctx, key)
+	if err != nil {
+		return api.JailBase{}, err
 	}
-	if si, ok := s.storageOfJail(key); ok {
-		return s.imageLocks(ctx, ref, si.Name), nil
+	res := api.JailBase{Jail: name, Packages: []api.JailBasePackage{}}
+	for _, p := range pk {
+		res.Packages = append(res.Packages, api.JailBasePackage{Name: p[0], Version: p[1]})
 	}
-	return nil, nil
+	return res, nil
 }
 
-// moveBody is upgradeBody for a move to another image: the result is the same, and the move is written to the
-// update history of the jail as an OS update, from the generation of the old release to the one of the new.
-func (s *Service) moveBody(ctx context.Context, h *OpHandle, project, name, key string, up api.JailUpgrade, req lifecycle.UpgradeRequest) (any, error) {
-	out, _, _, err := s.moveRun(ctx, h, project, name, key, up, req)
-	return out, err
-}
-
-// moveRun runs a move and returns the result, what the plan was for and the id of the history record (empty for a
-// dry run and for a move that did nothing).
-func (s *Service) moveRun(ctx context.Context, h *OpHandle, project, name, key string, up api.JailUpgrade, req lifecycle.UpgradeRequest) (any, *lifecycle.UpgradeResult, string, error) {
+// upgradeRecorded runs an upgrade and writes it to the update history of the jail as an OS update. It returns the
+// result, what the plan was for and the id of the history record (empty for a dry run and for an upgrade that did
+// nothing).
+func (s *Service) upgradeRecorded(ctx context.Context, h *OpHandle, project, name, key string, up api.JailUpgrade, req lifecycle.UpgradeRequest) (any, *lifecycle.UpgradeResult, string, error) {
 	started := s.now().UTC()
 	out, res, err := s.upgradeRun(ctx, h, project, name, key, up, req)
+	var se *lifecycle.SuspectedError
+	if errors.As(err, &se) && !up.DryRun {
+		s.noteSuspected(ctx, project, name, key, se, started)
+		return out, res, "", err
+	}
 	if up.DryRun || res == nil || !res.Changed {
 		return out, res, "", err
 	}
@@ -1239,7 +1260,13 @@ func (s *Service) moveRun(ctx context.Context, h *OpHandle, project, name, key s
 		FinishedAt: s.now().UTC(), Snapshot: res.Snapshot, From: res.From, To: res.To, Result: api.UpdateSuccess}
 	if err != nil {
 		rec.Error = err.Error()
-		rec.Result, rec.RootRolledBack, rec.Note = upgradeOutcome(err, res.From)
+		rec.Result, rec.Note = upgradeOutcome(err, res.From)
+	} else if len(up.AddPackages) > 0 {
+		rec.Note = "added the base packages " + strings.Join(up.AddPackages, ", ")
+	}
+	if len(res.RestartPending) > 0 {
+		// information: these processes use the new files once someone restarts them; JailOps never does
+		rec.Note = strings.TrimPrefix(rec.Note+"; restart pending: "+strings.Join(res.RestartPending, ", "), "; ")
 	}
 	s.appendHistory(rec)
 	if rec.Result == api.UpdateSuccess {
@@ -1250,19 +1277,44 @@ func (s *Service) moveRun(ctx context.Context, h *OpHandle, project, name, key s
 	return out, res, rec.ID, err
 }
 
-// upgradeBody plans, journals and runs a root swap of a thin jail. It is the
-// body of the upgrade operation and of the OS update of the update pipeline;
-// the caller holds the jail and anchor locks.
-func (s *Service) upgradeBody(ctx context.Context, h *OpHandle, project, name, key string, up api.JailUpgrade, req lifecycle.UpgradeRequest) (any, error) {
-	v, _, err := s.upgradeRun(ctx, h, project, name, key, up, req)
-	return v, err
-}
-
-// upgradeRun is upgradeBody that also returns what the plan was for, also when the run fails.
+// upgradeRun plans, journals and runs an in-place upgrade, and returns what the plan was for, also when the run fails.
+// The caller holds the jail and anchor locks.
 func (s *Service) upgradeRun(ctx context.Context, h *OpHandle, project, name, key string, up api.JailUpgrade, req lifecycle.UpgradeRequest) (any, *lifecycle.UpgradeResult, error) {
+	if cur, err := s.getByKey(ctx, key); err == nil {
+		if err := s.requireUpgradeRights(ctx, cur); err != nil {
+			return nil, nil, err
+		}
+	}
+	var portsWarn string
+	if cur, err := s.getByKey(ctx, key); err == nil && s.upgradesInPlace(cur) {
+		if !up.DryRun {
+			// one operation changes the packages of the jail at a time, for the whole upgrade: the background setup of
+			// the shell is settled first (a pkg the stop kills leaves the jail dying with its root busy), and no other
+			// package operation or session starts until the upgrade ends
+			release, err := s.holdJailFor(key, "an in-place upgrade", false)
+			if err != nil {
+				return nil, nil, err
+			}
+			defer release()
+		}
+		if !up.NoPackages && len(up.AddPackages) == 0 {
+			req.Ports, portsWarn = s.thickPorts(ctx, key, cur, up.DryRun)
+		}
+	}
 	pl, res, err := s.life.PlanUpgrade(ctx, key, req)
 	if err != nil {
 		return nil, res, err
+	}
+	// the check of the root passed: a finding of an earlier run no longer holds (the lifecycle cleared it)
+	if sus := s.life.Suspected(ctx, key); sus == "" {
+		s.mu.Lock()
+		if e := s.jails[key]; e != nil {
+			e.suspected = ""
+		}
+		s.mu.Unlock()
+	}
+	if portsWarn != "" && res != nil {
+		res.Warnings = append(res.Warnings, portsWarn)
 	}
 	j, _ := s.getByKey(ctx, key)
 	if pl == nil || up.DryRun {
@@ -1277,7 +1329,16 @@ func (s *Service) upgradeRun(ctx context.Context, h *OpHandle, project, name, ke
 		return nil, res, err
 	}
 	if err := s.life.Executor.Run(ctx, "upgrade/"+key, pl); err != nil {
-		return nil, res, err
+		if i := strings.Index(err.Error(), "suspected_compromised: "); i >= 0 {
+			// pkg's trees changed between the check and a later pkg step: the jail is suspected as at the check
+			return nil, res, &lifecycle.SuspectedError{Jail: name, Found: strings.TrimPrefix(err.Error()[i:], "suspected_compromised: "), During: true}
+		}
+		if note := s.life.NoteUpgradeFailure(ctx, key, err); note != "" {
+			if rerr := s.refreshJail(ctx, key); rerr != nil {
+				s.log.Warn("refresh after a failed rollback", "jail", key, "err", rerr)
+			}
+		}
+		return nil, res, thickHealthFailure(err, res)
 	}
 	s.life.FinishSwitch(ctx, key, res)
 	if err := s.refreshJail(ctx, key); err != nil {
@@ -1289,47 +1350,126 @@ func (s *Service) upgradeRun(ctx context.Context, h *OpHandle, project, name, ke
 	return ActionResult{Jail: j, Plan: res.Plan, Warnings: res.Warnings, Upgrade: upgradeInfo(res)}, res, nil
 }
 
-// ConvertJail changes the layout of a FreeBSD jail's root (thin to thick, or thick to thin on an image generation). The
-// jail is stopped for it and runs again afterwards when it ran before; with DryRun the result is the plan.
-func (s *Service) ConvertJail(ctx context.Context, name string, cv api.JailConvert) (api.Operation, error) {
-	if err := s.requireHost("convert"); err != nil {
-		return api.Operation{}, err
+// upgradesInPlace says whether a jail is a FreeBSD jail: the one an in-place upgrade applies to.
+func (s *Service) upgradesInPlace(j api.Jail) bool {
+	return !s.jailIsLinux(j)
+}
+
+// thickPorts finds out, inside the running jail and without changing anything but the package catalogue, which ports
+// packages have a newer version, and gives the plan the way to upgrade them (base packages are excluded by name, as in
+// every package update). A jail without ports packages fetches no catalogue. A dry run changes nothing at all: it
+// reads the catalogue the jail has. A stopped jail has no ports part: pkg -j runs inside it. A catalogue that cannot be read leaves the ports alone and says so. The caller
+// holds the jail (upgradeRun).
+func (s *Service) thickPorts(ctx context.Context, key string, j api.Jail, dryRun bool) (*lifecycle.PortsUpgrade, string) {
+	if !s.jailRunning(ctx, key) || !s.managesPackages(j) {
+		return nil, ""
 	}
-	p, key, err := s.jailRef(ctx, name)
+	// a jail without ports packages has no ports part: the ports catalogue (tens of MiB, written into the root) is
+	// not fetched, and the upgrade says so
+	if names, _, err := s.portsPackages(ctx, key); err != nil {
+		return nil, "the ports packages were not checked: " + tailText(err.Error(), 200)
+	} else if len(names) == 0 {
+		return &lifecycle.PortsUpgrade{None: true}, ""
+	}
+	if !dryRun {
+		if _, err := s.pkgExec(ctx, key, false, 10*time.Minute, "pkg", "update", "-q"); err != nil {
+			return nil, "the ports packages were not checked: " + tailText(err.Error(), 200)
+		}
+	}
+	out, err := s.pkgUpgradeCheck(ctx, key, dryRun)
 	if err != nil {
-		return api.Operation{}, err
+		return nil, "the ports packages were not checked: " + tailText(err.Error(), 200)
 	}
-	if _, err := s.getByKey(ctx, key); err != nil {
-		return api.Operation{}, err
+	var names []string
+	for _, p := range parsePackageUpdates(out, false) {
+		names = append(names, p.Name)
 	}
-	req := lifecycle.ConvertRequest{JailConvert: cv, Stamp: s.stamp()}
-	return s.Submit(ctx, OpSpec{
-		Action: api.OpJailConvert, Description: "Convert jail " + name + " to " + string(cv.Layout), Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
-		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
-		Run: func(ctx context.Context, h *OpHandle) (any, error) {
-			pl, res, err := s.life.PlanConvert(ctx, key, req)
-			if err != nil {
-				return nil, err
+	if len(names) == 0 {
+		return nil, ""
+	}
+	return &lifecycle.PortsUpgrade{Pending: names, Run: func(ctx context.Context) error {
+		if _, err := s.pkgUpgrade(ctx, key, false, 60*time.Minute, true); err != nil {
+			return fmt.Errorf("pkg upgrade of the ports packages: %w", err)
+		}
+		return nil
+	}}, ""
+}
+
+// thickHealthFailure says what happened when the health check of an in-place upgrade failed. The plan's
+// error is not an api.Error, so the operation record would show "internal error" only; the health check's command and
+// the tail of its output are written for the reader (like the app health errors), so they are kept. Any other error,
+// goes through unchanged.
+func thickHealthFailure(err error, res *lifecycle.UpgradeResult) error {
+	if res == nil {
+		return err
+	}
+	var pe *plan.Error
+	isPlan := errors.As(err, &pe)
+	// nothing is rolled back on its own and the jail is never stopped: it runs as the upgrade left it, and the snapshot
+	// taken before the first change is there for a person
+	end := "the jail runs as the upgrade left it (running the upgrade again completes it); snapshot " + res.Snapshot + " is kept: `jailops jail rollback <jail> --confirm-data-loss` returns the root to it, and what the jail wrote since is lost"
+	if isPlan && (pe.Step == "prefetch" || pe.Step == "check-scripts" || pe.Step == "snapshot") {
+		end = "nothing in the jail was changed (the failure came before the snapshot)"
+	}
+	var he *lifecycle.HealthError
+	if errors.As(err, &he) {
+		what := he.Msg
+		if he.Command != "" {
+			what = he.Command
+			if he.Err != nil {
+				what += ": " + he.Err.Error()
 			}
-			if pl == nil || cv.DryRun {
-				return res.JailConvertResult, nil
+			if o := tailText(he.Output, 400); o != "" {
+				what += ": " + o
 			}
-			st := res.State
-			if err := h.Bind("convert/"+key, &opRequest{Kind: "convert", Jail: key, Stamp: req.Stamp, Convert: &req, ConvertState: &st}); err != nil {
-				return nil, err
-			}
-			if err := s.life.Executor.Run(ctx, "convert/"+key, pl); err != nil {
-				return nil, err
-			}
-			s.life.FinishConvert(ctx, key, res)
-			if err := s.refreshJail(ctx, key); err != nil {
-				s.log.Warn("refresh after convert", "jail", key, "err", err)
-			}
-			s.emitIn(ctx, p.Meta.Name, "jail-converted", "/api/v1/jails/"+name)
-			s.kick()
-			return res.JailConvertResult, nil
-		},
-	})
+		}
+		return publicf(err, "the health check failed: %s; %s", what, end)
+	}
+	// another failure of a plan step (pkg, no room, a start that fails): typed errors keep their message, any other is
+	// shown with the step and the tail of what it said
+	var ae *api.Error
+	if !isPlan {
+		return err
+	}
+	if errors.As(err, &ae) {
+		out := *ae
+		out.Message += "; " + end
+		// the plan's error stays in the chain: the history tells a rollback from a refusal by it (thickOutcome)
+		return &publicError{ae: &out, cause: err}
+	}
+	return publicf(err, "the upgrade failed at step %s: %s; %s", pe.Step, tailText(pe.Err.Error(), 500), end)
+}
+
+// upgradeOutcome classifies the failure of an in-place upgrade for the update history: a failure before the snapshot
+// changed nothing; any later failure is left as it is (nothing rolls back on its own; the jail runs on, and the snapshot
+// is kept for a manual rollback).
+func upgradeOutcome(err error, from string) (result api.UpdateResult, note string) {
+	var pe *plan.Error
+	var se *lifecycle.SuspectedError
+	switch {
+	case errors.As(err, &se) && se.During:
+		return api.UpdateFailure, "suspected_compromised: " + se.Found + "; found during the upgrade, which stopped there: look at the jail before anything else; the snapshot of the upgrade is kept"
+	case errors.As(err, &se):
+		return api.UpdatePreflightFailed, "suspected_compromised: " + se.Found + "; the jail was not upgraded and nothing in it was changed: look at it before anything else"
+	case errors.As(err, &pe) && (pe.Step == "prefetch" || pe.Step == "check-scripts" || pe.Step == "snapshot"):
+		return api.UpdatePreflightFailed, "nothing in the jail was changed: the upgrade failed before its snapshot (" + from + " is installed)"
+	case errors.As(err, &pe):
+		return api.UpdateFailure, "the jail runs as the upgrade left it; run the upgrade again to complete it, or roll the root back to the snapshot (jailops jail rollback, which loses what the jail wrote since)"
+	}
+	return api.UpdatePreflightFailed, "nothing was changed: the upgrade stopped in its checks (" + from + " is installed)"
+}
+
+// tailText is the last n bytes of s (on a line start when there is one), marked when cut.
+func tailText(s string, n int) string {
+	s = strings.TrimSpace(imagegen.CleanOutput(s))
+	if len(s) <= n {
+		return s
+	}
+	s = s[len(s)-n:]
+	if i := strings.IndexByte(s, '\n'); i >= 0 && i < len(s)-1 {
+		s = s[i+1:]
+	}
+	return "..." + s
 }
 
 // CopyJail makes an independent copy with the data of the source (send and receive, never a clone) in the same
@@ -1444,4 +1584,57 @@ func (s *Service) CopyJail(ctx context.Context, src string, req api.JailCopy) (a
 		submitted = true
 	}
 	return op, err
+}
+
+// noteSuspected records what the preflight detection of an upgrade found in the root of a jail: on its container (so
+// that it survives a restart), in the registry (condition SuspectedCompromised, doctor), in the update history and as
+// the event jail-suspected-compromised. The other jails are not affected.
+func (s *Service) noteSuspected(ctx context.Context, project, name, key string, se *lifecycle.SuspectedError, started time.Time) {
+	s.life.NoteSuspected(ctx, key, se.Found)
+	s.mu.Lock()
+	if e := s.jails[key]; e != nil {
+		e.suspected = se.Found
+	}
+	s.mu.Unlock()
+	s.log.Warn("suspected_compromised: the root of the jail holds what an attack on host-side pkg plants; it was not upgraded", "jail", key, "found", se.Found)
+	res, note := upgradeOutcome(se, "")
+	s.appendHistory(api.UpdateRecord{ID: "upd-" + s.stamp() + "-" + randHex(3), Jail: name, Project: project, Kind: api.UpdateKindOS, StartedAt: started,
+		FinishedAt: s.now().UTC(), Result: res, Error: "suspected_compromised: " + se.Found, Note: "(severity high) " + note})
+	s.emitIn(ctx, project, "jail-suspected-compromised", "/api/v1/jails/"+name)
+}
+
+// unsupportedLayoutMessage says what a jail with the root layout of JailOps 0.9.2 and before is to this release, and
+// the fix.
+func unsupportedLayoutMessage(name string) string {
+	return lifecycle.UnsupportedLayoutMessage(name) + "; it was made by an earlier release: create a new jail and move its data over, " +
+		"or convert it with `jailops jail convert " + name + " --layout thick` on that earlier release before upgrading the host"
+}
+
+// hasUnsupportedLayout says whether the jail of key has the root layout of JailOps 0.9.2 and before.
+func (s *Service) hasUnsupportedLayout(key string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	e := s.jails[key]
+	return e != nil && e.unsupported
+}
+
+// RefuseUnsupportedLayout is the one guard of the HTTP layer: every request that changes a jail of the request's
+// project, other than the power actions (the start and restart are refused by JailAction) and delete, is refused for a
+// jail with an unsupported root layout (refuseUnsupported). A name that is no jail passes:
+// the handler answers it.
+func (s *Service) RefuseUnsupportedLayout(ctx context.Context, name string) error {
+	_, key, err := s.jailRef(ctx, name)
+	if err != nil {
+		return nil
+	}
+	return s.refuseUnsupported(key)
+}
+
+// refuseUnsupported refuses an operation other than stop and delete on a jail with an unsupported root layout.
+func (s *Service) refuseUnsupported(key string) error {
+	if !s.hasUnsupportedLayout(key) {
+		return nil
+	}
+	_, name := validate.SplitQualified(key)
+	return lifecycle.UnsupportedLayoutError(name)
 }

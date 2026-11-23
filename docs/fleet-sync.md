@@ -42,7 +42,7 @@ Every declarative object a user can create with the CLI has a file kind. Nothing
 | `jailops network create` | `shared/networks/*.yaml` (or `hosts/<h>/networks/`) | every field of the API: IPv4, IPv6 `routed`, `proxy` and `none`, uplink, `private`, DNS, MTU, exclusions. See below for the CLI flags |
 | `jailops wireguard create --mode server`, `peer add` | `hosts/<host>/wireguard/*.yaml` (WireGuard) | servers only, public parts only; see "WireGuard" below |
 | `jailops storage create` | `hosts/<host>/storage/*.yaml` (Storage) | a dataset on any pool, a big HDD pool included; `compression`. Datasets may not be equal or nested |
-| `jailops image create`, `image build` | `shared/images/*.yaml` (Image) | `build: true` builds the **first** generation when the host has none (a fresh host has none and a jail cannot be created from an image without one). Later generations are an operation, not a declaration: `jailops image build`, or a rollout |
+| `jailops image create`, `image build` | `shared/images/*.yaml` (Image) | `build: true` builds the **first** generation when the host has none (a fresh host has none and a jail cannot be created from an image without one). Later generations are an operation, not a declaration: `jailops image build` or `jailops image upgrade` |
 | `jailops create` | `projects/<p>/jails/*.yaml` (Jail) | the whole spec: network and storage (explicit), `volumes`, `expose`, `devfs`, `resources`, `boot`, `update` schedule, `firewall` (`policies`, a list, and `tags`), `env` with `secret:` references, `provision`, `labels`. `start: true` and `after:` hooks (start, restart, snapshot, exec) run once, after creation |
 | `jailops firewall policy/address-set create` | `projects/<p>/firewall-policies/`, `address-sets/` | the project's mandatory policies are set in a second write once the policies exist |
 | `jailops backup target create` | `shared/backup-targets/*.yaml` (BackupTarget) | `kind: node` needs `address` and a pinned `fingerprint` |
@@ -243,8 +243,10 @@ re-wrap, and a removed key may already have read the current values, so rotate t
     jailops-sync -C ./fleet drift            # in CI: non-zero when something changed behind your back
     jailops-sync -C ./fleet adopt --claim    # take over what is already running, as YAML
 
-Rollouts stage an upgrade (a project, a label selector, a canary, a batch size, a pause, a health gate) so one bad generation
-does not reach every jail at once.
+Rollouts stage the in-place upgrade of the jails (`jailops jail upgrade` on each, with a project, a label selector, a
+canary, a batch size, a pause and a health gate) so one bad set of packages does not reach every jail at once. `jail
+upgrade` is a global administrator's: the token or certificate of the host needs that role for a rollout, and a
+project-scoped one gets `forbidden` on every jail.
 
 ## Naming rules
 

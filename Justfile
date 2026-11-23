@@ -189,7 +189,12 @@ release-pr VERSION:
         { echo "x release/v{{VERSION}} already on origin: open the PR with: gh pr create --head release/v{{VERSION}} --title \"Release v{{VERSION}}\" (or delete it: git push -d origin release/v{{VERSION}})"; exit 1; }
     git show-ref --verify -q "refs/heads/release/v{{VERSION}}" && \
         { echo "x local branch release/v{{VERSION}} left over from a failed run: git checkout master && git branch -D release/v{{VERSION}}"; exit 1; }
-    trap 'git checkout master 2>/dev/null; git branch -D "release/v{{VERSION}}" 2>/dev/null || true' EXIT
+    # what can be checked before anything is touched is checked here: the Unreleased notes on master
+    git show origin/master:CHANGELOG.md | grep -Eq '^## \[?Unreleased\]?' || { echo "x CHANGELOG.md on master has no Unreleased section"; exit 1; }
+    [ -n "$(git show origin/master:CHANGELOG.md | awk '/^## \[?Unreleased\]?/{f=1;next} /^## /{f=0} f' | tr -d '[:space:]')" ] || \
+        { echo "x the Unreleased section of CHANGELOG.md on master is empty: write the notes first"; exit 1; }
+    # a failure from here on leaves nothing behind: the branch's changes (version.txt, a fixture) are thrown away with it
+    trap 'git checkout -f master 2>/dev/null; git clean -fdq internal/store/testdata/upgrade 2>/dev/null; git branch -D "release/v{{VERSION}}" 2>/dev/null || true' EXIT
     git checkout -b "release/v{{VERSION}}" origin/master
     # The workflow walkthrough: what master says a jail administrator can do, its steps and the roadmap agree. A task that is
     # missing without a plan stops the release here. The steps run on a FreeBSD host (just e2e-workflows): not here, it takes a while.
@@ -234,10 +239,16 @@ release VERSION:
     sha=$(git rev-parse HEAD)
     ci=""
     for _ in $(seq 1 60); do
-        ci=$(gh run list --workflow CI --commit "$sha" --limit 1 --json status,conclusion,databaseId --jq '.[0] | "\(.status)/\(.conclusion)/\(.databaseId)"' 2>/dev/null || true)
-        case "$ci" in completed/success/*) break ;; completed/*) echo "x CI failed on ${sha:0:7}: gh run view ${ci##*/} --log-failed"; exit 1 ;; esac
-        [ -n "$ci" ] && [ "${ci%%/*}" = in_progress ] && { gh run watch "${ci##*/}" --interval 20 >/dev/null 2>&1 || true; continue; }
-        sleep 10
+        # empty when there is no run yet (and when gh fails: the loop asks again)
+        ci=$(gh run list --workflow CI --commit "$sha" --limit 1 --json status,conclusion,databaseId \
+            --jq 'if length == 0 then "" else .[0] | "\(.status)/\(.conclusion)/\(.databaseId)" end' 2>/dev/null || true)
+        case "$ci" in
+            completed/success/*) break ;;
+            completed/*) echo "x CI failed on ${sha:0:7}: gh run view ${ci##*/} --log-failed"; exit 1 ;;
+            "") sleep 10 ;;
+            # queued, waiting, pending, requested, in_progress: watch it, however long the runner takes to come
+            *) gh run watch "${ci##*/}" --interval 20 >/dev/null 2>&1 || sleep 10 ;;
+        esac
     done
     case "$ci" in completed/success/*) echo "CI is green on ${sha:0:7}" ;; *) echo "x CI is not green on ${sha:0:7} (${ci:-no run found})"; exit 1 ;; esac
     # The quick gate is not the release gate: the browsers, the fuzzers and the FreeBSD VMs run at night, by hand and on the release PR.
@@ -279,7 +290,10 @@ publish-packages VERSION:
     echo "waiting for the bump PR of jailops-packages"
     pr=""
     for _ in $(seq 1 40); do
-        pr=$(gh pr list -R jailops/jailops-packages --state open --search "{{VERSION}} in:title" --json number --jq '.[0].number // empty' 2>/dev/null || true)
+        # the exact title of the bump PR (check-updates.sh: "<group>: bump to <version>"): a search by words also finds
+        # other titles with 0, 9 and 3 in them, and another group's bump
+        pr=$(gh pr list -R jailops/jailops-packages --state open --json number,title \
+            --jq '[.[] | select(.title == "jailops: bump to {{VERSION}}" or .title == "jailops: bump to v{{VERSION}}") | .number] | first // empty' 2>/dev/null || true)
         [ -n "$pr" ] && break
         sleep 15
     done

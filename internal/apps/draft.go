@@ -526,7 +526,7 @@ func BuildDraft(f DraftFacts) api.AppDraft {
 			find("volume %s left out: %s", v, reason(err))
 			continue
 		}
-		if err := CheckPersistent(api.App{Data: next}, PersistentPaths); err != nil {
+		if err := CheckRootPaths(api.App{Data: next}, RootPaths); err != nil {
 			find("volume %s left out: %s", v, reason(err))
 			continue
 		}

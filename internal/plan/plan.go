@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"jailops.net/jailops/sdk/api"
 )
 
 // Step is one unit of work.
@@ -157,7 +159,17 @@ func (e *Executor) put(ctx context.Context, r Record) error {
 }
 
 // Run executes the plan. id identifies the run in the journal.
+// A record that is still in the journal under id (a run the recovery could not resolve, one of an older release among
+// them) is never overwritten: the run is refused, and the record stays as the evidence of what that run did.
 func (e *Executor) Run(ctx context.Context, id string, p *Plan) error {
+	if e.Journal != nil {
+		if old, ok, err := e.Journal.Get(ctx, id); err != nil {
+			return fmt.Errorf("plan %s: journal: %w", p.Name, err)
+		} else if ok {
+			return api.Errorf(api.CodePreconditionFailed, "an earlier run %s (%s) is still in the journal: it was interrupted and not resolved", id, old.Plan).
+				WithHint("jailops doctor (operations.journal) says what to do; a run of JailOps 0.9.2 is resolved by 0.9.2")
+		}
+	}
 	rec := Record{ID: id, Plan: p.Name, Steps: p.Names(), State: StateRunning}
 	if err := e.put(ctx, rec); err != nil {
 		return fmt.Errorf("plan %s: journal: %w", p.Name, err)

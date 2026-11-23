@@ -30,6 +30,9 @@ type Profile struct {
 type ProfileSpec struct {
 	// Comment is what the profile is for.
 	Comment string `json:"comment,omitempty"`
+	// Notes is a long text about the object: what it does, how it was set up, who to ask. Multi-line, at most
+	// MaxNotes bytes (ValidNotes).
+	Notes string `json:"notes,omitempty"`
 	// Config maps keys of the registry that are allowed in a profile to values.
 	Config map[string]string `json:"config,omitempty"`
 }
@@ -318,7 +321,7 @@ func buildRegistry() []ckey {
 		unset: func(s *JailSpec, _ string) { s.Resources.CPUSet = "" }})
 	size("resources.memory", "resources.memory", "Anonymous memory the jail may reserve in total (rctl swapuse): an allocation beyond it fails and nothing is killed; needs kern.racct.enable=1.", "2G", true, func(s *JailSpec) *string { return &s.Resources.Memory })
 	num("resources.pids", "resources.pids", "Processes the jail may have (rctl maxproc): fork fails beyond it; needs kern.racct.enable=1.", "500", 0, 4194304, true, func(s *JailSpec) *int { return &s.Resources.PIDs })
-	size("resources.disk", "resources.disk", "ZFS quota of the jail's container: its root, persistent datasets, volumes and snapshots together.", "20G", false, func(s *JailSpec) *string { return &s.Resources.Disk })
+	size("resources.disk", "resources.disk", "ZFS quota of the jail's container: its root, its delegated dataset and their snapshots together.", "20G", false, func(s *JailSpec) *string { return &s.Resources.Disk })
 	size("resources.disk_reservation", "resources.disk_reservation", "ZFS reservation of the jail's container.", "5G", false, func(s *JailSpec) *string { return &s.Resources.DiskReservation })
 	num("resources.states", "resources.states", "Pf states each rule of the jail's firewall may create, so that one jail cannot fill the host's state table; 0 is the host's default.", "20000", 0, 10000000, false, func(s *JailSpec) *int { return &s.Resources.States })
 	add(ckey{ConfigKey: ConfigKey{Name: "boot.autostart", Type: "bool", Description: "Start the jail when the host starts.", Example: "true", Profile: true, Path: "boot.autostart"},
@@ -397,9 +400,9 @@ func buildRegistry() []ckey {
 		},
 		unset: func(s *JailSpec, _ string) { s.Delegate = false }})
 	boolKey("update.packages", "update.packages", "Update the packages inside the jail (pkg or apk, from the host).", func(s *JailSpec) *bool { return &s.Update.Packages })
-	boolKey("update.os", "update.os", "Move the jail to a newer image generation (root swap).", func(s *JailSpec) *bool { return &s.Update.OS })
+	boolKey("update.os", "update.os", "Upgrade the FreeBSD base of the jail in place, inside its release: on the schedule of a managed jail (a global administrator turns that on), or on demand by a global administrator.", func(s *JailSpec) *bool { return &s.Update.OS })
 	add(ckey{ConfigKey: ConfigKey{Name: "update.reboot", Type: "enum", Values: []string{"manual", "auto"}, Profile: true, Path: "update.reboot",
-		Description: "Whether a jail restart that an update needs is applied automatically (auto) or left to you (manual, the default).", Example: "manual"},
+		Description: "Kept for compatibility: JailOps never stops or restarts a running jail for an update, so auto behaves as manual (the default) and the update record names the processes whose restart is pending.", Example: "manual"},
 		get: func(s *JailSpec, _ string) (string, bool) { return string(s.Update.Reboot), s.Update.Reboot != "" },
 		set: func(s *JailSpec, _, v string) error {
 			switch UpdateReboot(v) {

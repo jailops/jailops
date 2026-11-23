@@ -13,8 +13,7 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// RenameImage renames an image: its datasets on every pool (the generations go with them, and the roots of thin
-// jails, which are clones of a generation, follow by themselves), the image name ZFS properties hold, the references
+// RenameImage renames an image: its datasets on every pool (the generations go with them), the image name ZFS properties hold, the references
 // of the jails (spec.image, bundle.json and their container's property), the projects' image allow-lists and the
 // records of its nightly upgrade. Jails on it may run.
 func (s *Service) RenameImage(ctx context.Context, name string, o RenameOptions) (api.Operation, *api.RenameResult, error) {

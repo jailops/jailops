@@ -68,7 +68,7 @@ App postgresql: PostgreSQL
   Category:   database
   License:    PostgreSQL
   Homepage:   https://www.postgresql.org/
-  Image:      FreeBSD 15.1 or later, thin jail
+  Image:      FreeBSD 15.1 or later
   File:       postgresql.yaml (sha256:<sha256>)
   Source:     catalog
 

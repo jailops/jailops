@@ -262,7 +262,7 @@ func TestWatchedHostDirectoryRemountsForRunningJailsThatKeepRunning(t *testing.T
 	for _, c := range e.Run.Calls()[before:] {
 		args := strings.Join(c.Cmd.Args, " ")
 		umounted = umounted || c.Cmd.Name == "umount" && strings.Contains(args, "/srv/backups")
-		mounted = mounted || c.Cmd.Name == "mount" && strings.Contains(args, "-t nullfs "+boxDir+" ") && strings.HasSuffix(args, "/srv/backups")
+		mounted = mounted || c.Cmd.Name == "mount" && strings.Contains(args, "-t nullfs -o nosuid "+boxDir+" ") && strings.HasSuffix(args, "/srv/backups")
 	}
 	if !umounted || !mounted {
 		t.Fatalf("umount %v mount %v: %v", umounted, mounted, e.Run.Calls()[before:])

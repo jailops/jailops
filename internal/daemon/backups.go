@@ -157,7 +157,7 @@ func (a *backupAdapters) Jails(ctx context.Context) ([]hostbackup.JailRecord, er
 	out := make([]hostbackup.JailRecord, 0, len(js))
 	for _, j := range js {
 		rec := hostbackup.JailRecord{Name: j.Name, UUID: j.UUID, Project: j.Project, Labels: j.Labels, Spec: j.Spec,
-			Container: j.Layout.Container, Image: j.Image, VolumeIDs: j.VolumeIDs}
+			Container: j.Layout.Container, Image: j.Image, VolumeIDs: j.VolumeIDs, Unsupported: j.Unsupported}
 		for _, d := range j.Layout.Datasets {
 			hd := hostbackup.Dataset{Name: d.Name, Kind: d.Kind, Mountpoint: d.Mountpoint, Props: d.Props}
 			if d.Delegated {

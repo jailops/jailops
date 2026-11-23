@@ -76,12 +76,13 @@ updates:
   # tick: 1m
   # project_files_dir: /var/db/jailops/state/project-files   # provisioning files, one directory per project
 
-# What a new FreeBSD jail gets when its request and its profiles do not say (docs/shell.md): bash, installed into the
-# jail at its first start and started by `jailops shell` and the console, and a coloured bash prompt for every user of the
-# jail. An existing jail gets them only through `jailops jail shell-setup NAME`. Linux jails are left alone.
+# What a new FreeBSD jail gets when its request and its profiles do not say (docs/shell.md): the shell started by
+# `jailops shell` and the console, and a coloured prompt: every user's bash, and root's sh, where it applies through a
+# marked block at the end of /root/.shrc (read after ~/.profile). An existing jail gets them only through
+# `jailops jail shell-setup NAME`. Linux jails are left alone.
 jails:
-  # shell: bash          # bash, or sh (FreeBSD's own shell; nothing is installed)
-  # prompt: default      # default (user@jail [project/host]:dir), short (without the tag), none, or a bash PS1 text
+  # shell: sh            # sh (FreeBSD's own shell; nothing is installed), or bash (installed at the jail's first start)
+  # prompt: default      # default (user@jail [project/host]:dir), short (without the tag), none, or a PS1 text
   # prompt_color: 39     # 256-colour number of user@jail (39 light blue, 40 green, 196 red: one colour per kind of host)
   # max_states: 10000    # pf states each pass rule of a jail may create when its resources.states is 0 (0: no limit)
 
@@ -144,13 +145,6 @@ logging:
 devd:
   enable: true                      # the default is on for FreeBSD; false switches it off
   pipe: /var/run/devd.seqpacket.pipe
-
-# The paths of a thin jail that survive a switch to a newer image generation, each in its own dataset. Empty keeps the
-# built-in list (/etc, /usr/local, /var/db, /var/log, /var/mail, /var/spool, /home, /root). Setting it replaces the list.
-lifecycle:
-  persistent: []
-  # - {dataset: etc, path: /etc, class: system, merge: true}
-  # - {dataset: local, path: /usr/local, class: data, no_seed: false}   # no_seed: do not copy the image's files into the new dataset
 
 # Host-side backups (docs/backup-restore.md). Absent, every backup call answers "unsupported".
 # backup:

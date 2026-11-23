@@ -50,9 +50,9 @@ vault    default   0 B    5G          770:770   0700   vault (locked)    -
 vault2   default   0 B    unlimited   0:0       0755   vault2 (locked)   -
 
 $ jailops jail list
-NAME     STATE    IMAGE        GEN   ADDRESSES    EXPOSED   AUTOSTART   USED   AGE
-vault    locked   freebsd-15   g1    10.20.0.10   -         -           -      3h
-vault2   locked   freebsd-15   g1    10.20.0.11   -         -           -      3h
+NAME     STATE    OS        IMAGE        GEN   ADDRESSES    EXPOSED   AUTOSTART   USED   AGE
+vault    locked   freebsd   freebsd-15   g1    10.20.0.10   -         -           -      3h
+vault2   locked   freebsd   freebsd-15   g1    10.20.0.11   -         -           -      3h
 
 $ jailops jail start vault
 ! locked: jail "vault" is locked: the encrypted volume(s) vault wait for a passphrase
@@ -82,22 +82,22 @@ $ jailops jail list --state locked
 ! No jails in project main match.
 
 $ jailops jail list
-┌────────┬─────────┬──────────────────┬──────┬─────────────────┬─────────┬───────────┬──────┬─────┐
-│ NAME   │ STATE   │ IPV4             │ IPV6 │ IMAGE           │ EXPOSED │ AUTOSTART │ USED │ AGE │
-├────────┼─────────┼──────────────────┼──────┼─────────────────┼─────────┼───────────┼──────┼─────┤
-│ vault  │ running │ 10.20.0.10 (lan) │ -    │ freebsd-15 (g1) │ -       │ -         │ -    │ 3h  │
-│ vault2 │ stopped │ 10.20.0.11 (lan) │ -    │ freebsd-15 (g1) │ -       │ -         │ -    │ 3h  │
-└────────┴─────────┴──────────────────┴──────┴─────────────────┴─────────┴───────────┴──────┴─────┘
+┌────────┬─────────┬─────────┬──────────────────┬──────┬─────────────────┬─────────┬───────────┬──────┬─────┐
+│ NAME   │ STATE   │ OS      │ IPV4             │ IPV6 │ IMAGE           │ EXPOSED │ AUTOSTART │ USED │ AGE │
+├────────┼─────────┼─────────┼──────────────────┼──────┼─────────────────┼─────────┼───────────┼──────┼─────┤
+│ vault  │ running │ freebsd │ 10.20.0.10 (lan) │ -    │ freebsd-15 (g1) │ -       │ -         │ -    │ 3h  │
+│ vault2 │ stopped │ freebsd │ 10.20.0.11 (lan) │ -    │ freebsd-15 (g1) │ -       │ -         │ -    │ 3h  │
+└────────┴─────────┴─────────┴──────────────────┴──────┴─────────────────┴─────────┴───────────┴──────┴─────┘
 
 $ jailops volume lock vault
 volume/vault locked
 
 $ jailops jail list --state locked
-┌───────┬────────┬──────────────────┬──────┬─────────────────┬─────────┬───────────┬──────┬─────┐
-│ NAME  │ STATE  │ IPV4             │ IPV6 │ IMAGE           │ EXPOSED │ AUTOSTART │ USED │ AGE │
-├───────┼────────┼──────────────────┼──────┼─────────────────┼─────────┼───────────┼──────┼─────┤
-│ vault │ locked │ 10.20.0.10 (lan) │ -    │ freebsd-15 (g1) │ -       │ -         │ -    │ 3h  │
-└───────┴────────┴──────────────────┴──────┴─────────────────┴─────────┴───────────┴──────┴─────┘
+┌───────┬────────┬─────────┬──────────────────┬──────┬─────────────────┬─────────┬───────────┬──────┬─────┐
+│ NAME  │ STATE  │ OS      │ IPV4             │ IPV6 │ IMAGE           │ EXPOSED │ AUTOSTART │ USED │ AGE │
+├───────┼────────┼─────────┼──────────────────┼──────┼─────────────────┼─────────┼───────────┼──────┼─────┤
+│ vault │ locked │ freebsd │ 10.20.0.10 (lan) │ -    │ freebsd-15 (g1) │ -       │ -         │ -    │ 3h  │
+└───────┴────────┴─────────┴──────────────────┴──────┴─────────────────┴─────────┴───────────┴──────┴─────┘
 
 $ jailops volume unlock vault
 volume/vault unlocked

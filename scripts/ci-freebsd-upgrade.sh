@@ -172,6 +172,14 @@ check "expose web" $J expose web 80 --family 4 --project demo
 waitfor "web answers a command" 180 $J exec --project demo web -- true
 check "a file in the jail" $J exec --project demo web -- sh -c 'echo upgrade-marker > /root/marker'
 check "a file in the volume" $J exec --project demo web -- sh -c 'echo volume-marker > /srv/data/marker'
+# docs/upgrade.md: a jail of the root layout of 0.9.2 and before that this release does not support is converted with
+# the released version before the upgrade (the value below is the identifier that release prints for that layout)
+for j in web db; do
+	if $J jail show "$j" --project demo -o json | grep -q '"layout": "thin"'; then
+		check "convert $j to its own root before the upgrade" $J jail convert "$j" --layout thick --project demo
+	fi
+done
+waitfor "web answers a command after its conversion" 180 $J exec --project demo web -- true
 $J list --project demo -c name,state,ipv4,autostart > "$work/list.before"
 cat "$work/list.before"
 jls -h name | grep '^demo_' | sort > "$work/jls.before"

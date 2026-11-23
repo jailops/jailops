@@ -55,7 +55,7 @@ func (s *Service) PlanCopyFrom(ctx context.Context, src, dst, newUUID, stamp, sn
 	if newUUID == "" {
 		return nil, res, api.Errorf(api.CodeInvalid, "the proposer must supply the copy's uuid")
 	}
-	st, err := s.ready(ctx, src)
+	st, err := s.own(ctx, src)
 	if err != nil {
 		return nil, res, err
 	}
@@ -85,8 +85,8 @@ func (s *Service) PlanCopyFrom(ctx context.Context, src, dst, newUUID, stamp, sn
 		from, to string
 		props    map[string]string
 	}
-	// What the copy's datasets are told is explicit: a plain send carries no properties, so the kind, the layout, the
-	// image, the class and the path of each dataset are read from the source and set on the copy.
+	// What the copy's datasets are told is explicit: a plain send carries no properties, so the kind and the image of
+	// each dataset are read from the source and set on the copy.
 	with := func(ds string, over map[string]string) map[string]string {
 		m := s.copyProps(ctx, ds)
 		m[PropID], m[PropName], m[PropProject] = newUUID, dstName, dstProject
@@ -97,9 +97,6 @@ func (s *Service) PlanCopyFrom(ctx context.Context, src, dst, newUUID, stamp, sn
 	}
 	items := []item{{st.Container, dc, with(st.Container, map[string]string{"mountpoint": dstMP, PropComplete: "off"})}}
 	items = append(items, item{st.Root, dc + "/root", with(st.Root, map[string]string{"mountpoint": dstRoot})})
-	for _, d := range st.Persist {
-		items = append(items, item{d.DS, dc + "/" + strings.TrimPrefix(d.DS, st.Container+"/"), with(d.DS, map[string]string{"mountpoint": dstRoot + d.Path})})
-	}
 	if st.Delegated != "" {
 		items = append(items, item{st.Delegated, s.Cfg.at(dst).delegatedDS(), with(st.Delegated, map[string]string{"mountpoint": "none"})})
 	}
@@ -205,8 +202,8 @@ func checkJSON(v any) error {
 }
 
 // copyPropNames are the properties of a jail's dataset that a copy keeps: what JailOps reads back (managed, kind,
-// layout, image, generation, class, merge, path) and the limits set on it.
-var copyPropNames = []string{PropManaged, PropKind, PropLayout, PropImage, PropGen, PropManifest, PropClass, PropMerge, PropPath,
+// image, generation, the installed release) and the limits set on it.
+var copyPropNames = []string{PropManaged, PropKind, PropImage, PropGen, PropManifest, PropFreeBSDVersion,
 	"quota", "refquota", "reservation", "readonly", "compression", "recordsize", "atime"}
 
 func (s *Service) copyProps(ctx context.Context, ds string) map[string]string {

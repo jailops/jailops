@@ -67,11 +67,10 @@ describe('ImageCreateDialog', () => {
     expect(w.get('[data-test="image-arch"]').attributes('readonly')).toBeDefined()
     expect((w.get('[data-test="image-arch"]').element as HTMLInputElement).value).toBe('amd64')
     expect((w.get('[data-test="image-build"]').element as HTMLInputElement).checked).toBe(true)
-    // the nightly upgrade is the owner's choice: off until the box is ticked, then at 03:00, with the packages
+    // the nightly upgrade is the owner's choice: off until the box is ticked, then at 03:00
     expect((w.get('[data-test="image-auto"]').element as HTMLInputElement).checked).toBe(false)
     await w.get('[data-test="image-auto"]').setValue(true)
     expect((w.get('[data-test="image-at"]').element as HTMLInputElement).value).toBe('03:00')
-    expect((w.get('[data-test="image-packages"]').element as HTMLInputElement).checked).toBe(true)
 
     // a name that exists, a name against the rule, a release older than 15.1
     await w.get('[data-test="image-name"]').setValue('freebsd-15-1')
@@ -184,10 +183,9 @@ describe('ImageCreateDialog', () => {
     expect(w.get('[data-test="image-create-why"]').text()).toContain('Time (host time): Required.')
     expect(phase(w)).toBe('idle')
     await w.get('[data-test="image-at"]').setValue('04:30')
-    await w.get('[data-test="image-packages"]').setValue(false)
     await w.get('form').trigger('submit')
     await settle(() => phase(w) === 'done')
-    expect((sent.find((r) => r.method === 'POST' && r.path === '/images')?.body as { spec: unknown }).spec).toMatchObject({ auto_upgrade: { enabled: true, at: '04:30', packages: false } })
+    expect((sent.find((r) => r.method === 'POST' && r.path === '/images')?.body as { spec: unknown }).spec).toMatchObject({ auto_upgrade: { enabled: true, at: '04:30' } })
   })
 
   it('leaves the nightly upgrade out when the box is cleared', async () => {

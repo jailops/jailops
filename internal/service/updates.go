@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -208,7 +209,7 @@ func (s *Service) runInJail(ctx context.Context, key string, timeout time.Durati
 }
 
 // pkgExec runs a package command for a running jail and returns its output. A Linux jail runs apk inside itself. A
-// FreeBSD jail has no package tool of its own (a thin jail is a pkgbase userland without pkg), so the host's pkg runs
+// FreeBSD jail need not have a package tool of its own (a pkgbase userland without pkg), so the host's pkg runs
 // with -j: it enters the jail first, so what it writes and the scripts it runs stay in the jail, and it reads the
 // repositories the jail is configured for. argv is the command as it would be typed inside the jail ("pkg",
 // "upgrade", "-y") and -j JAIL is put after "pkg".
@@ -232,6 +233,15 @@ const pkgUpgradeChunk = 50
 // everything with apk. For a FreeBSD jail the host names the installed packages that are not part of the base
 // system: the base (FreeBSD-*) comes from the image generation and only moves with it, and a bare `pkg upgrade` on
 // the host would also take the base packages from the host's FreeBSD-base repository into the jail's root.
+// pkgUpgradeCheck is pkg upgrade -n of the ports packages of a FreeBSD jail; with noUpdate the catalogue is not
+// refreshed (-U): what the jail has is read, nothing is written.
+func (s *Service) pkgUpgradeCheck(ctx context.Context, key string, noUpdate bool) ([]byte, error) {
+	if !noUpdate {
+		return s.pkgUpgrade(ctx, key, false, 10*time.Minute, false)
+	}
+	return s.pkgUpgradeFlags(ctx, key, 10*time.Minute, "-n", "-U")
+}
+
 func (s *Service) pkgUpgrade(ctx context.Context, key string, linux bool, timeout time.Duration, apply bool) ([]byte, error) {
 	if linux {
 		if apply {
@@ -239,24 +249,24 @@ func (s *Service) pkgUpgrade(ctx context.Context, key string, linux bool, timeou
 		}
 		return s.pkgExec(ctx, key, true, timeout, "apk", "upgrade", "--simulate", "--no-interactive")
 	}
-	out, err := s.pkgExec(ctx, key, false, timeout, "pkg", "query", "%n")
-	if err != nil {
-		return out, err
-	}
-	var names []string
-	for _, n := range strings.Fields(string(out)) {
-		if !strings.HasPrefix(n, "FreeBSD-") && n != "pkg" {
-			names = append(names, n)
-		}
-	}
 	flag := "-n"
 	if apply {
 		flag = "-y"
 	}
+	return s.pkgUpgradeFlags(ctx, key, timeout, flag)
+}
+
+// pkgUpgradeFlags runs pkg upgrade with the flags over the ports packages of a FreeBSD jail (every installed package but
+// the base ones and pkg itself), in chunks.
+func (s *Service) pkgUpgradeFlags(ctx context.Context, key string, timeout time.Duration, flags ...string) ([]byte, error) {
+	names, out, err := s.portsPackages(ctx, key)
+	if err != nil {
+		return out, err
+	}
 	var all []byte
 	for len(names) > 0 {
 		n := min(len(names), pkgUpgradeChunk)
-		o, err := s.pkgExec(ctx, key, false, timeout, append([]string{"pkg", "upgrade", flag}, names[:n]...)...)
+		o, err := s.pkgExec(ctx, key, false, timeout, append(append([]string{"pkg", "upgrade"}, flags...), names[:n]...)...)
 		all = append(all, o...)
 		if err != nil {
 			return all, err
@@ -264,6 +274,27 @@ func (s *Service) pkgUpgrade(ctx context.Context, key string, linux bool, timeou
 		names = names[n:]
 	}
 	return all, nil
+}
+
+// portsPackages names the ports packages installed in a running FreeBSD jail: every package in its package database
+// but the base ones (FreeBSD-*) and pkg itself. It reads the database only: no catalogue is fetched.
+func (s *Service) portsPackages(ctx context.Context, key string) ([]string, []byte, error) {
+	out, err := s.pkgExec(ctx, key, false, 2*time.Minute, "pkg", "query", "%n")
+	if err != nil {
+		return nil, out, err
+	}
+	return portsNames(out), out, nil
+}
+
+// portsNames picks the ports packages out of `pkg query %n`.
+func portsNames(out []byte) []string {
+	var names []string
+	for _, n := range strings.Fields(string(out)) {
+		if !strings.HasPrefix(n, "FreeBSD-") && n != "pkg" {
+			names = append(names, n)
+		}
+	}
+	return names
 }
 
 func (s *Service) jailRunning(ctx context.Context, key string) bool {
@@ -276,7 +307,10 @@ func (s *Service) jailRunning(ctx context.Context, key string) bool {
 
 // checkJail asks one jail what could be updated. It changes the package
 // catalog inside the jail (pkg update, apk update) and nothing else.
-func (s *Service) checkJail(ctx context.Context, key string) api.UpdateReport {
+//
+// checkJail checks one jail for updates. locked says that the caller holds the jail's lock (the scheduled run); a check
+// on request takes it for the base part of a jail, or leaves that part out while an operation has the jail.
+func (s *Service) checkJail(ctx context.Context, key string, locked bool) api.UpdateReport {
 	j, err := s.jailSnapshot(key)
 	rep := api.UpdateReport{Jail: j.Metadata.Name, Project: j.Metadata.Project, Mode: j.Spec.Update.Mode, CheckedAt: s.now().UTC()}
 	if err != nil {
@@ -284,6 +318,7 @@ func (s *Service) checkJail(ctx context.Context, key string) api.UpdateReport {
 		return rep
 	}
 	var errs []string
+	var held error // a package operation that held the jail when the check asked
 	if !s.managesPackages(j) {
 		// nothing to check: the jail updates its own packages
 	} else if s.jailRunning(ctx, key) {
@@ -293,16 +328,22 @@ func (s *Service) checkJail(ctx context.Context, key string) api.UpdateReport {
 			upd = []string{"apk", "update", "--no-interactive"}
 		}
 		release := func() {}
-		var held error
 		if !alpine {
 			release, held = s.holdJailFor(key, "a package update", false)
 		}
 		if held != nil {
 			release = func() {} // a refused hold gives no release function
 		}
-		defer release()
+		var none bool // a FreeBSD jail without ports packages: there is nothing to check and no catalogue to fetch
+		if held == nil && !alpine {
+			if names, _, err := s.portsPackages(ctx, key); err == nil && len(names) == 0 {
+				none = true
+			}
+		}
 		if held != nil {
 			errs = append(errs, "package catalog: "+held.Error())
+		} else if none {
+			// no ports packages: the ports catalogue (tens of MiB in the root) is not fetched for nothing
 		} else if _, err := s.pkgExec(ctx, key, alpine, 10*time.Minute, upd...); err != nil {
 			errs = append(errs, "package catalog: "+err.Error())
 		} else if out, err := s.pkgUpgrade(ctx, key, alpine, 10*time.Minute, false); err != nil {
@@ -310,40 +351,60 @@ func (s *Service) checkJail(ctx context.Context, key string) api.UpdateReport {
 		} else {
 			rep.Packages = parsePackageUpdates(out, alpine)
 		}
+		// the hold ends with the package check: the base check below does not keep an upgrade from the jail
+		release()
 	} else {
 		errs = append(errs, "the jail is stopped; its packages cannot be checked")
 	}
-	if os, err := s.osUpdate(ctx, key, j); err != nil {
-		errs = append(errs, "image: "+err.Error())
-	} else {
-		rep.OS = os
+	switch {
+	case s.upgradesInPlace(j) && held != nil:
+		// a package operation holds the jail (an upgrade among them): the base is not checked under it
+		errs = append(errs, "base packages: not checked while "+tailText(held.Error(), 200))
+	case s.upgradesInPlace(j) && !locked:
+		// the dry run of the base reads the root (and mounts a stopped one): it does not run beside an operation on
+		// the jail, and it never waits for one (the nightly upgrade is not kept from the jail by a check)
+		if unlock, err := s.locks.tryLock("update check of "+key, jailLock(key)); err != nil {
+			errs = append(errs, "base packages: not checked: "+tailText(err.Error(), 200))
+		} else {
+			s.checkBase(ctx, key, j, &rep, &errs)
+			unlock()
+		}
+	default:
+		s.checkBase(ctx, key, j, &rep, &errs)
 	}
 	rep.Available = len(rep.Packages) > 0 || rep.OS != nil
 	rep.Error = strings.Join(errs, "; ")
 	return rep
 }
 
-// osUpdate reports a newer generation of the jail's image (thin jails).
+// checkBase is the OS part of an update check: the newer base packages of a FreeBSD jail.
+func (s *Service) checkBase(ctx context.Context, key string, j api.Jail, rep *api.UpdateReport, errs *[]string) {
+	if os, err := s.osUpdate(ctx, key, j); err != nil {
+		*errs = append(*errs, "base packages: "+err.Error())
+	} else {
+		rep.OS = os
+	}
+}
+
+// osUpdate reports the base packages pkg finds newer for a running FreeBSD jail in the repository of its installed
+// release (the read-only check of jail upgrade --dry-run, on a copy of the jail's package database). A stopped jail is
+// not checked.
 func (s *Service) osUpdate(ctx context.Context, key string, j api.Jail) (*api.OSUpdate, error) {
-	if s.life == nil || j.Spec.Layout == api.LayoutThick {
+	if s.life == nil || s.jailIsLinux(j) {
 		return nil, nil
 	}
-	lay, err := s.life.Layout(ctx, key)
-	if err != nil || lay.Layout != api.LayoutThin {
+	if !s.jailRunning(ctx, key) {
 		return nil, nil
 	}
-	si, ok := s.storageOfJail(key)
-	if !ok {
-		return nil, nil
-	}
-	target, err := s.life.Images.Resolve(ctx, si.Root, j.Spec.Image)
+	up := api.JailUpgrade{DryRun: true, NoPackages: true}
+	_, res, err := s.life.PlanUpgrade(ctx, key, lifecycle.UpgradeRequest{JailUpgrade: up, Stamp: s.stamp()})
 	if err != nil {
 		return nil, err
 	}
-	if target.Number <= lay.Generation {
+	if res == nil || len(res.BasePending) == 0 {
 		return nil, nil
 	}
-	return &api.OSUpdate{From: genRef(lay.Image, lay.Generation), To: target.Name}, nil
+	return &api.OSUpdate{From: res.Installed, To: fmt.Sprintf("%d newer base packages (jailops jail upgrade %s)", len(res.BasePending), j.Metadata.Name)}, nil
 }
 
 // updateTargets resolves the jails of a request to keys, in the request's
@@ -394,7 +455,7 @@ func (s *Service) CheckUpdates(ctx context.Context, req api.UpdateCheckRequest) 
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			out := make([]api.UpdateReport, 0, len(keys))
 			for i, k := range keys {
-				rep := s.checkJail(ctx, k)
+				rep := s.checkJail(ctx, k, false)
 				s.upd.setReport(k, rep)
 				out = append(out, rep)
 				h.Progress((i + 1) * 100 / len(keys))
@@ -489,8 +550,8 @@ func wanted(j api.Jail, w applyWhat, scheduled bool) applyWhat {
 // The caller holds the jail and anchor locks.
 func (s *Service) applyJail(ctx context.Context, h *OpHandle, key string, w applyWhat, scheduled bool) []api.UpdateRecord {
 	j, err := s.jailSnapshot(key)
-	if err != nil {
-		return nil
+	if err != nil || s.hasUnsupportedLayout(key) {
+		return nil // a jail with an unsupported root layout is not updated (refuseUnsupported)
 	}
 	w = wanted(j, w, scheduled)
 	project, name := j.Metadata.Project, j.Metadata.Name
@@ -509,34 +570,39 @@ func (s *Service) applyJail(ctx context.Context, h *OpHandle, key string, w appl
 			s.emitIn(ctx, project, "update.failed", "/api/v1/jails/"+name+"/updates")
 		}
 	}
-	// OS first: a new root first, then the packages on top of it.
-	if w.os {
-		os, err := s.osUpdate(ctx, key, j)
-		if err != nil {
-			// the image of the jail cannot be read: the plan stops here, the packages are not updated on a root that may be old
-			finish(api.UpdateRecord{Kind: api.UpdateKindOS, StartedAt: s.now().UTC(), Result: api.UpdateFailure, Error: err.Error(),
-				Note: "the image of the jail could not be checked, so nothing was updated"})
+	// OS first, then the packages.
+	if w.os && s.upgradesInPlace(j) && !scheduled && !isGlobalAdmin(ActorFrom(ctx)) {
+		// on demand, a jail's base is upgraded in place by a global administrator (as `jail upgrade`); on its schedule,
+		// by the jail's own update policy (update.mode managed with update.os)
+		if !w.packages {
+			finish(api.UpdateRecord{Kind: api.UpdateKindOS, StartedAt: s.now().UTC(), Result: api.UpdateFailure,
+				Error: "the base of a jail is upgraded on demand by a global administrator; set update.mode=managed with update.os=true to have it upgraded on the jail's schedule"})
 			return recs
 		}
-		if os != nil {
-			rec := api.UpdateRecord{Kind: api.UpdateKindOS, StartedAt: s.now().UTC(), From: os.From, To: os.To}
-			rec.Snapshot = "jo-pre-upgrade-" + s.stamp()
-			req := lifecycle.UpgradeRequest{JailUpgrade: api.JailUpgrade{Generation: os.To}, Stamp: s.stamp()}
-			if _, err := s.upgradeBody(ctx, h, project, name, key, req.JailUpgrade, req); err != nil {
-				// The root-swap plan undoes itself when the start or the health check fails.
-				rec.Error = err.Error()
-				rec.Result, rec.RootRolledBack, rec.Note = upgradeOutcome(err, os.From)
-			} else {
-				rec.Result = api.UpdateSuccess
-				if j2, e := s.jailSnapshot(key); e == nil {
-					j = j2
-				}
-			}
+		w.os = false
+	}
+	if w.os && s.upgradesInPlace(j) {
+		// a jail is upgraded in place when pkg says a base package is newer (its ports packages are the package
+		// update's); nothing newer is no stop, no snapshot and no record
+		rec := api.UpdateRecord{Kind: api.UpdateKindOS, StartedAt: s.now().UTC()}
+		up := api.JailUpgrade{NoPackages: true}
+		_, res, err := s.upgradeRun(ctx, h, project, name, key, up, lifecycle.UpgradeRequest{JailUpgrade: up, Stamp: s.stamp()})
+		switch {
+		case err != nil && (res == nil || !res.Changed):
+			rec.Result, rec.Error, rec.Note = api.UpdateFailure, err.Error(), "the base packages of the jail could not be checked, so nothing was updated"
 			finish(rec)
-			if rec.Result != api.UpdateSuccess {
-				return recs
-			}
+			return recs
+		case err != nil:
+			rec.From, rec.To, rec.Snapshot = res.From, res.To, res.Snapshot
+			rec.Error = err.Error()
+			rec.Result, rec.Note = upgradeOutcome(err, res.From)
+			finish(rec)
+			return recs
+		case res != nil && res.Changed:
+			rec.From, rec.To, rec.Snapshot, rec.Result = res.From, res.To, res.Snapshot, api.UpdateSuccess
+			finish(rec)
 		}
+		w.os = false
 	}
 	if w.packages {
 		finish(s.applyPackages(ctx, key, j, scheduled))
@@ -565,6 +631,12 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 			return rec
 		}
 		defer release()
+	}
+	if !alpine {
+		if names, _, err := s.portsPackages(ctx, key); err == nil && len(names) == 0 {
+			rec.Result, rec.Note = api.UpdateSuccess, "no ports packages: nothing to update"
+			return rec
+		}
 	}
 	// The packages that will change, from a dry run.
 	upd := []string{"pkg", "update", "-q"}
@@ -604,16 +676,12 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 		return rec
 	}
 	rec.Result = api.UpdateSuccess
-	if j.Spec.Update.Reboot == api.RebootAuto {
-		if err := s.restartKey(ctx, key); err != nil {
-			rec.Result, rec.Error = api.UpdateFailure, "the automatic restart failed: "+err.Error()
-			rec.Note = "the packages are updated and the jail does not run: start it after looking at the cause, or restore the snapshot with `jailops jail rollback " +
-				j.Metadata.Name + " --scope all --snapshot " + snap.Name + "`, which discards what the jail wrote since"
-		} else {
-			rec.Note = "the jail was restarted (update.reboot=auto)"
-		}
+	// JailOps never stops or restarts a running jail for an update, whatever update.reboot says (auto reports, as
+	// manual does): the processes that still run replaced files are named, and the administrator restarts them.
+	if pending := s.life.RestartPending(ctx, key); len(pending) > 0 {
+		rec.Note = "restart pending: " + strings.Join(pending, ", ") + "; JailOps does not restart the jail: restart these services (or the jail) when you choose"
 	} else {
-		rec.Note = "restart the jail to run the updated programs (update.reboot=manual)"
+		rec.Note = "no process runs a replaced file; JailOps does not restart the jail"
 	}
 	return rec
 }
@@ -630,13 +698,6 @@ func (s *Service) healthCheck(ctx context.Context, key string, j api.Jail) error
 		return fmt.Errorf("health check %q failed: %v", strings.Join(hc, " "), strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-func (s *Service) restartKey(ctx context.Context, key string) error {
-	if err := s.stopJail(ctx, key); err != nil {
-		return err
-	}
-	return s.life.StartJail(ctx, key)
 }
 
 // ---- schedule ----
@@ -707,9 +768,9 @@ func (s *Service) runUpdateSchedules(ctx context.Context, start time.Time) {
 
 // runScheduled checks a jail and, for managed jails, applies what its policy
 // allows. The locks are held; it runs as an operation so that a crash during
-// a root swap is recovered like any other.
+// an update is recovered like any other.
 func (s *Service) runScheduled(ctx context.Context, key string, j api.Jail, apply bool) {
-	rep := s.checkJail(ctx, key)
+	rep := s.checkJail(ctx, key, true)
 	s.upd.setReport(key, rep)
 	if !apply || !rep.Available {
 		if rep.Available {
@@ -726,7 +787,9 @@ func (s *Service) runScheduled(ctx context.Context, key string, j api.Jail, appl
 		s.log.Warn("scheduled update could not start", "jail", key, "err", err)
 		return
 	}
-	if _, err := s.WaitOperation(ctx, op.ID, 4*time.Hour); err != nil {
+	// the caller releases the jail's locks when this returns, and applyJail works under them: wait for the end, however
+	// long (the jails' schedules run one after the other meanwhile)
+	if _, err := s.WaitOperation(ctx, op.ID, time.Duration(math.MaxInt64)); err != nil {
 		s.log.Warn("scheduled update", "jail", key, "err", err)
 	}
 }

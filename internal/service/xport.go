@@ -70,16 +70,7 @@ func (s *Service) ExportJail(ctx context.Context, name string, req api.JailExpor
 		gen.Manifest = "-"
 	}
 	m := api.ExportManifest{Created: s.now().UTC(), Name: j.Metadata.Name, Project: proj, UUID: j.Metadata.UUID, Labels: j.Metadata.Labels,
-		Layout: j.Spec.Layout, OS: j.Spec.OS, Warnings: plan.Warnings}
-	m.Image = api.ExportImage{Name: lay.Image, Generation: lay.Generation, Manifest: lay.Manifest}
-	if im, err := s.imgKind.get(lay.Image); err == nil {
-		m.Image.Release = im.Spec.Release
-	}
-	if si, ok := s.storageOfJail(key); ok && lay.Image != "" && lay.Generation > 0 {
-		if g, err := s.life.Images.Resolve(ctx, si.Root, genRef(lay.Image, lay.Generation)); err == nil {
-			m.Image.FreeBSDVersion = g.FreeBSDVersion
-		}
-	}
+		OS: j.Spec.OS, Warnings: plan.Warnings}
 	var refs []string
 	for k, v := range s.effective(j).Env {
 		if isSealed(v) {
@@ -211,7 +202,14 @@ func (s *Service) checkImport(ctx context.Context, p project, m api.ExportManife
 	}
 	chg("the new jail gets a new uuid and does not start at boot")
 	spec := jsonCopy(m.Bundle.Spec)
-	spec.Layout, spec.OS = m.Layout, m.OS
+	spec.OS = m.OS
+	root := false
+	for _, pt := range m.Parts {
+		root = root || pt.Kind == api.PartRoot
+	}
+	if !root {
+		fail("the file holds no root: it is the export of a jail with a root layout of JailOps 0.9.2 and before, which this release does not import; import it on that earlier release and convert it there (jailops jail convert NAME --layout thick)")
+	}
 	spec.Boot.Autostart = false
 	if spec.Hostname == m.Name && name != m.Name {
 		spec.Hostname = ""
@@ -262,33 +260,8 @@ func (s *Service) checkImport(ctx context.Context, p project, m api.ExportManife
 	} else {
 		_ = st
 	}
-	// the image of a thin jail has to be here; a thick jail carries its root
-	w.image = api.ImageGeneration{Number: m.Image.Generation, Name: genRef(m.Image.Name, m.Image.Generation), Manifest: m.Image.Manifest}
-	if m.Layout == api.LayoutThin {
-		spec.Image = m.Image.Name
-		switch im, _, err := s.imageFor(spec); {
-		case err != nil:
-			miss("image %s", m.Image.Name)
-			fail("the jail's root is made from the image %s, which this host does not have: jailops image create %s --release %s, then jailops image build %s", m.Image.Name, m.Image.Name, m.Image.Release, m.Image.Name)
-		case m.Image.Release != "" && im.Spec.Release != "" && im.Spec.Release != m.Image.Release:
-			fail("image %s here is %s, the jail was exported from %s: move it to the newer release with jailops jail upgrade --image after the import, or import it on a host of the same release", m.Image.Name, im.Spec.Release, m.Image.Release)
-		default:
-			if si, ok := s.storage(spec.Storage); ok && s.life != nil {
-				g, gerr := s.life.Images.Resolve(ctx, si.Root, m.Image.Name)
-				if gerr != nil {
-					miss("a generation of image %s", m.Image.Name)
-					fail("image %s has no generation on storage %s: jailops image build %s", m.Image.Name, spec.Storage, m.Image.Name)
-				} else {
-					w.image = g
-					if g.Manifest != m.Image.Manifest || g.Number != m.Image.Generation {
-						chg("the root is made from %s here (%s), the exported jail ran on generation g%d (%s): the data is the same, the base system is this host's", g.Name, firstNonEmptyStr(g.FreeBSDVersion, "FreeBSD version not recorded"), m.Image.Generation, firstNonEmptyStr(m.Image.FreeBSDVersion, "FreeBSD version not recorded"))
-					}
-				}
-			}
-		}
-	} else if _, err := s.imgKind.get(m.Image.Name); err != nil {
-		chg("image %s is not on this host: the thick jail carries its root, and `jail upgrade` needs the image", m.Image.Name)
-	}
+	// the jail carries its root: the image is where it came from
+	w.image = api.ImageGeneration{Name: m.Bundle.ImageGeneration, Manifest: m.Bundle.ImageManifest}
 	// the objects the jail refers to
 	for i, n := range m.Bundle.PolicyNames {
 		if hp, err := s.polKind.p(proj).get(n); err != nil {

@@ -69,16 +69,6 @@ func (j *JailClient) Provision(ctx context.Context, name string, again bool) (*O
 	return op, err
 }
 
-// RepairPackages brings the base package records of a thin FreeBSD jail in step with the image generation of its root
-// (the pass every start makes). The jail must be stopped; only its package database changes.
-func (j *JailClient) RepairPackages(ctx context.Context, name string) (*Operation[api.RepairPackagesResult], error) {
-	if err := j.c.need("jail_repair_packages"); err != nil {
-		return nil, err
-	}
-	op, _, err := sendOp[api.RepairPackagesResult](ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/repair-packages", body: api.RepairPackagesRequest{}}, nil)
-	return op, err
-}
-
 // ShellSetup gives a FreeBSD jail the shell and prompt a new jail gets (docs/shell.md): bash installed when it is
 // the jail's shell and missing, and the prompt written. The jail must run.
 func (j *JailClient) ShellSetup(ctx context.Context, name string) (*Operation[api.ShellSetupResult], error) {

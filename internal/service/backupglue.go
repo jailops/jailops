@@ -153,6 +153,8 @@ type BackupJail struct {
 	Image   api.ImageGeneration
 	// VolumeIDs maps the name of each volume of the jail (its profiles' included) that has a dataset to its UUID.
 	VolumeIDs map[string]string
+	// Unsupported says why the jail is not backed up (the root layout of JailOps 0.9.2 and before): its backup fails with it.
+	Unsupported string
 }
 
 // BackupJails lists the jails of this host with their dataset layout.
@@ -173,6 +175,12 @@ func (s *Service) BackupJails(ctx context.Context) ([]BackupJail, error) {
 			continue
 		}
 		bj := BackupJail{Key: k, Name: j.Metadata.Name, UUID: j.Metadata.UUID, Project: j.Metadata.Project, Labels: j.Metadata.Labels, Spec: j.Spec, Layout: lay}
+		if lay.UnsupportedLayout {
+			// listed, so that its backup fails visibly (the run, backup-failed, doctor) instead of stopping in silence
+			bj.Unsupported = "jail " + j.Metadata.Name + " has a root layout this release does not back up (made by JailOps 0.9.2 or earlier): create a new jail and move its data over, or convert it with that earlier release (jailops jail convert NAME --layout thick) before upgrading the host"
+			out = append(out, bj)
+			continue
+		}
 		for _, v := range s.effective(j).Volumes {
 			if o, err := s.volKind.p(j.Metadata.Project).get(v.Name); err == nil && !o.Spec.IsHostDir() {
 				if bj.VolumeIDs == nil {
@@ -408,7 +416,7 @@ func (s *Service) BackupTargets() ([]api.BackupTarget, error) {
 
 // RestoreState gathers the facts of this host for a restore into a project.
 func (s *Service) RestoreState(ctx context.Context, project string) (backup.HostState, error) {
-	st := backup.HostState{Generations: map[string]string{}, Networks: map[string]api.NetworkSpec{}, Policies: map[string]api.FirewallPolicySpec{},
+	st := backup.HostState{Networks: map[string]api.NetworkSpec{}, Policies: map[string]api.FirewallPolicySpec{},
 		AddressSets: map[string]api.AddressSetSpec{}, Jails: map[string]backup.JailRef{}, Secrets: map[string]bool{}}
 	nets, err := s.netKind.list()
 	if err != nil {
@@ -558,6 +566,7 @@ func (s *Service) RestoreAdopt(ctx context.Context, key string, j api.Jail, gen 
 	s.mu.Lock()
 	if e := s.jails[key]; e != nil {
 		nj.Status.ImageGeneration = e.jail.Status.ImageGeneration
+		nj.Status.FreeBSDVersion = e.jail.Status.FreeBSDVersion
 		e.jail = nj
 	}
 	s.mu.Unlock()

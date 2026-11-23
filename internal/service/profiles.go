@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
@@ -245,6 +246,26 @@ func (s *Service) readmitProfile(ctx context.Context, proj, name string, spec ap
 		if len(eff.Devfs) > 0 && len(j.Spec.Devfs) == 0 && !ActorFrom(ctx).Perm.Satisfies(api.PermAdmin) {
 			return api.Errorf(api.CodeForbidden, "jail %q would gain device nodes, which needs the admin role", who)
 		}
+		// bpf and dri reach past the project (the jail's link frames, the host's shared GPU): a profile that newly grants
+		// one to a jail is a global administrator's to apply, as it is on the jail itself.
+		if added := addedSensitiveDevices(s.effective(j).Devfs, eff.Devfs); len(added) > 0 && !isGlobalAdmin(ActorFrom(ctx)) {
+			return api.Errorf(api.CodeForbidden, "jail %q would gain the %s device, which a global administrator only grants", who, strings.Join(added, ", ")).
+				WithHint("bpf can read the frames of the jail's link and dri is the host's shared GPU: both reach past the project")
+		}
+		// a policy with a raw PF fragment that the profile newly gives the jail is a global administrator's to attach,
+		// as it is on the jail itself (admit)
+		if !isGlobalAdmin(ActorFrom(ctx)) {
+			had := s.effective(j).Firewall.Policies
+			for _, n := range eff.Firewall.Policies {
+				if slices.Contains(had, n) {
+					continue
+				}
+				if o, perr := s.polKind.p(j.Metadata.Project).get(n); perr == nil && o.Spec.Raw != "" {
+					return api.Errorf(api.CodeForbidden, "jail %q would get firewall policy %q, which carries a raw PF fragment: attaching it is a global administrator's", who, n).
+						WithHint("raw pf text is the host administrator's; a policy of plain rules does not need this")
+				}
+			}
+		}
 		// the volumes the profile gives the jail pass what a volume attached to the jail itself passes
 		was := s.effective(j).Volumes
 		if err := s.hostDirAdmission(ctx, j.Metadata.Project, eff.Volumes, was); err != nil {
@@ -465,8 +486,13 @@ func (s *Service) ConfigureJail(ctx context.Context, name string, ch api.ConfigC
 	if err != nil {
 		return api.Operation{}, notFound("jail", name)
 	}
+	had := scheduledBaseUpgrade(pre.Spec)
 	if _, err := api.ApplyChange(&pre.Spec, ch); err != nil {
 		return api.Operation{}, err
+	}
+	// refused before the operation, as admit refuses it in the update path
+	if scheduledBaseUpgrade(pre.Spec) && !had && !isGlobalAdmin(ActorFrom(ctx)) {
+		return api.Operation{}, errScheduledBaseUpgrade()
 	}
 	nlocks := s.netLocksEff(p.Meta.Name, pre.Spec)
 	return s.Submit(ctx, OpSpec{

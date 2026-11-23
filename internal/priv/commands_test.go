@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func TestCommandRulesAreDocumentedAndFixed(t *testing.T) {
 			t.Errorf("rule %s: timeout %d", r.Name, r.MaxTimeoutSeconds)
 		}
 	}
-	for _, n := range []string{"pkg", "etcupdate", "sysctl", "kldstat", "kldload", "pfctl", "uname", "rctl"} {
+	for _, n := range []string{"pkg", "sysctl", "kldstat", "kldload", "pfctl", "uname", "rctl"} {
 		if !seen[n] {
 			t.Errorf("no rule for %s", n)
 		}
@@ -70,6 +71,9 @@ func TestExtendedCommandRules(t *testing.T) {
 	ok(ctx, "/sbin/sysctl", "sysctl", "-n", "net.inet6.icmp6.nd6_onlink_ns_rfc4861")
 	bad(adm, api.CodeForbidden, "sysctl", "net.inet6.icmp6.nd6_onlink_ns_rfc4861=1")
 	bad(adm, api.CodeForbidden, "sysctl", "-w", "net.inet6.icmp6.nd6_onlink_ns_rfc4861=1")
+	ok(ctx, "/sbin/sysctl", "sysctl", "-n", "vfs.zfs.bclone_enabled") // read only: doctor zfs.block_cloning
+	bad(adm, api.CodeForbidden, "sysctl", "vfs.zfs.bclone_enabled=0")
+	bad(adm, api.CodeForbidden, "sysctl", "vfs.zfs.bclone_enabled=1")
 	for _, a := range [][]string{
 		{"-n", "kern.securelevel"}, {"-n", "net.link.epair.q2"}, {"-n"}, {}, {"kern.osrelease"}, {"-a"}, {"-n", "kern.osrelease", "hw.ncpu"}, {"-n", "kern.osrelease=1"},
 		{"-n", "../kern"}, {"-N", "kern.osrelease"}, {"-w", "net.inet.ip.forwarding=1"}, {"-n", ""}, {"-n", "kern.osrelease\n"},
@@ -152,6 +156,7 @@ func TestExtendedCommandRules(t *testing.T) {
 	ok(ctx, "/sbin/pfctl", "pfctl", "-a", "jailops/shared.pf", "-s", "Tables")
 	ok(ctx, "/sbin/pfctl", "pfctl", "-s", "rules")
 	ok(ctx, "/sbin/pfctl", "pfctl", "-s", "nat")
+	ok(ctx, "/sbin/pfctl", "pfctl", "-s", "memory")
 	ok(ctx, "/sbin/pfctl", "pfctl", "-a", "jailops", "-s", "Anchors")
 	ok(ctx, "/sbin/pfctl", "pfctl", "-a", "jailops/web", "-s", "Anchors")
 	for _, a := range [][]string{
@@ -322,13 +327,87 @@ func TestSetMTUOverTheSocket(t *testing.T) {
 	}
 }
 
+// The in-place upgrade of a thick jail (internal/lifecycle/upgrade_thick.go) uses the pkg rule of the image builds, on the
+// root of a jail that is stopped: the repository file and the work directory are in the jail's container, outside its
+// root, and the package cache is the storage's. Nothing else is accepted.
+func TestThickJailUpgradeCommands(t *testing.T) {
+	e := newEnv(t)
+	c := e.cfg
+	ctx := context.Background()
+	container := filepath.Join(c.MountBase, "projects", "demo", "jails", "web")
+	root := filepath.Join(container, "root")
+	repos := filepath.Join(container, ".upgrade-100", "repos")
+	cache := filepath.Join(c.MountBase, "cache", "pkg")
+	for _, d := range []string{root, repos, cache} {
+		os.MkdirAll(d, 0o755)
+	}
+	os.WriteFile(filepath.Join(repos, "jailops.conf"), []byte("jailops: {\n  url: \"pkg+https://pkg.FreeBSD.org/${ABI}/base_release_1\",\n  mirror_type: \"srv\",\n  signature_type: \"fingerprints\",\n  fingerprints: \"/usr/share/keys/pkgbase-${VERSION_MAJOR}\",\n  enabled: yes\n}\n"), 0o600)
+	pkg := func(r, rp, ch string, extra ...string) []string {
+		return append([]string{"pkg", "-r", r, "-o", "ABI=FreeBSD:15:amd64", "-o", "OSVERSION=1500000", "-o", "REPOS_DIR=" + rp, "-o", "PKG_CACHEDIR=" + ch, "-o", "RUN_SCRIPTS=false"}, extra...)
+	}
+	good := func(extra ...string) []string { return pkg(root, repos, cache, extra...) }
+	scratch := filepath.Join(container, ".upgrade-100-check", "scratch")
+	for _, tc := range []struct {
+		name string
+		argv []string
+		ok   bool
+	}{
+		{"update", good("update", "-f", "-r", "jailops"), true},
+		{"upgrade", good("upgrade", "-y", "-r", "jailops"), true},
+		{"upgrade to another release", good("upgrade", "-f", "-y", "-r", "jailops"), true},
+		{"release check", good("query", "%n %v", "FreeBSD-runtime"), true},
+		{"the catalogue of the repository", pkg(filepath.Join(container, ".upgrade-100", "scratch"), repos, cache, "rquery", "-r", "jailops", "%n %v %sb"), true},
+		{"the annotations of the catalogue", pkg(scratch, repos, cache, "rquery", "-r", "jailops", "%At %Av", "FreeBSD-runtime"), false},
+		{"pkg's dry run on the copy of the database", pkg(scratch, repos, cache, "upgrade", "-n", "-U", "-r", "jailops"), true},
+		{"pkg's dry run of a new release", pkg(scratch, repos, cache, "upgrade", "-f", "-n", "-U", "-r", "jailops"), true},
+		{"pkg's dry run of an addition", pkg(scratch, repos, cache, "install", "-n", "-U", "-r", "jailops", "FreeBSD-ssh"), true},
+		{"the packages of the copy", []string{"pkg", "-r", scratch, "query", "%n %v %sb"}, true},
+		{"the catalogue of another repository", good("rquery", "-r", "FreeBSD-ports", "%n %v"), false},
+		{"another rquery format", good("rquery", "-r", "jailops", "%n %v %w"), false},
+		{"the old rquery format", good("rquery", "-r", "jailops", "%n %v"), false},
+		{"rquery of one package", good("rquery", "-r", "jailops", "%n %v", "FreeBSD-ssh"), false},
+		{"installed packages with their sizes", good("query", "%n %v %sb"), true},
+		{"the size of what fetch would download", good("fetch", "-n", "-y", "-d", "-r", "jailops", "FreeBSD-runtime"), true},
+		{"the checksums of changed packages", good("check", "-s", "FreeBSD-runtime"), true},
+		{"fetch the packages of an upgrade", good("fetch", "-y", "-d", "-r", "jailops", "FreeBSD-runtime"), true},
+		{"add base packages", good("install", "-y", "-r", "jailops", "FreeBSD-ssh", "FreeBSD-ee"), true},
+		{"add a base package, dry", good("install", "-n", "-r", "jailops", "FreeBSD-ssh"), true},
+		{"add a package file", good("install", "-y", "-r", "jailops", "/tmp/x.pkg"), false},
+		{"add a package archive name", good("install", "-y", "-r", "jailops", "FreeBSD-ssh.pkg"), false},
+		{"add a name that climbs out", good("install", "-y", "-r", "jailops", "../FreeBSD-ssh"), false},
+		{"add with a script option", good("install", "-y", "-r", "jailops", "--no-scripts", "FreeBSD-ssh"), false},
+		{"add with another repository directory", pkg(root, "/usr/local/etc/pkg/repos", cache, "install", "-y", "-r", "jailops", "FreeBSD-ssh"), false},
+		{"add into the host", pkg("/", repos, cache, "install", "-y", "-r", "jailops", "FreeBSD-ssh"), false},
+		{"the root is the storage", pkg(c.MountBase, repos, cache, "upgrade", "-y", "-r", "jailops"), false},
+		{"the root is the host", pkg("/", repos, cache, "upgrade", "-y", "-r", "jailops"), false},
+		{"the root climbs out", pkg(root+"/../../../..", repos, cache, "upgrade", "-y", "-r", "jailops"), false},
+		{"the repository directory is the host's", pkg(root, "/usr/local/etc/pkg/repos", cache, "upgrade", "-y", "-r", "jailops"), false},
+		{"the cache is the host's", pkg(root, repos, "/var/cache/pkg", "upgrade", "-y", "-r", "jailops"), false},
+		{"a repository name with a path", good("upgrade", "-y", "-r", "../jailops"), false},
+		{"the repository is a file", good("upgrade", "-y", "-r", "jailops", "x.pkg"), false},
+		{"a script of the jail", good("upgrade", "-y", "-r", "jailops", "--pre-script", "/x"), false},
+		{"no root", []string{"pkg", "-o", "ABI=FreeBSD:15:amd64", "-o", "REPOS_DIR=" + repos, "upgrade", "-y"}, false},
+		{"the option that runs no scripts", good("-o", "RUN_SCRIPTS=false", "upgrade"), true},
+		{"the option that runs the scripts", good("-o", "RUN_SCRIPTS=true", "upgrade"), false},
+		{"another database", append([]string{"pkg", "-r", root, "-o", "PKG_DBDIR=/var/db/pkg"}, "upgrade", "-y"), false},
+	} {
+		_, out, err := c.CheckCommandCtx(WithAdmin(ctx, "a"), tc.argv)
+		if tc.ok && (err != nil || out[0] != "/usr/sbin/pkg") {
+			t.Errorf("%s: %q refused: %v", tc.name, tc.argv, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("%s: %q accepted", tc.name, tc.argv)
+		}
+	}
+	// the root of a jail that runs is not a root for pkg -r: the verification stops it (pkgtarget_test.go has the cases)
+}
+
 func TestImageBuildingCommands(t *testing.T) {
 	e := newEnv(t)
 	c := e.cfg
 	ctx := context.Background()
 	root := filepath.Join(e.cfg.MountBase, "images", "freebsd-15", "g1", "root")
 	work := filepath.Join(e.cfg.StateDir, "work")
-	tar := filepath.Join(e.cfg.StateDir, "work", "etc.tar.xz")
 	repos := filepath.Join(e.cfg.StateDir, "repos")
 	for _, d := range []string{root, work, repos, filepath.Join(root, "etc")} {
 		os.MkdirAll(d, 0o755)
@@ -369,21 +448,6 @@ func TestImageBuildingCommands(t *testing.T) {
 	}
 	bad("pkg", "-o", "ABI=FreeBSD:15:amd64", "install", "x") // no -r
 	bad("pkg", "-r", root, "query", "%n;id", "x")
-	// etcupdate: subcommand before or after the flags
-	ok("/usr/sbin/etcupdate", "etcupdate", "extract", "-d", work, "-t", tar, "-D", root)
-	ok("/usr/sbin/etcupdate", "etcupdate", "-d", work, "-t", tar, "-D", root, "-L", filepath.Join(work, "log"))
-	ok("/usr/sbin/etcupdate", "etcupdate", "-D", root, "resolve")
-	bad("etcupdate", "extract", "-d", work, "-t", tar)                 // no -D
-	bad("etcupdate", "extract", "-d", "/tmp/x", "-t", tar, "-D", root) // work outside
-	bad("etcupdate", "extract", "-d", work, "-t", "/etc/passwd", "-D", root)
-	bad("etcupdate", "-D", root, "-L", "/var/log/x")
-	bad("etcupdate", "-D", "/", "-d", work)
-	bad("etcupdate", "-D", root, "-D", root)
-	bad("etcupdate", "-D", root, "-p")
-	bad("etcupdate", "-D", root, "extract", "extract")
-	bad("etcupdate", "-D", root, "extract", "x")
-	bad("etcupdate", "-D", root, "-t")
-	bad("etcupdate", "-D", root, "-t", work+"/../../x")
 	// pwd_mkdb
 	ok("/usr/sbin/pwd_mkdb", "pwd_mkdb", "-p", "-d", filepath.Join(root, "etc"), mp)
 	bad("pwd_mkdb", "-p", "-d", "/etc", mp)
@@ -400,31 +464,6 @@ func TestImageBuildingCommands(t *testing.T) {
 	bad("pw-lock-root", "-R", root, "usermod", "root", "-s", "/bin/sh")
 	bad("pw-lock-root", "-R", root, "useradd", "x")
 	bad("pw-lock-root", "usermod", "root", "-w", "no")
-	// pkg-records: read and change package RECORDS of a jail tree, never files and never scripts
-	man := filepath.Join(work, "runtime.ucl")
-	ok("/usr/sbin/pkg", "pkg-records", "-r", root, "info", "-a", "-q")
-	ok("/usr/sbin/pkg", "pkg-records", "-r", root, "info", "--raw", "--raw-format", "ucl", "FreeBSD-runtime")
-	ok("/usr/sbin/pkg", "pkg-records", "-r", root, "unregister", "-f", "-y", "FreeBSD-runtime", "FreeBSD-ftp")
-	ok("/usr/sbin/pkg", "pkg-records", "-r", root, "register", "-t", "-M", man)
-	bad("pkg-records", "info", "-a", "-q")
-	bad("pkg-records", "-r", "/", "info", "-a", "-q")
-	bad("pkg-records", "-r", "/etc", "unregister", "-f", "-y", "FreeBSD-runtime")
-	bad("pkg-records", "-r", root, "info", "-a")
-	bad("pkg-records", "-r", root, "info", "--raw", "--raw-format", "json", "FreeBSD-runtime")
-	bad("pkg-records", "-r", root, "info", "--raw", "--raw-format", "ucl", "FreeBSD-*")
-	bad("pkg-records", "-r", root, "delete", "-f", "-y", "FreeBSD-runtime")
-	bad("pkg-records", "-r", root, "unregister", "-y", "FreeBSD-runtime")
-	bad("pkg-records", "-r", root, "unregister", "-f", "-y")
-	bad("pkg-records", "-r", root, "unregister", "-f", "-y", "-a")
-	bad("pkg-records", "-r", root, "unregister", "-f", "-y", "../x")
-	bad("pkg-records", "-r", root, "unregister", "-f", "-y", "x.pkg")
-	bad("pkg-records", "-r", root, "unregister", "-f", "-y", "FreeBSD-*")
-	bad("pkg-records", "-r", root, "unregister", "-f", "-y", "-x", "FreeBSD")
-	bad("pkg-records", "-r", root, "register", "-N", "-M", man)
-	bad("pkg-records", "-r", root, "register", "-t", "-m", work, "-i", root)
-	bad("pkg-records", "-r", root, "register", "-t", "-M", "/etc/passwd")
-	bad("pkg-records", "-r", root, "register", "-t", "-M", filepath.Join(work, "runtime.json"))
-	bad("pkg-records", "-r", root, "register", "-t", "-M", man, "extra")
 	// freebsd-version
 	ok("/bin/freebsd-version", "freebsd-version", "-k")
 	ok("/bin/freebsd-version", "freebsd-version", "-u")
@@ -433,8 +472,6 @@ func TestImageBuildingCommands(t *testing.T) {
 	bad("freebsd-version", "-k", "-u")
 	// a symlink in the work area cannot lead out of the roots
 	os.Symlink("/etc", filepath.Join(work, "evil"))
-	bad("etcupdate", "-D", root, "-L", filepath.Join(work, "evil", "log"))
-	bad("pkg-records", "-r", root, "register", "-t", "-M", filepath.Join(work, "evil", "x.ucl"))
 }
 
 func TestSeedKeys(t *testing.T) {
@@ -514,5 +551,204 @@ func TestTermGraceReachesTheHelper(t *testing.T) {
 		if got := calls[len(calls)-1].Cmd.TermGrace; got != tc.want {
 			t.Errorf("asked %v: the helper ran the command with a grace of %v, want %v", tc.ask, got, tc.want)
 		}
+	}
+}
+
+// pkg -r on a jail tree: the directories pkg writes as root of the host must be real directories, and nothing below the
+// package database, the cache or the configuration directories may be a symbolic link.
+func TestPkgTreeBounds(t *testing.T) {
+	e := newEnv(t)
+	c := e.cfg
+	mk := func(name string) (root, repos, cache string) {
+		container := filepath.Join(c.MountBase, "projects", "demo", "jails", name)
+		root = filepath.Join(container, "root")
+		repos = filepath.Join(container, ".upgrade-100", "repos")
+		cache = filepath.Join(c.MountBase, "cache", "pkg")
+		for _, d := range []string{root, repos, cache} {
+			os.MkdirAll(d, 0o755)
+		}
+		os.WriteFile(filepath.Join(repos, "jailops.conf"), []byte("jailops: {\n  url: \"pkg+https://pkg.FreeBSD.org/${ABI}/base_release_1\",\n  mirror_type: \"srv\",\n  signature_type: \"fingerprints\",\n  fingerprints: \"/usr/share/keys/pkgbase-${VERSION_MAJOR}\",\n  enabled: yes\n}\n"), 0o600)
+		return
+	}
+	check := func(root string) error { return verifyPkgTree(nil, root) }
+	for _, rel := range pkgTreeLinks {
+		root, _, _ := mk("l" + strings.NewReplacer("/", "_", ".", "_").Replace(rel))
+		target := t.TempDir()
+		p := filepath.Join(root, rel)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.Symlink(target, p); err != nil {
+			t.Fatal(err)
+		}
+		if err := check(root); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+			t.Errorf("%s as a symbolic link: %v", rel, err)
+		}
+	}
+	// real directories, and a tree without them, are fine
+	root, _, _ := mk("fine")
+	os.MkdirAll(filepath.Join(root, "var/db/pkg/repos"), 0o755)
+	os.MkdirAll(filepath.Join(root, "usr/local/etc/pkg/repos"), 0o755)
+	if err := check(root); err != nil {
+		t.Errorf("a plain tree: %v", err)
+	}
+	jail, _, _ := mk("jail")
+	os.WriteFile(filepath.Join(filepath.Dir(jail), "spec.json"), []byte(`{"spec":{"image":"freebsd-15-1"}}`), 0o600)
+	if err := check(jail); err != nil {
+		t.Errorf("a jail: %v", err)
+	}
+	// a link anywhere below the trees pkg opens by plain path (the audit's var/db/pkg/repos/jailops -> a host directory)
+	for _, rel := range []string{"var/db/pkg/repos/jailops", "var/db/pkg/repos/jailops/meta", "var/db/pkg/local.sqlite-journal",
+		"var/cache/pkg/FreeBSD-runtime-15.1.pkg", "var/cache/pkg/All/x", "usr/local/etc/pkg/repos/FreeBSD.conf", "etc/pkg/FreeBSD.conf"} {
+		root, _, _ := mk("deep" + strings.NewReplacer("/", "_", ".", "_").Replace(rel))
+		p := filepath.Join(root, rel)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.Symlink(t.TempDir(), p); err != nil {
+			t.Fatal(err)
+		}
+		if err := check(root); err == nil || !strings.Contains(err.Error(), rel+" is a symbolic link") {
+			t.Errorf("%s as a symbolic link: %v", rel, err)
+		}
+	}
+	// the links pkg makes in its own cache name a file of the same directory: they stay
+	cache, _, _ := mk("cachelinks")
+	os.MkdirAll(filepath.Join(cache, "var/cache/pkg"), 0o755)
+	os.WriteFile(filepath.Join(cache, "var/cache/pkg/bash-5.3.20~1a2b3c.pkg"), nil, 0o644)
+	os.Symlink("bash-5.3.20~1a2b3c.pkg", filepath.Join(cache, "var/cache/pkg/bash-5.3.20.pkg"))
+	if err := check(cache); err != nil {
+		t.Errorf("pkg's own cache links: %v", err)
+	}
+	for _, target := range []string{"..", "../../etc", "/etc/passwd"} {
+		l := filepath.Join(cache, "var/cache/pkg/x.pkg")
+		os.Remove(l)
+		os.Symlink(target, l)
+		if err := check(cache); err == nil {
+			t.Errorf("a cache link to %s was accepted", target)
+		}
+	}
+	// a symbolic link elsewhere in the root is not the package database's: the tree check lets it be
+	other, _, _ := mk("other")
+	os.MkdirAll(filepath.Join(other, "var/db/pkg"), 0o755)
+	os.Symlink("/tmp", filepath.Join(other, "var/db/elsewhere"))
+	if err := check(other); err != nil {
+		t.Errorf("a link outside the pkg trees: %v", err)
+	}
+}
+
+// Before pkg installs, upgrades or removes packages in a root, no symbolic link may lead out of the root, whatever it
+// points to: pkg creates the directories of a package through such a link, and reads a configuration file through it to
+// merge it. The links the base ships stay; in the trees no base package touches only a link to a host directory counts.
+func TestPkgRootLinksOut(t *testing.T) {
+	root := t.TempDir()
+	hostDir := t.TempDir()
+	hostFile := filepath.Join(hostDir, "secret")
+	os.WriteFile(hostFile, []byte("x"), 0o644)
+	for _, d := range []string{"etc", "var/unbound", "usr/share/nls/C", "usr/include", "usr/lib", "usr/local/www", "home/ann"} {
+		os.MkdirAll(filepath.Join(root, d), 0o755)
+	}
+	// what FreeBSD ships: links inside the root, and the absolute termcap and motd
+	os.Symlink("../var/unbound", filepath.Join(root, "etc/unbound"))
+	os.Symlink("C", filepath.Join(root, "usr/share/nls/POSIX"))
+	os.Symlink("../../usr/include", filepath.Join(root, "usr/lib/include"))
+	os.Symlink("/usr/share/misc/termcap", filepath.Join(root, "etc/termcap"))
+	os.Symlink("/var/run/motd", filepath.Join(root, "etc/motd"))
+	os.Symlink("../var/run/os-release", filepath.Join(root, "etc/os-release"))
+	// the jail's own links where no base package installs, to files and to nothing
+	os.Symlink("/srv/app/current", filepath.Join(root, "usr/local/www/app"))
+	os.Symlink(hostFile, filepath.Join(root, "home/ann/notes"))
+	if err := verifyRootLinks(root); err != nil {
+		t.Fatalf("a root as FreeBSD ships it: %v", err)
+	}
+	for _, tc := range []struct{ link, target string }{
+		{"etc/ssl", hostDir},
+		{"etc/ssl", "../../../../../../../../../../" + strings.TrimPrefix(hostDir, "/")},
+		{"usr/share/certs", "/"},
+		// the second audit: a configuration file linked to a file of the host, absolute or climbing, or to nothing
+		{"etc/crontab", hostFile},
+		{"etc/crontab", "../../../../../../../../../../" + strings.TrimPrefix(hostFile, "/")},
+		{"etc/crontab", "/nonexistent/file"},
+		{"root/.shrc", "/etc/master.passwd"},
+		// a shipped name with another target
+		{"etc/termcap", hostFile},
+		// a directory of the host below a tree no base package touches
+		{"usr/local/www/data", hostDir},
+	} {
+		p := filepath.Join(root, tc.link)
+		old, hadOld := os.Readlink(p)
+		os.Remove(p)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.Symlink(tc.target, p); err != nil {
+			t.Fatal(err)
+		}
+		if err := verifyRootLinks(root); err == nil || !strings.Contains(err.Error(), tc.link+" is a symbolic link out of the root") {
+			t.Errorf("%s -> %s: %v", tc.link, tc.target, err)
+		}
+		os.Remove(p)
+		if hadOld == nil {
+			os.Symlink(old, p)
+		}
+	}
+	for args, want := range map[string]string{"-r /x install -y a": "install", "-C /c -o A=b -r /x upgrade": "upgrade", "-r /x query %n": "query", "-j j -y": ""} {
+		if got := pkgSubcommand(strings.Fields(args)); got != want {
+			t.Errorf("%s: %q", args, got)
+		}
+	}
+}
+
+// Every pkg -r the helper runs reads an empty configuration file of the helper (never the root's pkg.conf, which could
+// load a plugin into a pkg running as root of the host), with plugins off; on the root of a thick jail no package
+// script runs. A caller cannot name its own configuration file.
+func TestPkgRootHardened(t *testing.T) {
+	e := newEnv(t)
+	c := e.cfg
+	container := filepath.Join(c.MountBase, "projects", "demo", "jails", "web")
+	root := filepath.Join(container, "root")
+	os.MkdirAll(root, 0o755)
+	l := &Local{cfg: c}
+	harden := func(argv ...string) []string {
+		t.Helper()
+		out, cleanup, err := l.hardenPkgRoot(context.Background(), argv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(cleanup)
+		return out
+	}
+	got := harden("pkg", "-r", root, "query", "%n")
+	if len(got) < 6 || got[1] != "-C" || got[3] != "-o" || got[4] != "PKG_ENABLE_PLUGINS=false" {
+		t.Fatalf("a jail root: %q", got)
+	}
+	if b, err := os.ReadFile(got[2]); err != nil || len(b) != 0 || !strings.HasPrefix(got[2], c.StateDir+"/") {
+		t.Errorf("the configuration file %s: %q %v", got[2], b, err)
+	}
+	// the place makes it a jail root, whatever its container holds (no spec.json here)
+	got = harden("pkg", "-r", root, "upgrade", "-y")
+	if !slices.Contains(got, "RUN_SCRIPTS=false") || got[len(got)-2] != "upgrade" {
+		t.Errorf("the root of a jail: %q", got)
+	}
+	// a root no jail has run in yet (an app being installed) is the copy of the image: its package scripts may run
+	os.WriteFile(filepath.Join(container, NeverStartedFile), nil, 0o600)
+	if got := harden("pkg", "-r", root, "install", "-y", "postgresql18-server"); slices.Contains(got, "RUN_SCRIPTS=false") {
+		t.Errorf("a root that never ran: %q", got)
+	}
+	os.Remove(filepath.Join(container, NeverStartedFile))
+	os.Symlink("/etc/hosts", filepath.Join(container, NeverStartedFile))
+	if got := harden("pkg", "-r", root, "install", "-y", "x"); !slices.Contains(got, "RUN_SCRIPTS=false") {
+		t.Errorf("a link named like the mark: %q", got)
+	}
+	os.Remove(filepath.Join(container, NeverStartedFile))
+	// pkg -j and pkg config abi are not changed
+	for _, argv := range [][]string{{"pkg", "-j", "demo_web", "upgrade", "-n"}, {"pkg", "config", "abi"}} {
+		if got := harden(argv...); !slices.Equal(got, argv) {
+			t.Errorf("%q became %q", argv, got)
+		}
+	}
+	for _, argv := range [][]string{{"pkg", "-C", "/tmp/evil.conf", "-r", root, "query", "%n"}, {"pkg", "-r", root, "-C", "/tmp/evil.conf", "query", "%n"},
+		{"pkg", "-r", root, "-o", "PKG_ENABLE_PLUGINS=true", "query", "%n"}, {"pkg", "-r", root, "-o", "PLUGINS=evil", "query", "%n"},
+		{"pkg", "-r", root, "-o", "RUN_SCRIPTS=true", "upgrade"}, {"pkg", "-r", root, "-o", "OSVERSION=15", "upgrade"}} {
+		if _, _, err := c.CheckCommandCtx(WithAdmin(context.Background(), "a"), argv); err == nil {
+			t.Errorf("accepted %q", argv)
+		}
+	}
+	if _, _, err := c.CheckCommandCtx(WithAdmin(context.Background(), "a"), []string{"pkg", "-r", root, "-o", "OSVERSION=1501000", "-o", "RUN_SCRIPTS=false", "upgrade", "-n"}); err != nil {
+		t.Errorf("OSVERSION and RUN_SCRIPTS: %v", err)
 	}
 }

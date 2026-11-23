@@ -175,14 +175,14 @@ func TestKeyRunRestoreAcrossProjects(t *testing.T) {
 	for _, j := range lay {
 		if j.Name == "web" {
 			for _, d := range j.Layout.Datasets {
-				if strings.HasSuffix(d.Name, "/web/etc") {
+				if strings.HasSuffix(d.Name, "/web/root") {
 					dbDS = d.Name
 				}
 			}
 		}
 	}
 	if dbDS == "" {
-		t.Fatalf("no volume dataset in %+v", lay)
+		t.Fatalf("no root dataset in %+v", lay)
 	}
 	_ = os.WriteFile(filepath.Join(mnt.dir(dbDS), "rc.conf"), []byte("rows rows rows"), 0o644)
 	_ = web

@@ -95,6 +95,22 @@ func (s *Server) jailRoutes() []route {
 			c.sync(200, v, "")
 			return nil
 		}},
+		route{method: "GET", pattern: "/api/v1/jails/{name}/base", h: func(c *rc) error {
+			v, err := svc.BaseList(c.r.Context(), c.pathArg("name"))
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, "")
+			return nil
+		}},
+		route{method: "GET", pattern: "/api/v1/jails/{name}/audit", h: func(c *rc) error {
+			v, err := svc.JailAudit(c.r.Context(), c.pathArg("name"))
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, "")
+			return nil
+		}},
 		route{method: "GET", pattern: "/api/v1/jails/{name}/logs", h: func(c *rc) error {
 			v, truncated, err := svc.JailLogs(c.r.Context(), c.pathArg("name"))
 			if err != nil {
@@ -224,18 +240,6 @@ func (s *Server) jailRoutes() []route {
 				return err
 			}
 			op, err := svc.RollbackJail(c.r.Context(), c.pathArg("name"), rb)
-			if err != nil {
-				return err
-			}
-			c.async(op)
-			return nil
-		}},
-		route{method: "POST", pattern: "/api/v1/jails/{name}/convert", h: func(c *rc) error {
-			var cv api.JailConvert
-			if err := c.decode(&cv); err != nil {
-				return err
-			}
-			op, err := svc.ConvertJail(c.r.Context(), c.pathArg("name"), cv)
 			if err != nil {
 				return err
 			}

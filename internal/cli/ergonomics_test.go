@@ -113,13 +113,6 @@ func TestGenerationNotation(t *testing.T) {
 	tr.do("", "image", "build", "freebsd-15", "--from-generation", "other#g2")
 	tr.ok("image", "generation", "delete", "-y", "freebsd-15", "g3")
 	tr.do("", "image", "generation", "delete", "-y", "freebsd-15", "three")
-	tr.ok("jail", "create", "web", "--image", "freebsd-15#g1", "--network", "lan", "--storage", "default")
-	tr.ok("jail", "upgrade", "web", "--generation", "2")
-	var up api.JailUpgrade
-	if err := json.Unmarshal(h.lastBody("POST", "/api/v1/jails/web/upgrade"), &up); err != nil || up.Generation != "g2" {
-		t.Fatalf("upgrade request: %+v %v", up, err)
-	}
-	tr.do("", "jail", "upgrade", "web", "--generation", "x")
 	tr.golden("generations")
 }
 
@@ -168,7 +161,7 @@ spec: {ipv4: {subnet: 10.30.0.0/24, gateway: 10.30.0.1, range: 10.30.0.10-10.30.
 apiVersion: jailops/v1
 kind: Jail
 metadata: {name: web, labels: {env: prod}}
-spec: {image: freebsd-15, storage: default, layout: thin, hostname: web, network: [{network: lan, ipv4: 10.20.0.15}]}
+spec: {image: freebsd-15, storage: default, hostname: web, network: [{network: lan, ipv4: 10.20.0.15}]}
 ---
 kind: Image
 metadata: {name: alpine-3}
@@ -299,7 +292,6 @@ func TestCompletionEverywhere(t *testing.T) {
 		{[]string{"jail", "list", "--state", ""}, "running\n", ""},
 		{[]string{"list", "-c", ""}, "addresses", ""},
 		{[]string{"list", "--sort", ""}, "age", ""},
-		{[]string{"create", "x", "--layout", ""}, "thick\n", ""},
 		{[]string{"create", "x", "--depends", ""}, "web\n", ""},
 		{[]string{"project", "set", "main", "--firewall-policy", ""}, "floor\n", ""},
 		{[]string{"firewall", "test", "--proto", ""}, "tcp\n", ""},
@@ -322,7 +314,6 @@ func TestCompletionEverywhere(t *testing.T) {
 		{[]string{"--remote", ""}, "local\n", ""},
 		{[]string{"-o", ""}, "csv\n", ""},
 		{[]string{"jail", "rollback", "web", "--snapshot", ""}, "s1\n", ""},
-		{[]string{"jail", "upgrade", "web", "--generation", ""}, "g1\n", ""},
 	} {
 		out, _, code := h.run("", append([]string{"__complete"}, c.args...)...)
 		if code != 0 || !strings.Contains(out, c.want) || (c.none != "" && strings.Contains(out, c.none)) {

@@ -6,17 +6,23 @@ export * from '@jailops/shared/api/types'
  * define a dry-run body: this is the shape the console expects in the operation metadata.
  */
 export interface UpgradePreview {
-  from_generation: string
-  to_generation: string
-  steps: string[]
-  etc_conflicts?: string[]
-  warnings?: string[]
-  /** Set for a move to another image (a new release): the releases, the image the jail follows, what is kept. */
+  /** The jail has nothing newer: nothing is changed. */
+  nothing: boolean
+  /** The release installed in the jail. */
+  installed?: string
   from_release?: string
   to_release?: string
-  image?: string
+  /** The snapshot taken before the first package change, for manual recovery. */
   snapshot?: string
-  kept?: string[]
+  steps: string[]
+  /** The base packages that change ("name old -> new") and the ports packages that are newer. */
+  base_changes?: string[]
+  ports_packages?: string[]
+  checks?: string[]
+  failed_checks?: string[]
+  health_check?: string
+  restart_pending?: string[]
+  warnings?: string[]
 }
 
 /** Body of POST /api/v1/jails/{name}/snapshots: a JailSnapshot with an optional name. */

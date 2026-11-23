@@ -2,6 +2,7 @@ package imagegen
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -31,8 +32,12 @@ func TestBuildFirstAndNext(t *testing.T) {
 			t.Fatalf("property %s missing", p)
 		}
 	}
-	if len(w.Files.Paths()) != 4 { // the files staged in the root (rc.conf and periodic.conf too); work dir cleaned
+	// the files staged in the root (rc.conf, periodic.conf and the two repository files too); work dir cleaned
+	if len(w.Files.Paths()) != 6 || !slices.Contains(w.Files.Paths(), "/jailops/images/fb/staging-g1/usr/local/etc/pkg/repos/FreeBSD-base.conf") {
 		t.Fatal(w.Files.Paths())
+	}
+	if b, _ := w.Files.ReadFile(bg, "/jailops/images/fb/staging-g1/usr/local/etc/pkg/repos/FreeBSD-base.conf"); !strings.Contains(string(b), "FreeBSD-base: { enabled: no }") {
+		t.Fatalf("%q", b)
 	}
 	w.repoVersion = "15.0p2"
 	r2, err := w.M.Build(bg, "fb", api.ImageBuild{FromGeneration: 1})

@@ -120,6 +120,9 @@ func TestCheck(t *testing.T) {
 		{api.PermOperator, "POST", "/api/v1/jails/{name}/snapshots", ""},
 		{api.PermAdmin, "POST", "/api/v1/jails", ""},
 		{api.PermAdmin, "PUT", "/api/v1/jails/{name}/state", ""},
+		// the audit reads the tenant's files as root of the host: operator, like exec, never readonly
+		{api.PermReadonly, "GET", "/api/v1/jails/{name}/audit", api.CodeForbidden},
+		{api.PermOperator, "GET", "/api/v1/jails/{name}/audit", ""},
 		{api.PermAdmin, "GET", "/api/v1/users", ""},
 		{api.PermOperator, "GET", "/api/v1/users", api.CodeForbidden},
 		{api.PermAdmin, "POST", "/api/v1/restores", ""},                      // admin covers restore

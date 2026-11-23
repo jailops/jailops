@@ -317,6 +317,14 @@ func (m *opManager) failure(lo *liveOp, err error) *api.Error {
 	aerr := toAPIError(err)
 	var pub *publicError
 	if aerr.Code != api.CodeInternal || errors.As(err, &pub) {
+		// an upgrade says which operation it was, so that the log and the history can be found from the message
+		if lo.op.Action == api.OpJailUpgrade || lo.op.Action == api.OpJailRollback {
+			if aerr.Hint == "" {
+				aerr.Hint = "operation " + lo.op.ID
+			} else if !strings.Contains(aerr.Hint, lo.op.ID) {
+				aerr.Hint += " (operation " + lo.op.ID + ")"
+			}
+		}
 		return aerr
 	}
 	m.s.log.Error("operation failed", "op", lo.op.ID, "description", lo.op.Description, "project", lo.op.Project, "err", aerr.Message)

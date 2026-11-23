@@ -15,18 +15,18 @@ type SnapshotResult struct {
 	Datasets []string
 	// Created is when the snapshot was taken (the creation property); zero when the ZFS layer does not say.
 	Created time.Time
-	// Written is what a data rollback to this snapshot would discard, per
-	// dataset and in total (bytes written since the snapshot).
+	// Written is what a rollback to this snapshot (scope all) would discard, per dataset and in total (bytes written
+	// to the root and the delegated dataset since the snapshot).
 	Written      map[string]int64
 	TotalWritten int64
 }
 
 // SnapshotJail takes ONE atomic zfs snapshot over every dataset of the jail
-// (container, root, persistent datasets, volumes), so the set is consistent.
+// (container, root, the delegated dataset), so the set is consistent.
 // An empty name generates "snap-<timestamp>".
 func (s *Service) SnapshotJail(ctx context.Context, name, snapName, comment string) (SnapshotResult, error) {
 	var res SnapshotResult
-	st, err := s.ready(ctx, name)
+	st, err := s.own(ctx, name)
 	if err != nil {
 		return res, err
 	}
@@ -66,7 +66,7 @@ func (s *Service) snapshotSet(ctx context.Context, st *jailState, snapName, comm
 
 func (s *Service) fillWritten(ctx context.Context, st *jailState, res SnapshotResult) (SnapshotResult, error) {
 	res.Written = map[string]int64{}
-	for _, d := range dataDatasets(st) {
+	for _, d := range append([]string{st.Root}, dataDatasets(st)...) {
 		if ok, _ := s.ZFS.Exists(ctx, d+"@"+res.Name); !ok {
 			continue // dataset created after the snapshot
 		}

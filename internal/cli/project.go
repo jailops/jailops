@@ -56,7 +56,7 @@ log sinks that select it. Every jail of the project must be stopped`)
 
 // projectOpts holds the flags that describe a project; create and set share them.
 type projectOpts struct {
-	comment, maxMemory                  string
+	comment, maxMemory, shell           string
 	images, hosts                       []string
 	firewall                            []string
 	maxJails, maxCPU, maxPIDs, maxAddrs int
@@ -75,6 +75,8 @@ func projectFlags(cmd *cobra.Command, forSet bool) *projectOpts {
 	f.StringArrayVar(&o.firewall, "firewall-policy", nil, "mandatory firewall policy rendered before every jail's own (repeatable, in order; an empty value clears the list; global admins only)")
 	f.StringArrayVar(&o.images, "image", nil, "image allow-list entry (repeatable; empty allows every image)")
 	f.StringSliceVar(&o.hosts, "hosts", nil, "hosts a fleet project spans, comma separated (managed by a hub)")
+	f.StringVar(&o.shell, "shell", "", "shell of a new FreeBSD jail of the project: sh or bash (an empty value goes back to the host's default, sh)")
+	_ = cmd.RegisterFlagCompletionFunc("shell", cobra.FixedCompletions([]string{"sh", "bash"}, cobra.ShellCompDirectiveNoFileComp))
 	if forSet {
 		f.BoolVar(&o.clearImages, "any-image", false, "remove the image allow-list")
 	} else {
@@ -120,6 +122,14 @@ func (o *projectOpts) apply(cmd *cobra.Command, spec *api.ProjectSpec) error {
 	}
 	if ch("hosts") {
 		spec.Hosts = o.hosts
+	}
+	if ch("shell") {
+		switch o.shell {
+		case "", api.ShellSh, api.ShellBash:
+			spec.Shell = o.shell
+		default:
+			return usagef("--shell must be sh or bash")
+		}
 	}
 	if o.newNetwork {
 		spec.NewNetwork = true

@@ -518,26 +518,21 @@ func (l *Local) Remove(ctx context.Context, path string) error {
 }
 
 // recursiveRemovable reports whether a whole tree may be removed at path: the scratch trees the daemon makes
-// below its work directory (image builds), the stage and merge directories of a jail's container, and the
-// directories below the root.new of a jail (the root a layout conversion is building, which has no data of the jail
-// yet: a persistent dataset is folded into it).
+// below its work directory (image builds), the stage, merge and upgrade directories of a jail's container (the
+// .upgrade-* directory of an in-place upgrade holds the repository file and nothing of the jail).
 func (c Config) recursiveRemovable(path string) bool {
 	p := filepath.Clean(path)
 	if c.WorkDir != "" && within(c.WorkDir, p) && p != c.WorkDir {
 		return true
 	}
-	if c.inMounts(p) && belowRootNew(p) {
+	base := filepath.Base(p)
+	if c.inMounts(p) && strings.HasPrefix(base, ".upgrade-") {
 		return true
 	}
-	base := filepath.Base(p)
-	return c.inMounts(p) && (strings.HasPrefix(base, ".seed-") || strings.HasPrefix(base, ".merge-"))
-}
-
-// belowRootNew reports whether p lies strictly below a directory named root.new.
-func belowRootNew(p string) bool {
+	// anything below the work directory of an upgrade is its scratch (the copy of a package database, a catalogue)
 	for d := filepath.Dir(p); d != "/" && d != "."; d = filepath.Dir(d) {
-		if filepath.Base(d) == "root.new" {
-			return true
+		if strings.HasPrefix(filepath.Base(d), ".upgrade-") {
+			return c.inMounts(p)
 		}
 	}
 	return false

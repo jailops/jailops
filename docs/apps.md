@@ -75,7 +75,7 @@ services:                        # rc.d services, in start order
     start: true                  # default true; false: enabled, not started
 ports:
   - {name: postgres, port: 5432, proto: tcp, description: The SQL port., expose: false}
-data:                            # the state; each path becomes a persistent dataset of the jail
+data:                            # the state; each path becomes a volume of the jail
   - {path: /var/db/postgres, description: The cluster.}
 config:                          # files a person edits; restart names the service to restart afterwards
   - {path: /var/db/postgres/data18/postgresql.conf, description: Server settings., restart: postgresql}
@@ -103,13 +103,12 @@ Rules the validator enforces, besides the sizes above:
 - `data`, `config` and `logs` paths are absolute and clean (no `.`, `..`, empty segments, no characters outside
   `A-Za-z0-9/._+@:=,-`). `data` and `config` paths lie **below** `/var`, `/usr/local`, `/usr/local/etc` or `/home`
   (never one of those themselves); `logs` paths below `/var/log`, `/var/db` or `/usr/local`. A `data` or `config` path
-  is never one of the persistent datasets of every jail (`/etc`, `/usr/local`, `/var/db`, `/var/log`, `/var/mail`,
-  `/var/spool`, `/home`, `/root`); the installer also refuses, before the operation starts and with the same message,
-  a path that equals one this host adds in `lifecycle.persistent`. Nothing lies under the base
+  is never one of these directories of every jail's own root itself (`/etc`, `/usr/local`, `/var/db`, `/var/log`,
+  `/var/mail`, `/var/spool`, `/home`, `/root`): a volume there would hide what the root holds. Nothing lies under the base
   system (`/etc`, `/bin`, `/sbin`, `/lib`, `/usr/bin`, `/usr/lib`, `/usr/share`, ...) nor under the packages' own
   directories (`/usr/local/bin`, `/usr/local/lib`, `/usr/local/share`, `/usr/local/etc/rc.d`, ...) nor under `/var/run`,
   `/var/tmp` or `/tmp`.
-- Two `data` paths never overlap: each is its own dataset.
+- Two `data` paths never overlap: each is its own volume.
 - `rc` keys are rc.conf variable names (`^[a-z][a-z0-9_]{0,63}$`); values are one printable line. The installer writes
   `<name>_enable=YES` itself, with `-` and `.` of the service name turned into `_` as rc.conf spells it, and a
   definition that sets any service's `_enable` is invalid. Two services whose names are the same once converted
@@ -195,7 +194,7 @@ The page of a jail that came from the catalog has an **Access** tab (when the se
 journal: `POST /api/v1/apps/NAME/install` answers `202` with the operation, and the client waits for it. The steps, in
 this order, each a step of the operation's plan (`--dry-run` returns them and does nothing):
 
-1. **Create a thin jail** from the image `--image` names (`freebsd-15-1`, its newest generation), or else from the
+1. **Create a jail** from the image `--image` names (`freebsd-15-1`: its root is a copy of the newest generation), or else from the
    FreeBSD image of the highest release the host's kernel can run (of two images of the same release, the first by
    name), so a host with `freebsd-15-1` and `freebsd-15-2` on 15.2 takes `freebsd-15-2`. Without any FreeBSD image the
    request is refused before the operation, and the hint names the two commands that make the base image
@@ -205,11 +204,11 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    `image.release_min`, compared major.minor. The jail is created in the project, on the network and storage named
    (the project's only grant of a kind is the default), with the `data` paths as **volumes** of the project: one each, named `<jail>-<what the path is called>`
    (`/var/db/postgres` of the jail `db` becomes the volume `db-var-db-postgres`), made by steps of their own before the
-   jail (`create-volume-NAME` in the plan) and attached at the path. A volume has its own snapshots, is untouched by a
-   generation switch and by the jail's snapshots and rollbacks, and stays when the jail is deleted (`jailops volume
+   jail (`create-volume-NAME` in the plan) and attached at the path. A volume has its own snapshots, is untouched by the
+   jail's upgrades, snapshots and rollbacks, and stays when the jail is deleted (`jailops volume
    list`). The volumes start empty and root-owned; the definition's `setup` chowns them. The labels `jailops.app=<name>` and
    `jailops.app.hash=<hash>` are set at creation. The `resources` hints become the jail's limits unless `--memory`,
-   `--disk` or `--cpu` replace them. The jail is not started yet: its datasets are **mounted** on the host.
+   `--disk` or `--cpu` replace them. The jail is not started yet: its root is **mounted** on the host.
 2. **Install the packages from the host** into that root, while the jail has never run, with `pkg -r <root> install -y <names>` through the privileged helper, from
    the FreeBSD repository (`repo: ports`, the host's own repository configuration) or from `pkg.jailops.net`
    (`repo: jailops`: `pkg -r <root> install -y -r jailops <names>`, the repository named `jailops` in the host's
@@ -272,7 +271,7 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    network nor the host, until `jailops app allow` lets a source in ([Who may connect](#who-may-connect)). It comes after
    the health check, which connects from the host; the services have run only for the time of that check before. A
    policy of that name that app access does not manage refuses the installation before it starts (`precondition_failed`).
-8. **Take the snapshot `app-installed`** of all the jail's datasets: the point to roll back to before the first
+8. **Take the snapshot `app-installed`** of the jail's root: the point to roll back to before the first
    change (`jailops jail rollback JAIL --scope all --snapshot app-installed`).
 9. **Start with the host** (`enable-autostart`): `boot.autostart` of the jail is turned on, the last step, so that an
    installation that was interrupted or failed, and is kept stopped for inspection, never starts again by itself. The
@@ -447,8 +446,8 @@ restart of a server whose `listen_addresses` was already set by hand, IPv6 sourc
 - **Logs.** A definition declares its log files and directories; reading them is a separate feature (the jail logs
   API) and the catalog only says where they are.
 - **Updates.** The packages of an app follow the jail's ordinary update policy ([upgrade.md](upgrade.md)):
-  `update.packages` upgrades them with `pkg upgrade` inside the jail, `update.os` moves the jail to a newer image
-  generation with the data datasets untouched. There is no separate app update; the catalog's `version` is what the
+  `update.packages` upgrades them with `pkg upgrade` inside the jail, its base is upgraded in place like that of any jail, while it
+  runs (`jailops jail upgrade`, or `update.os` of the policy; [lifecycle.md](lifecycle.md#35-a-freebsd-jail)). There is no separate app update; the catalog's `version` is what the
   definition was written against, not a pin.
 - **Rollback.** `jailops jail rollback JAIL --scope all --snapshot app-installed` is the way back to the fresh installation.
 
@@ -652,7 +651,7 @@ three later ones were not: their sources are named in the table and below, and w
 | `mail` | communication | `postfix`, `dovecot` (ports) | 25, 587, 143, 993 (tcp) | tcp 25 | Postfix's and Dovecot 2.3's documented configuration and the Postfix package's install message; the packages not inspected |
 
 **isms** (featured: the platform's own information security management system) installs the package `isms` from the
-JailOps package repository (and `openssh-portable` from the FreeBSD packages, because the thin image has no `ssh-keygen`, which the signing key needs): `pkg -r ROOT install -y -r jailops isms`, which assumes the host's pkg configuration has the
+JailOps package repository (and `openssh-portable` from the FreeBSD packages, because the minimal image has no `ssh-keygen`, which the signing key needs): `pkg -r ROOT install -y -r jailops isms`, which assumes the host's pkg configuration has the
 repository named `jailops` (the one [install.md](install.md) sets up for JailOps itself). The package has no
 dependencies. The paths (`/usr/local/bin/isms`, data `/var/db/isms`, `/var/db/isms/private` for the signing key,
 `/usr/local/etc/isms/server.env` mode 0600 owner `isms`, log `/var/log/isms.log`), the user `isms`, the rc.d service

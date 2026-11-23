@@ -302,3 +302,14 @@ func TestAMountThatLandedElsewhereIsFound(t *testing.T) {
 		t.Errorf("a mount that went through a link: %v", got)
 	}
 }
+
+// parseMountPoints reads lines of `mount -p` into the form mountPoints returns: mount point and device to mount point.
+func parseMountPoints(out string) map[string]string {
+	m := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		if f := strings.Fields(line); len(f) >= 3 {
+			m[f[1]+"\x00"+f[0]] = f[1]
+		}
+	}
+	return m
+}

@@ -12,9 +12,9 @@ JailOps that depend on a FreeBSD version fit together. The maintainers read it. 
   [capacity page of jailops-packages](https://github.com/jailops/jailops-packages/blob/master/docs/capacity.md).
 - **Images are one per release.** `freebsd-15-1` and `freebsd-15-2` live side by side, and the generations of an image are
   the patch levels of its release ([upgrade.md](upgrade.md#an-image-is-one-release)).
-- **The nightly auto upgrade stays inside one release.** It builds the next generation of an image and moves its thin jails
-  to it ([upgrade.md](upgrade.md#nightly-auto-upgrade)). A new release is explicit: upgrade the host, create the image, create
-  jails on it ([upgrade.md](upgrade.md#a-new-release-move-the-jails)).
+- **The nightly auto upgrade stays inside one release.** It builds the next generation of an image for new jails
+  ([upgrade.md](upgrade.md#nightly-auto-upgrade)); a jail's own update policy upgrades it in place inside its release. A new release is explicit: upgrade the host, then
+  `jailops jail upgrade NAME --release`, and an image of the new release for new jails ([upgrade.md](upgrade.md#a-new-release-move-the-jails)).
 - **The gate of the continuous integration is a FreeBSD 15.1 VM** that runs the end-to-end and packet filter suites of
   every change ([ci-supply-chain.md](ci-supply-chain.md) lists the workflows). Other releases are brought in by the
   steps below.
@@ -83,8 +83,8 @@ in one `pkg upgrade`:
    ([3.2](lifecycle.md#32-a-minor-release-of-the-host-151-to-152); no `zpool upgrade` while the way back is needed).
 3. JailOps: `bectl create`, the database copy, `pkg upgrade -r jailops`, `service jailopsd restart`, `jailops doctor`, and the
    way back ([3.4](lifecycle.md#34-jailops-itself), [going back](upgrade.md#going-back-one-version-of-jailops)).
-4. A new image and the jails on it when you want them: `jailops jail upgrade NAME --image freebsd-15-2` moves a jail with its data
-   ([3.6](lifecycle.md#36-a-thin-jail-to-a-new-release)).
+4. The jails when you want them: `jailops jail upgrade NAME --release 15.2-RELEASE` moves a jail in place with its data
+   ([3.5](lifecycle.md#35-a-freebsd-jail)), and a new image for new jails ([3.6](lifecycle.md#36-images-and-generations)).
 5. FreeBSD 15 to 16: after the repository serves `FreeBSD:16` packages, with the host converted to pkgbase first
    ([3.3](lifecycle.md#33-a-major-release-of-the-host-15-to-16)).
 

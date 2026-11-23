@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"jailops.net/jailops/internal/render"
 	"os"
 	"path"
 	"path/filepath"
@@ -134,6 +135,9 @@ type provStep struct {
 	name string
 	argv []string
 	file *api.ProvisionFile
+	// rc sets an rc.conf variable of a FreeBSD jail from the host: the minimal base set has no sysrc(8) (it is in
+	// FreeBSD-bsdconfig), and the file is the same either way.
+	rc *render.RcVar
 }
 
 func provisionSteps(p api.Provision, linux bool) []provStep {
@@ -142,7 +146,8 @@ func provisionSteps(p api.Provision, linux bool) []provStep {
 		if linux {
 			out = append(out, provStep{name: "packages", argv: append([]string{"apk", "add", "--no-interactive"}, p.Packages...)})
 		} else {
-			out = append(out, provStep{name: "packages", argv: append([]string{"pkg", "install", "-y"}, p.Packages...)})
+			argv := []string{"pkg", "install", "-y"}
+			out = append(out, provStep{name: "packages", argv: append(argv, p.Packages...)})
 		}
 	}
 	for i := range p.Files {
@@ -153,7 +158,7 @@ func provisionSteps(p api.Provision, linux bool) []provStep {
 		if linux {
 			out = append(out, provStep{name: "enable " + svc, argv: []string{"rc-update", "add", svc, "default"}})
 		} else {
-			out = append(out, provStep{name: "enable " + svc, argv: []string{"sysrc", svcVarRE.ReplaceAllString(svc, "_") + "_enable=YES"}})
+			out = append(out, provStep{name: "enable " + svc, rc: &render.RcVar{Name: svcVarRE.ReplaceAllString(svc, "_") + "_enable", Value: "YES"}})
 		}
 	}
 	for _, svc := range p.Services.Start {
@@ -187,7 +192,11 @@ func (s *Service) runProvision(ctx context.Context, key string, j api.Jail) (api
 	}
 	linux := s.jailIsLinux(j)
 	for _, st := range provisionSteps(*p, linux) {
-		if st.file != nil {
+		if st.rc != nil {
+			if err := s.setJailRc(ctx, key, *st.rc); err != nil {
+				return res, fmt.Errorf("provisioning step %q: %w", st.name, err)
+			}
+		} else if st.file != nil {
 			if err := s.provisionFile(ctx, key, j, *st.file); err != nil {
 				return res, fmt.Errorf("provisioning step %q: %w", st.name, err)
 			}
@@ -199,6 +208,20 @@ func (s *Service) runProvision(ctx context.Context, key string, j api.Jail) (api
 	res.ProvisionedAt = s.now().UTC()
 	s.markProvisioned(key, res.ProvisionedAt)
 	return res, nil
+}
+
+// setJailRc sets one variable in the jail's /etc/rc.conf through the file operations of the host.
+func (s *Service) setJailRc(ctx context.Context, key string, v render.RcVar) error {
+	p := s.rootMount(key) + "/etc/rc.conf"
+	cur, err := s.d.Files.ReadFile(ctx, p)
+	if err != nil && !notExist(err) {
+		return fmt.Errorf("read %s: %w", p, err)
+	}
+	next, err := render.RcConfSet(string(cur), []render.RcVar{v})
+	if err != nil {
+		return err
+	}
+	return s.d.Files.WriteAtomic(ctx, p, []byte(next))
 }
 
 func (s *Service) provisionFile(ctx context.Context, key string, j api.Jail, f api.ProvisionFile) error {

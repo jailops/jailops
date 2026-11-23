@@ -271,12 +271,20 @@ func TestRemoveAllOnlyWhereTreesAreScratch(t *testing.T) {
 	if err := l.RemoveAll(ctx, work); err == nil {
 		t.Error("the work directory itself was removed")
 	}
-	// a jail's stage directory yes, the jail's files no
+	// a jail's upgrade work directory yes, the jail's files no
 	jail := filepath.Join(e.cfg.MountBase, "projects", "web", "jails", "nginx")
-	mustWrite(t, filepath.Join(jail, ".seed-etc", "a", "b"), "z")
 	mustWrite(t, filepath.Join(jail, "root", "etc", "passwd"), "z")
-	if err := l.RemoveAll(ctx, filepath.Join(jail, ".seed-etc")); err != nil {
-		t.Fatalf("a seed stage: %v", err)
+	mustWrite(t, filepath.Join(jail, ".upgrade-100", "repos", "jailops.conf"), "x")
+	if err := l.RemoveAll(ctx, filepath.Join(jail, ".upgrade-100")); err != nil {
+		t.Fatalf("an upgrade work directory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(jail, ".upgrade-100")); err == nil {
+		t.Error("the upgrade work directory is still there")
+	}
+	// below it, a directory of its scratch root (the catalogues of the copy of a package database)
+	mustWrite(t, filepath.Join(jail, ".upgrade-100-check", "scratch", "var", "db", "pkg", "repos", "jailops", "db"), "x")
+	if err := l.RemoveAll(ctx, filepath.Join(jail, ".upgrade-100-check", "scratch", "var", "db", "pkg", "repos")); err != nil {
+		t.Fatalf("the catalogues of the scratch root: %v", err)
 	}
 	if err := l.RemoveAll(ctx, filepath.Join(jail, "root")); err == nil {
 		t.Error("a jail's root with files in it was removed")
@@ -286,17 +294,6 @@ func TestRemoveAllOnlyWhereTreesAreScratch(t *testing.T) {
 	}
 	if err := l.RemoveAll(ctx, filepath.Join(e.base, "elsewhere")); err == nil {
 		t.Error("a path outside every root")
-	}
-	// the root a conversion builds: its directories yes, the root.new itself and the live root no
-	mustWrite(t, filepath.Join(jail, "root.new", "usr", "local", "bin", "x"), "z")
-	if err := l.RemoveAll(ctx, filepath.Join(jail, "root.new")); err == nil {
-		t.Error("root.new itself was removed")
-	}
-	if err := l.RemoveAll(ctx, filepath.Join(jail, "root.new", "usr", "local")); err != nil {
-		t.Fatalf("a directory of root.new: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(jail, "root.new", "usr", "local")); err == nil {
-		t.Error("it is still there")
 	}
 }
 

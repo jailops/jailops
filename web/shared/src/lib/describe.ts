@@ -2,9 +2,21 @@
 // user. The words for codes are in i18n/common.ts (codes); an app passes the kinds it links to.
 import { common as s } from '../i18n/common'
 
-/** Whether a condition is a fault someone should look at: not True, except a jail that is stopped (Ready is False with the reason Stopped and nothing is wrong). */
+// Conditions that name a fault when they are True (a jail of an older release whose root this one no longer runs).
+const FAULT_WHEN_TRUE = new Set(['UnsupportedLayout'])
+
+/**
+ * Whether a condition is a fault someone should look at: not True, except a jail that is stopped (Ready is False with
+ * the reason Stopped and nothing is wrong); a condition that names a fault is one when it is True.
+ */
 export function conditionProblem(c: { type: string; status: string; reason?: string }): boolean {
+  if (FAULT_WHEN_TRUE.has(c.type)) return c.status === 'True'
   return c.status !== 'True' && !(c.type === 'Ready' && c.reason === 'Stopped')
+}
+
+/** Whether a condition is a known fault: a False one that is a problem, or a fault that is True (not Unknown). */
+export function conditionFault(c: { type: string; status: string; reason?: string }): boolean {
+  return c.status !== 'Unknown' && conditionProblem(c)
 }
 
 export interface ObjectRef {

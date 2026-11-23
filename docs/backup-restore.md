@@ -88,6 +88,8 @@ A policy selects jails **by label**, so label the jails first:
     jailops backup run --project shop nightly      # now, instead of at 02:00
     jailops backup list --project shop
 
+A jail's backup holds its spec and its whole root, read from an atomic snapshot. A run skips a jail with an unsupported root
+layout of JailOps 0.9.2 and names it, and its older backups are refused at restore ([upgrade.md](upgrade.md#jails-with-an-unsupported-root-layout)).
 An empty selector matches no jail. `--include-state` also backs up the host's state dataset.
 
 **Volumes.** A policy also backs up the volumes of the jails it selects, and the volumes whose own labels match the selector.
@@ -143,7 +145,7 @@ between hosts); it is not built ([design.md](design.md) section 16).
 
 ## 7. Restore
 
-Restoring always starts with a **preflight** that lists what is missing (image generations, networks, policies), what would be
+Restoring always starts with a **preflight** that lists what is missing (networks, policies, storage), what would be
 created and what conflicts. Nothing is touched until you confirm.
 
     jailops backup restore --project shop <id> --as web-restored --dry-run     # the preflight only
@@ -202,8 +204,7 @@ Then the restore is the one of section 7:
     jailops backup restore --project shop <id> --as web --dry-run
     jailops backup restore --project shop <id> --as web -y
 
-The preflight lists what the new host lacks: an image generation that is missing is rebuilt from pkgbase, networks and
-storage the project is granted must exist (create them first), and volumes the jail attaches come back from their newest
+The preflight lists what the new host lacks: networks and storage the project is granted must exist (create them first), and volumes the jail attaches come back from their newest
 backup. Nothing is touched until you confirm.
 
 **UNVERIFIED:** S3 as a datastore on a real service.

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The nightly upgrade of one image (spec.auto_upgrade) and what it did (status.auto_upgrade): a global admin turns it
-// on, picks the time and whether the packages inside the jails are upgraded too, and saves with a merge patch;
+// on, picks the time, and saves with a merge patch;
 // everyone else reads it. A failed last run stays on the card as a notice until a later run does better.
 import { computed, reactive, ref, watch } from 'vue'
 import { s } from '@/i18n'
@@ -27,26 +27,21 @@ const at = computed(() => spec.value?.at || DEFAULT_AUTO_AT)
 
 // the form starts from the definition, and again when the definition changes (a save); a reload that brings the same
 // definition keeps what is being edited
-const f = reactive({ auto: false, at: DEFAULT_AUTO_AT, packages: true })
-const fromSpec = () => Object.assign(f, { auto: !!spec.value?.enabled, at: at.value, packages: spec.value ? !!spec.value.packages : true })
+const f = reactive({ auto: false, at: DEFAULT_AUTO_AT })
+const fromSpec = () => Object.assign(f, { auto: !!spec.value?.enabled, at: at.value })
 watch(() => JSON.stringify(spec.value ?? null), fromSpec, { immediate: true })
-const dirty = computed(() => f.auto !== !!spec.value?.enabled || (f.auto && (f.at !== at.value || f.packages !== !!spec.value?.packages)))
+const dirty = computed(() => f.auto !== !!spec.value?.enabled || (f.auto && f.at !== at.value))
 
 const id = (x: string) => `au-${x}-${name.value}`
 const check = useFormCheck(() => ({ [id('at')]: f.auto ? autoAtProblem(f.at) : '' }))
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
 
-// turning it on proposes the packages too
-function toggled(): void {
-  if (f.auto && !spec.value?.enabled) f.packages = true
-}
-
 const save = () => check.submit(async () => {
   busy.value = true
   error.value = null
   try {
-    await runOp(s.autoUpgrade.saveOp(name.value), () => api.images.autoUpgrade(name.value, autoUpgradeSpec(f.auto, f.at, f.packages)))
+    await runOp(s.autoUpgrade.saveOp(name.value), () => api.images.autoUpgrade(name.value, autoUpgradeSpec(f.auto, f.at)))
     check.reset()
     emit('saved')
   } catch (e) {
@@ -68,7 +63,7 @@ const tone = (r: string) => (r === 'ok' ? 'ok' : r === 'failed' ? 'danger' : 'in
     </Callout>
 
     <form v-if="editable" :id="id('form')" class="au-form" novalidate @submit.prevent="save">
-      <label class="check"><input v-model="f.auto" type="checkbox" :aria-describedby="id('explain')" data-test="auto-upgrade-on" @change="toggled" />{{ s.autoUpgrade.enable }}</label>
+      <label class="check"><input v-model="f.auto" type="checkbox" :aria-describedby="id('explain')" data-test="auto-upgrade-on" />{{ s.autoUpgrade.enable }}</label>
       <span :id="id('explain')" class="hint au-explain">{{ s.autoUpgrade.explain }}</span>
       <div v-if="f.auto" class="au-row">
         <div class="field au-at">
@@ -77,7 +72,6 @@ const tone = (r: string) => (r === 'ok' ? 'ok' : r === 'failed' ? 'danger' : 'in
           <span v-if="check.err(id('at'))" :id="id('at-err')" class="field-error" role="alert">{{ check.err(id('at')) }}</span>
           <span v-else :id="id('at-h')" class="hint">{{ s.autoUpgrade.atHint }}</span>
         </div>
-        <label class="check au-packages"><input v-model="f.packages" type="checkbox" data-test="auto-upgrade-packages" />{{ s.autoUpgrade.packages }}</label>
       </div>
       <div v-if="dirty" class="row">
         <span v-if="check.tried.value && check.reason.value" class="why-disabled">{{ check.reason.value }}</span>
@@ -86,9 +80,9 @@ const tone = (r: string) => (r === 'ok' ? 'ok' : r === 'failed' ? 'danger' : 'in
       <ErrorPanel v-if="error" :error="error" />
     </form>
     <p v-else class="muted au-state" data-test="auto-upgrade-state">
-      {{ spec?.enabled ? s.autoUpgrade.on(at, !!spec.packages) : s.autoUpgrade.off }} <span class="faint">{{ s.autoUpgrade.readOnly }}</span>
+      {{ spec?.enabled ? s.autoUpgrade.on(at) : s.autoUpgrade.off }} <span class="faint">{{ s.autoUpgrade.readOnly }}</span>
     </p>
-    <p v-if="editable && spec?.enabled && !dirty" class="muted au-state" data-test="auto-upgrade-summary">{{ s.autoUpgrade.on(at, !!spec.packages) }}</p>
+    <p v-if="editable && spec?.enabled && !dirty" class="muted au-state" data-test="auto-upgrade-summary">{{ s.autoUpgrade.on(at) }}</p>
 
     <p v-if="spec?.enabled && status?.next_at" class="au-next" data-test="auto-upgrade-next">{{ s.autoUpgrade.next }}: <TimeStamp :ts="status.next_at" /></p>
 
@@ -96,13 +90,12 @@ const tone = (r: string) => (r === 'ok' ? 'ok' : r === 'failed' ? 'danger' : 'in
       <h4 :id="id('recent')" class="au-sub">{{ s.autoUpgrade.recent }}</h4>
       <div class="table-wrap">
         <table class="rtable" :aria-labelledby="id('recent')" data-test="auto-upgrade-runs">
-          <thead><tr><th>{{ s.autoUpgrade.started }}</th><th>{{ s.autoUpgrade.result }}</th><th>{{ s.autoUpgrade.generation }}</th><th>{{ s.autoUpgrade.jails }}</th><th>{{ s.autoUpgrade.detail }}</th></tr></thead>
+          <thead><tr><th>{{ s.autoUpgrade.started }}</th><th>{{ s.autoUpgrade.result }}</th><th>{{ s.autoUpgrade.generation }}</th><th>{{ s.autoUpgrade.detail }}</th></tr></thead>
           <tbody>
             <tr v-for="r in recent" :key="r.started_at" :data-result="r.result">
               <td :data-label="s.autoUpgrade.started"><TimeStamp :ts="r.started_at" /></td>
               <td :data-label="s.autoUpgrade.result"><span class="pill" :class="tone(r.result)">{{ s.autoUpgrade.results[r.result] ?? r.result }}</span></td>
               <td class="mono" :data-label="s.autoUpgrade.generation">{{ r.generation || '-' }}</td>
-              <td :data-label="s.autoUpgrade.jails">{{ s.autoUpgrade.jailCounts(r.jails_moved ?? 0, r.jails_upgraded ?? 0, r.jails_failed ?? 0) }}</td>
               <td class="au-cell-detail" :data-label="s.autoUpgrade.detail">{{ r.detail || '-' }}</td>
             </tr>
           </tbody>

@@ -43,7 +43,7 @@ workflow has no secret and no write permission, and nothing in it is the gate of
 
 ## The nightly Linux jail test
 
-`linux-e2e.yml` runs the Linux jail block of `scripts/ci-freebsd-e2e.sh` (`JAILOPS_E2E_PART=linux`) on its own FreeBSD VM: a thick-only layout, a Linux
+`linux-e2e.yml` runs the Linux jail block of `scripts/ci-freebsd-e2e.sh` (`JAILOPS_E2E_PART=linux`) on its own FreeBSD VM: a Linux jail's own root, a Linux
 shell, a volume attached before the start and to the running jail (mounted in the root and below `compat/linux`) and the detach that takes both away. It
 builds an Alpine image from `dl-cdn.alpinelinux.org`; when that host does not answer in four tries the script ends with status 75 and the line `SKIPPED`,
 and the workflow ends green with a notice. Every other failure is a red run in the Actions tab; no issue is opened.

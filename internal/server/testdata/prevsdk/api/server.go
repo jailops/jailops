@@ -73,7 +73,6 @@ const (
 	OpJailRestart           OperationAction = "jail.restart"
 	OpJailConfigure         OperationAction = "jail.configure"
 	OpJailCopy              OperationAction = "jail.copy"
-	OpJailConvert           OperationAction = "jail.convert"
 	OpJailUpgrade           OperationAction = "jail.upgrade"
 	OpJailRollback          OperationAction = "jail.rollback"
 	OpJailSnapshot          OperationAction = "jail.snapshot"
@@ -81,7 +80,6 @@ const (
 	OpJailImport            OperationAction = "jail.import"
 	OpJailProvision         OperationAction = "jail.provision"
 	OpJailShellSetup        OperationAction = "jail.shell_setup"
-	OpJailRepairPackages    OperationAction = "jail.repair_packages"
 	OpJailRestore           OperationAction = "jail.restore"
 	OpAppInstall            OperationAction = "app.install"
 	OpRename                OperationAction = "rename"
@@ -98,7 +96,6 @@ const (
 	OpVolumeRestore         OperationAction = "volume.restore"
 	OpImageBuild            OperationAction = "image.build"
 	OpImageUpgrade          OperationAction = "image.upgrade"
-	OpImageMove             OperationAction = "image.move"
 	OpImageGenerationDelete OperationAction = "image.generation_delete"
 	OpImageAutoUpgrade      OperationAction = "image.auto_upgrade"
 	OpBackupRun             OperationAction = "backup.run"
@@ -111,11 +108,11 @@ const (
 
 // OperationActions lists every OperationAction.
 var OperationActions = []OperationAction{
-	OpJailCreate, OpJailDelete, OpJailStart, OpJailStop, OpJailRestart, OpJailConfigure, OpJailCopy, OpJailConvert,
+	OpJailCreate, OpJailDelete, OpJailStart, OpJailStop, OpJailRestart, OpJailConfigure, OpJailCopy,
 	OpJailUpgrade, OpJailRollback, OpJailSnapshot, OpJailSnapshotDelete, OpJailImport, OpJailProvision, OpJailShellSetup,
-	OpJailRepairPackages, OpJailRestore, OpAppInstall, OpRename, OpVolumeCreate, OpVolumeDelete, OpVolumeSnapshot, OpVolumeSnapshotDelete,
+	OpJailRestore, OpAppInstall, OpRename, OpVolumeCreate, OpVolumeDelete, OpVolumeSnapshot, OpVolumeSnapshotDelete,
 	OpVolumeRollback, OpVolumeAttach, OpVolumeDetach, OpVolumeLock, OpVolumeUnlock, OpVolumePassphrase, OpVolumeRestore,
-	OpImageBuild, OpImageUpgrade, OpImageMove, OpImageGenerationDelete, OpImageAutoUpgrade, OpBackupRun, OpBackupVerify,
+	OpImageBuild, OpImageUpgrade, OpImageGenerationDelete, OpImageAutoUpgrade, OpBackupRun, OpBackupVerify,
 	OpBackupDelete, OpUpdateCheck, OpUpdateApply, OpUpdateScheduled,
 }
 
@@ -265,17 +262,16 @@ var Extensions = []string{
 	"setup",
 	"host_certificate",
 	"jail_shell_setup",
-	"jail_repair_packages",
 	"rename",
 	"boot_plan",
 	"firewall_test",
 	"jail_expose",
 	"jail_reach",
-	"jail_diff",
 	"firewall_applied",
 	"jail_export",
 	"jail_files",
-	"jail_convert",
 	"volume_from_dir",
 	"top",
+	"jail_audit",
+	"jail_base",
 }

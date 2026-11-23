@@ -146,6 +146,13 @@ const (
 // nothing says they are applied. True has the reason "Applied" and names the rules by a short hash.
 const ConditionFirewallApplied = "FirewallApplied"
 
+// ConditionUnsupportedLayout is the condition of a jail whose root is a clone of an image with separate datasets for
+// /etc, /usr/local and /var, a root layout of JailOps 0.9.2 and before that this release does not support. The jail
+// does not start; a running one can be stopped, it can be deleted and read, and every other operation is refused.
+// Status True, reason "EarlierRelease"; the message names the fix: create a new jail and move the data over, or
+// convert it with `jailops jail convert NAME --layout thick` on that earlier release before the upgrade.
+const ConditionUnsupportedLayout = "UnsupportedLayout"
+
 // The states of status.shell_setup.
 const (
 	// ShellSetupInstalling: bash is being installed into the running jail in the background; `jailops shell` waits for it.

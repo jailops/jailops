@@ -103,7 +103,7 @@ UNVERIFIED end to end: no restore onto a second machine has been run by the test
    the daemon rebuilds its catalog from the repository at start.
 4. Create the projects, networks and storages again (`jailops-sync` from your repository, if you keep one); a restore is
    admitted like a new jail and needs them granted.
-5. Restore each jail; the preflight lists what is missing (an image generation is rebuilt from pkgbase):
+5. Restore each jail; the preflight lists what is missing:
 
        jailops backup list --project shop
        jailops backup restore --project shop BACKUP --as web --dry-run
@@ -207,7 +207,7 @@ each one is enforced by the kernel, not by JailOps polling.
 | `resources.pids` | rctl `maxproc`, `deny` | `fork` fails while the jail has that many processes |
 | `resources.cpu` | rctl `pcpu`, `deny`, at cores times 100 | the jail is slowed down to that many cores, nothing is killed |
 | `resources.cpuset` | `cpuset -l LIST -j JID` | the jail's processes run on those CPUs only; the other CPUs of the host are never used by it |
-| `resources.disk`, `resources.disk_reservation` | ZFS `quota` and `reservation` of the jail's container dataset | writes fail below the container: the root, the persistent datasets and the snapshots of all of them count; a volume is a dataset of the project, outside the container: it is bounded by its own `--size` and by the project's storage quota, not by the jail's limit |
+| `resources.disk`, `resources.disk_reservation` | ZFS `quota` and `reservation` of the jail's container dataset | writes fail below the container: the root, a delegated dataset and the snapshots of them count; a volume is a dataset of the project, outside the container: it is bounded by its own `--size` and by the project's storage quota, not by the jail's limit |
 | `resources.states` | pf `keep state (max N)` on every pass rule of the jail's anchor | a rule creates no new state beyond N; the host's state table cannot be filled by one jail |
 
 `jailops info JAIL` shows both counters next to the limit: the memory that is **resident** now (`memoryuse`, what the processes hold in RAM) and the memory the jail has **reserved** (`swapuse`, the counter the limit is of). A jail can show a resident size above its limit and be under it: the limit counts reservations, not pages in RAM.
@@ -294,7 +294,7 @@ in the log of `jailopsd` under that id, and nowhere in the API, for any role:
     grep ID /var/log/messages
 
 (`jailopsd` tag, level `ERROR`, message `operation failed`, fields `op`, `description`, `project` and `err`.) An error with a
-code of its own, such as `busy`, `invalid`, `pool_exhausted` or `merge_conflict`, carries its message and hint to the reader.
+code of its own, such as `busy`, `invalid`, `pool_exhausted` or `quota_exceeded`, carries its message and hint to the reader.
 A failed app installation names the step and whether the jail was kept; the cause is in the same log. The audit trail records
 the code of the failure, not its text.
 
@@ -322,7 +322,7 @@ the summary; a stopped jail you named yourself is a failure. `--parallel N` boun
 
 `jailops pkg install|upgrade|remove|info [NAME...] [-l KEY=VALUE | --all] -- PACKAGE...` is exec of the jail's own
 `pkg`, nothing more: `jailops pkg install -l role=web -- nginx` is `jailops exec -l role=web -- pkg install -y nginx`.
-Jails whose packages JailOps manages (a thin jail's base, an app) are changed by `jailops update` and `jailops app`.
+Jails whose packages JailOps manages (the base of a jail, an app) are changed by `jailops update` and `jailops app`.
 
 The console does the same: select jails in the jail list and choose Run a command. Each jail gets its own block with
 the output and the exit status, and the stopped ones are named.
@@ -355,12 +355,20 @@ the jail:
 A transfer is limited to `limits.file_copy_bytes` of the daemon (2 GiB by default) and a bounded number of entries and
 directory levels. It needs the role that may exec in the project and is audited with the jail, the direction, the
 paths and the bytes. A running jail always works; a stopped jail works only while its root dataset is mounted on the
-host, otherwise the answer is `busy` and names the dataset to mount.
+host, otherwise the answer is `busy` and names the dataset to mount. While an operation has the jail (an upgrade, a
+stop, a start) or a package update or app installation holds it, a copy answers `busy` and names what holds it; copy
+again when it has ended (`jailops op list` shows it).
 
 The console has the same for one file at a time: the Files tab of a running jail sends a file from the browser and
 downloads one.
 
 ## Watching the host
+
+`jailops list` shows each jail with its state and OS (`freebsd` or `linux`), its addresses, image, exposure, autostart
+and the space it uses. `jailops list -v` adds VERSION (the release installed in a FreeBSD jail, the image of a Linux
+jail), UPTIME (`5m`, `3d4h`) and STARTED (local time); a stopped jail shows `-` for both, and so does a jail that was already
+running when the daemon last started. A terminal too narrow for the
+table loses its least important columns, STARTED first, and never wraps a row.
 
 `jailops top` shows what the host and its running jails use now: the load, CPU, memory, ZFS cache and pool of the host
 on top (a global identity sees them) and one row per jail with its project, CPU, memory, processes, disk, network

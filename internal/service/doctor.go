@@ -47,14 +47,18 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorTLS(ctx, c)
 	s.doctorZFS(ctx, c)
 	s.doctorVolumes(ctx, c)
+	s.doctorUpgradeState(c)
+	s.doctorAudit(c)
 	s.doctorHostDirs(ctx, c)
 	s.doctorLeftovers(ctx, c)
 	s.doctorDelegation(ctx, c)
 	s.doctorEncryption(ctx, c)
+	s.doctorBlockCloning(ctx, c)
 	s.doctorPF(ctx, c)
 	s.doctorExposedJails(ctx, c)
 	s.doctorInboundWithoutSource(c)
-	s.doctorBasePackages(c)
+	s.doctorUnsupportedLayout(c)
+	s.doctorOldRuns(ctx, c)
 	s.doctorNDPProxy(c)
 	s.doctorNDPUplink(ctx, c)
 	s.doctorDNS(ctx, c)
@@ -140,7 +144,7 @@ func (s *Service) doctorState(ctx context.Context, c *checkSet) {
 		if len(bad) > 0 {
 			c.add("operations.journal", api.DoctorFail, "a rollback did not complete for: "+strings.Join(bad, ", "), "inspect the datasets of these jails, then remove the journal record")
 		} else if len(attention) > 0 {
-			c.add("operations.journal", api.DoctorFail, "the recovery after the last start could not resolve: "+strings.Join(attention, "; "), "look at what the run made (zfs list), clean it up, then remove the record from the journal directory")
+			c.add("operations.journal", api.DoctorFail, "the recovery after the last start could not resolve: "+strings.Join(attention, "; "), "a run of JailOps 0.9.2 (a convert, upgrade or rollback of a jail of its old root layout) is finished or rolled back by 0.9.2 only: reinstall 0.9.2, start it once so it recovers the run, check jailops doctor there, then upgrade again; do not destroy datasets of the jail meanwhile (its data may be in root.old or root.new)")
 		} else if inflight > 0 {
 			c.add("operations.journal", api.DoctorOK, "operations are in flight", "")
 		} else {
@@ -531,6 +535,7 @@ func (s *Service) doctorPF(ctx context.Context, c *checkSet) {
 			c.add("pf.order", api.DoctorOK, "no quick pass rule comes before the jailops anchor", "")
 		}
 		s.doctorPFInbound(c, rules)
+		s.doctorHostDefaultDeny(c, rules)
 		if hasScrub(rules) {
 			c.add("pf.scrub", api.DoctorOK, "pf.conf normalises packets (scrub)", "")
 		} else {
@@ -542,6 +547,7 @@ func (s *Service) doctorPF(ctx context.Context, c *checkSet) {
 			"/etc/pf.conf is yours and protects this host: JailOps' firewall governs the jails and needs exactly one line there. Add it before any quick rule that should not decide first, then reload with pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf. Write no jail rules in pf.conf: policies do that:\n"+render.AnchorLines())
 	}
 	s.doctorStatePolicy(ctx, c, rules)
+	s.doctorPFStates(ctx, c)
 }
 
 // pfStatus is "Enabled" or "Disabled" from the output of pfctl -s info, "" when it does not say.
@@ -971,4 +977,82 @@ func sizeText(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTP"[exp])
+}
+
+// doctorOldRuns names the datasets of each jail that a run of JailOps 0.9.2 left and this release neither uses nor
+// cleans (lifecycle.Leftovers): an interrupted conversion or upgrade of 0.9.2 can hold the jail's live data in one.
+func (s *Service) doctorOldRuns(ctx context.Context, c *checkSet) {
+	if s.life == nil {
+		return
+	}
+	s.mu.RLock()
+	keys := sortedKeys(s.jails)
+	s.mu.RUnlock()
+	bad := 0
+	for _, k := range keys {
+		left, err := s.life.Leftovers(ctx, k)
+		if err != nil || len(left) == 0 {
+			continue
+		}
+		bad++
+		project, name := validate.SplitQualified(k)
+		c.add("jail.old_datasets", api.DoctorWarn, fmt.Sprintf("jail %s/%s has datasets a run of JailOps 0.9.2 left: %s", project, name, strings.Join(left, ", ")),
+			"if an interrupted 0.9.2 convert or upgrade left them (operations.journal), reinstall 0.9.2 and start it once so it finishes or rolls back the run, then upgrade again; the jail's data may be in them, so do not destroy them before you know")
+	}
+	if bad == 0 {
+		c.add("jail.old_datasets", api.DoctorOK, "no jail has datasets a run of JailOps 0.9.2 left", "")
+	}
+}
+
+// doctorUpgradeState reports the jails whose upgrade failed and whose plan could not undo one of its steps: the root
+// may be between the old and the new state until someone rolls it back (the next successful upgrade or rollback clears it).
+func (s *Service) doctorUpgradeState(c *checkSet) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	bad := 0
+	for _, k := range sortedKeys(s.jails) {
+		e := s.jails[k]
+		if e.incomplete == "" {
+			continue
+		}
+		bad++
+		c.add("jail.upgrade_state", api.DoctorFail, fmt.Sprintf("jail %s/%s: %s", e.jail.Metadata.Project, e.jail.Metadata.Name, e.incomplete),
+			fmt.Sprintf("jailops stop %s --project %s, then jailops jail rollback %s --project %s --confirm-data-loss", e.jail.Metadata.Name, e.jail.Metadata.Project, e.jail.Metadata.Name, e.jail.Metadata.Project))
+	}
+	if bad == 0 {
+		c.add("jail.upgrade_state", api.DoctorOK, "no jail has an upgrade whose undo did not finish", "")
+	}
+	// the preflight detection of an upgrade: a root prepared against host-side pkg is an indicator of a compromised jail
+	for _, k := range sortedKeys(s.jails) {
+		if e := s.jails[k]; e.suspected != "" {
+			c.add("jail.suspected_compromised", api.DoctorFail, fmt.Sprintf("jail %s/%s: %s (it is not upgraded)", e.jail.Metadata.Project, e.jail.Metadata.Name, e.suspected),
+				"look at the jail: a link out of the root on a path pkg writes, or among pkg's own files, is what an attack on host-side pkg plants; remove it, or make it point inside the jail, and the next upgrade's check clears the finding")
+		}
+	}
+}
+
+// doctorUnsupportedLayout fails for every jail with the root layout of JailOps 0.9.2 and before: it does not start, a
+// running one can be stopped, it can be deleted, and nothing else works on it.
+func (s *Service) doctorUnsupportedLayout(c *checkSet) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	bad := 0
+	for _, k := range sortedKeys(s.jails) {
+		e := s.jails[k]
+		for _, v := range e.jail.Spec.Volumes {
+			if lifecycle.SystemDir(v.Mount) {
+				c.add("jail.volume_system_dir", api.DoctorWarn, fmt.Sprintf("jail %s/%s has the volume %s at %s, a directory of the jail's system: the jail starts, but an in-place upgrade refuses it and no other volume can be attached or detached", e.jail.Metadata.Project, e.jail.Metadata.Name, v.Name, v.Mount),
+					"move what the volume holds into a volume mounted below it (for example "+v.Mount+"/data) and detach this one")
+			}
+		}
+		if !e.unsupported {
+			continue
+		}
+		bad++
+		c.add("jail.unsupported_layout", api.DoctorFail, fmt.Sprintf("jail %s/%s has an unsupported root layout (a clone of an image with separate datasets for /etc, /usr/local and /var, made by JailOps 0.9.2 or earlier): it does not start; a running one can be stopped, and it can be deleted", e.jail.Metadata.Project, e.jail.Metadata.Name),
+			"it was made by an earlier release: create a new jail and move its data over, as docs/upgrade.md describes; a host not yet upgraded converts it with that release first: jailops jail convert "+e.jail.Metadata.Name+" --project "+e.jail.Metadata.Project+" --layout thick")
+	}
+	if bad == 0 {
+		c.add("jail.unsupported_layout", api.DoctorOK, "every jail has a root of its own", "")
+	}
 }

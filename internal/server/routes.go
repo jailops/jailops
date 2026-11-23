@@ -531,23 +531,6 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, "")
 			return nil
 		}},
-		route{method: "GET", pattern: "/api/v1/jails/{name}/diff", h: func(c *rc) error {
-			q := c.r.URL.Query()
-			limit := 0
-			if v := q.Get("limit"); v != "" {
-				n, err := strconv.Atoi(v)
-				if err != nil {
-					return api.Errorf(api.CodeInvalid, "limit %q is not a number", v)
-				}
-				limit = n
-			}
-			v, err := svc.JailDiff(c.r.Context(), c.pathArg("name"), limit, q.Get("dataset"), q.Get("packages") == "true")
-			if err != nil {
-				return err
-			}
-			c.sync(200, v, "")
-			return nil
-		}},
 		route{method: "GET", pattern: "/api/v1/exposed", h: func(c *rc) error {
 			v, err := svc.Exposed(c.r.Context(), c.r.URL.Query().Get("tunnels") == "true")
 			if err != nil {
@@ -615,18 +598,6 @@ func (s *Server) routeTable() []route {
 				return err
 			}
 			op, err := svc.ShellSetupJail(c.r.Context(), c.pathArg("name"), in)
-			if err != nil {
-				return err
-			}
-			c.async(op)
-			return nil
-		}},
-		route{method: "POST", pattern: "/api/v1/jails/{name}/repair-packages", h: func(c *rc) error {
-			var in api.RepairPackagesRequest
-			if err := c.decodeOptional(&in); err != nil {
-				return err
-			}
-			op, err := svc.RepairPackagesJail(c.r.Context(), c.pathArg("name"), in)
 			if err != nil {
 				return err
 			}

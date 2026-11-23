@@ -6,55 +6,8 @@ import (
 	"time"
 )
 
-// Class says how a persistent dataset is treated by rollback scopes.
-type Class string
-
-const (
-	// ClassSystem datasets hold configuration that belongs to the OS root
-	// generation (/etc). Only the "all" rollback scope rolls them back.
-	ClassSystem Class = "system"
-	// ClassData datasets hold application data. The "data" and "all" scopes
-	// roll them back.
-	ClassData Class = "data"
-)
-
-// PersistentPath is one path of a thin jail that survives an upgrade because it
-// lives in its own dataset mounted under the root.
-type PersistentPath struct {
-	// Dataset is the child name below the jail's container dataset.
-	Dataset string
-	// Path is the mount path inside the jail.
-	Path  string
-	Class Class
-	// Merge marks datasets the merge tool writes to; they are rolled back to
-	// a pre-merge snapshot when an upgrade fails after the merge.
-	Merge bool
-	// NoSeed leaves the dataset empty at creation instead of copying the
-	// image's content of Path into it.
-	NoSeed bool
-}
-
-// DefaultPersistent is the persistent path list of design section 4.2. It is
-// configuration (lifecycle.persistent in jailopsd.yaml) and this is only the
-// default. Prototype 2 verified /etc, /usr/local, /home and /root survive a
-// generation switch. UNVERIFIED: pkg database persistence, that is /var/db
-// (pkg keeps its database in /var/db/pkg, so a switch that keeps /var/db also
-// keeps the package records of a generation the root no longer has).
-func DefaultPersistent() []PersistentPath {
-	return []PersistentPath{
-		{Dataset: "etc", Path: "/etc", Class: ClassSystem, Merge: true},
-		{Dataset: "local", Path: "/usr/local", Class: ClassData},
-		{Dataset: "var-db", Path: "/var/db", Class: ClassData, Merge: true},
-		{Dataset: "var-log", Path: "/var/log", Class: ClassData},
-		{Dataset: "var-mail", Path: "/var/mail", Class: ClassData},
-		{Dataset: "var-spool", Path: "/var/spool", Class: ClassData},
-		{Dataset: "home", Path: "/home", Class: ClassData},
-		{Dataset: "rootdir", Path: "/root", Class: ClassData},
-	}
-}
-
-// DefaultRootOldRetention is how long the previous root of an upgraded jail is kept: `jail rollback --scope root` works
-// until then, and housekeeping destroys it after.
+// DefaultRootOldRetention is how long the snapshot of an upgrade is kept: `jail rollback` works until then, and
+// housekeeping destroys it after.
 const DefaultRootOldRetention = 14 * 24 * time.Hour
 
 // Config configures the lifecycle.
@@ -62,10 +15,8 @@ type Config struct {
 	// Root is the JailOps dataset, for example "tank/jailops".
 	Root string
 	// MountBase is the directory under which jails are mounted.
-	MountBase  string
-	Persistent []PersistentPath
-	Merge      MergeConfig
-	// RootOldRetention is how long root.old is kept after an upgrade.
+	MountBase string
+	// RootOldRetention is how long the snapshot of an upgrade (and a root.old a conversion left) is kept.
 	RootOldRetention time.Duration
 	// ReadyTimeout and PollInterval govern the readiness check after start.
 	ReadyTimeout time.Duration
@@ -113,15 +64,6 @@ func (c Config) attached(key string) ([]Attached, error) {
 	}
 	return c.Attached(key)
 }
-
-func (c Config) persistent() []PersistentPath {
-	if c.Persistent == nil {
-		return DefaultPersistent()
-	}
-	return c.Persistent
-}
-
-func (c Config) merge() MergeConfig { return c.Merge.names() }
 
 func (c Config) now() time.Time {
 	if c.Now != nil {
@@ -217,16 +159,12 @@ type jpaths struct {
 func (p jpaths) jailsDS() string     { return ProjectJailsDS(p.st, p.project) }
 func (p jpaths) containerDS() string { return path.Join(p.jailsDS(), p.name) }
 func (p jpaths) rootDS() string      { return p.containerDS() + "/root" }
-func (p jpaths) rootNewDS() string   { return p.containerDS() + "/root.new" }
 func (p jpaths) rootOldDS() string   { return p.containerDS() + "/root.old" }
-func (p jpaths) rootStaleDS() string { return p.containerDS() + "/root.stale" }
 func (p jpaths) delegatedDS() string { return p.containerDS() + "/delegated" }
 func (p jpaths) containerMP() string {
 	return path.Join(p.st.MountBase, "projects", p.project, "jails", p.name)
 }
 func (p jpaths) rootMP() string     { return p.containerMP() + "/root" }
-func (p jpaths) rootNewMP() string  { return p.containerMP() + "/root.new" }
-func (p jpaths) rootOldMP() string  { return p.containerMP() + "/root.old" }
 func (p jpaths) specPath() string   { return p.containerMP() + "/spec.json" }
 func (p jpaths) bundlePath() string { return p.containerMP() + "/bundle.json" }
 

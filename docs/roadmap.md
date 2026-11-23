@@ -56,6 +56,7 @@ Planned beside the list above, none of it a promise for 1.x releases before 16.0
 - A permission for opening a shell in a jail that is separate from the one for starting and stopping it.
 - Restart a service or a jail when one of its packages was upgraded (the update record already lists what changed).
 - A ready-made installation image of FreeBSD with JailOps, if people ask for one.
+- `jailops jail upgrade` for an Alpine jail: the release move with apk inside one snapshot, as a FreeBSD jail has it.
 
 ## Gaps found by the workflow walkthrough
 
@@ -63,8 +64,8 @@ The table [test/workflows/daily-tasks.md](../test/workflows/daily-tasks.md) list
 task that is not one plain command has an entry here, named `W-...`, with the command it should have. An entry leaves this
 list in the change that adds the command; the table and the script then say OK. Every command has a page or a button in
 the console as well.
-- **`W-upgrade-major`**: `jailops jail upgrade NAME --image IMG` moves the root across a major release and warns about the packages, which are
-  reinstalled by hand today; the command reinstalls them for the new ABI inside the same snapshot and rollback once a major
-  release exists to test it on.
+- **`W-upgrade-major`**: `jailops jail upgrade NAME --release 16.0-RELEASE` upgrades the base in place across a major
+  release; the ports packages are reinstalled for the new ABI by hand today (`pkg upgrade -f` inside the jail); the command
+  does it inside the same snapshot once a major release exists to test it on.
 - **`W-backup-nodeless`**: a backup of a jail to a directory or dataset of the host, without a separate node, key escrow and
   policy for the cases that need only a copy.

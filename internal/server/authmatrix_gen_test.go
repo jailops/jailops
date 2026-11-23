@@ -216,6 +216,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 		if _, err := op.Wait(c); err != nil {
 			t.Fatalf("%s: %v\n%s", p, err, e.Log())
 		}
+		e.Files.Put("/jailops/projects/"+p+"/jails/web/root/var/log/messages", []byte("Oct 29 11:00:00 web one\n"))
 		sn, err := pc.Jails().Snapshots("web").Create(c, "s1", "")
 		if err != nil {
 			t.Fatal(err)

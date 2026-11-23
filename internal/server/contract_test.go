@@ -99,7 +99,7 @@ func TestJailLifecycle(t *testing.T) {
 	if j.Metadata.UUID == "" || j.Metadata.Scope != api.ScopeHost || j.Metadata.Generation != 1 || j.Metadata.Host != e.D.Service().HostUUID() {
 		t.Fatalf("%+v", j.Metadata)
 	}
-	if j.Spec.Network[0].IPv4 != "10.20.0.10" || j.Spec.OS != api.OSFreeBSD || j.Spec.Layout != api.LayoutThin || j.Spec.Hostname != "web" {
+	if j.Spec.Network[0].IPv4 != "10.20.0.10" || j.Spec.OS != api.OSFreeBSD || j.Spec.Hostname != "web" {
 		t.Fatalf("%+v", j.Spec)
 	}
 	_, err := e.Admin.Jails().Create(c, dtest.WebJail("web"))
@@ -206,7 +206,7 @@ func TestJailUsageOverHTTP(t *testing.T) {
 	if a := u.Accounting; a.Error != "" || a.Processes != 5 || a.CPUSeconds != 61 || a.MemoryBytes != 1048576 {
 		t.Fatalf("%+v", a)
 	}
-	if u.Disk.Error != "" || u.Disk.RootBytes != 4096 || u.Disk.RootReferencedBytes != 1<<30 || u.Disk.DataBytes == 0 || u.Disk.DataBytes%1000 != 0 {
+	if u.Disk.Error != "" || u.Disk.RootBytes != 4096 || u.Disk.RootReferencedBytes != 1<<30 || u.Disk.DataBytes != 0 {
 		t.Fatalf("%+v", u.Disk)
 	}
 	j, _ := e.Admin.Jails().Get(c, "web")
@@ -260,57 +260,11 @@ func TestSnapshotsRollbackUpgrade(t *testing.T) {
 	if _, err := rb.Wait(c); err != nil {
 		t.Fatalf("data rollback: %v\n%s", err, e.Log())
 	}
-	// Root rollback has nothing to return to on generation 1.
+	// Root rollback has no upgrade to return to.
 	rb, _ = e.Admin.Jails().Rollback(c, "web", api.JailRollback{})
 	_, err = rb.Wait(c)
 	wantCode(t, err, api.CodeNotFound)
 
-	// Build generation 2, upgrade (dry run first), then roll the root back.
-	bop, err := e.Admin.Images().Build(c, "fb", api.ImageBuild{FromGeneration: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	g2, err := bop.Wait(c)
-	if err != nil || g2.Number != 2 || g2.Parent != 1 {
-		t.Fatalf("%v %+v\n%s", err, g2, e.Log())
-	}
-	dry, err := e.Admin.Jails().Upgrade(c, "web", api.JailUpgrade{DryRun: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	dr, err := dry.WaitResult(c)
-	if err != nil {
-		t.Fatalf("dry run: %v\n%s", err, e.Log())
-	}
-	if !strings.Contains(string(dr.Operation.Metadata), `"plan"`) || !strings.Contains(string(dr.Operation.Metadata), "zfs snapshot") {
-		t.Fatalf("dry run shows no plan: %s", dr.Operation.Metadata)
-	}
-	before, _ := e.Admin.Jails().Get(c, "web")
-	if before.Status.ImageGeneration != "fb#g1" {
-		t.Fatalf("dry run changed the jail: %+v", before.Status)
-	}
-	up, err := e.Admin.Jails().Upgrade(c, "web", api.JailUpgrade{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := up.Wait(c); err != nil {
-		t.Fatalf("upgrade: %v\n%s", err, e.Log())
-	}
-	after, _ := e.Admin.Jails().Get(c, "web")
-	if after.Status.ImageGeneration != "fb#g2" {
-		t.Fatalf("%+v", after.Status)
-	}
-	rb, _ = e.Admin.Jails().Rollback(c, "web", api.JailRollback{})
-	if _, err := rb.Wait(c); err != nil {
-		t.Fatalf("root rollback: %v\n%s", err, e.Log())
-	}
-	back, _ := e.Admin.Jails().Get(c, "web")
-	if back.Status.ImageGeneration != "fb#g1" {
-		t.Fatalf("%+v", back.Status)
-	}
-	// The generation a jail uses cannot be deleted.
-	_, err = e.Admin.Images().DeleteGeneration(c, "fb", 1)
-	wantCode(t, err, api.CodeImageInUse)
 	// Snapshot delete.
 	d, err := e.Admin.Jails().Snapshots("web").Delete(c, "before")
 	if err != nil {
@@ -560,38 +514,25 @@ func TestImagesAndGenerations(t *testing.T) {
 	if len(gens) != 1 || gens[0].Manifest == "" {
 		t.Fatalf("%+v", gens)
 	}
-	// An image used by a jail cannot be deleted, and the error names the jail; a used generation neither.
+	// A jail is a copy of a generation: it holds on to neither the image nor the generation it came from.
 	mustJail(t, e, "web")
-	err = e.Admin.Images().Delete(c, "fb")
-	wantCode(t, err, api.CodeImageInUse)
-	if !strings.Contains(err.Error(), "web") {
-		t.Fatalf("the error must name the jail: %v", err)
-	}
-	_, err = e.Admin.Images().DeleteGeneration(c, "fb", 1)
-	wantCode(t, err, api.CodeImageInUse)
-	for i := 0; i < 2; i++ { // g2 is free once g3 exists
+	for i := 0; i < 2; i++ {
 		bop, _ := e.Admin.Images().Build(c, "fb", api.ImageBuild{FromGeneration: 1})
 		if _, err := bop.Wait(c); err != nil {
 			t.Fatal(err)
 		}
 	}
-	_, err = e.Admin.Images().DeleteGeneration(c, "fb", 3)
-	wantCode(t, err, api.CodeImageInUse)
-	dop, err := e.Admin.Images().DeleteGeneration(c, "fb", 2)
+	dop, err := e.Admin.Images().DeleteGeneration(c, "fb", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := dop.Wait(c); err != nil {
 		t.Fatal(err)
 	}
-	// Deleting the image removes every generation once no jail uses it.
-	jop, err := e.Admin.Jails().Delete(c, "web")
-	if err != nil {
-		t.Fatal(err)
+	if _, err := e.Admin.Jails().Get(c, "web"); err != nil {
+		t.Fatalf("the jail went with its generation: %v", err)
 	}
-	if _, err := jop.Wait(c); err != nil {
-		t.Fatal(err)
-	}
+	// Deleting the image removes every generation; the jail made from it stays.
 	if err := e.Admin.Images().Delete(c, "fb"); err != nil {
 		t.Fatal(err)
 	}
@@ -604,7 +545,7 @@ func TestImagesAndGenerations(t *testing.T) {
 	wantCode(t, err, api.CodeNotFound)
 }
 
-func TestImageUpgradeBuildsAndMovesTheJails(t *testing.T) {
+func TestImageUpgradeBuildsAGenerationAndTouchesNoJail(t *testing.T) {
 	e := seeded(t)
 	c := ctxT(t)
 	mustJail(t, e, "web")
@@ -612,6 +553,7 @@ func TestImageUpgradeBuildsAndMovesTheJails(t *testing.T) {
 	if _, err := so.Wait(c); err != nil {
 		t.Fatalf("%v\n%s", err, e.Log())
 	}
+	before, _ := e.Admin.Jails().Get(c, "web")
 	// Only a global admin: a project admin is forbidden, and so is a global operator (the role of image builds).
 	_, err := e.Scoped(api.PermAdmin, dtest.SeedProject).Images().Upgrade(c, "fb", api.ImageUpgrade{})
 	wantCode(t, err, api.CodeForbidden)
@@ -619,19 +561,19 @@ func TestImageUpgradeBuildsAndMovesTheJails(t *testing.T) {
 	wantCode(t, err, api.CodeForbidden)
 	_, err = e.Admin.Images().Upgrade(c, "nope", api.ImageUpgrade{})
 	wantCode(t, err, api.CodeNotFound)
-	// The repository has nothing newer: no generation is kept and the jail stays.
+	// The repository has nothing newer: no generation is kept.
 	op, err := e.Admin.Images().Upgrade(c, "fb", api.ImageUpgrade{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	res, err := op.Wait(c)
-	if err != nil || !res.Unchanged || res.Generation != nil || len(res.Jails) != 1 || res.Jails[0].Status != api.ImageUpgradeSkipped {
+	if err != nil || !res.Unchanged || res.Generation != nil {
 		t.Fatalf("%+v %v\n%s", res, err, e.Log())
 	}
 	if im, _ := e.Admin.Images().Get(c, "fb"); len(im.Status.Generations) != 1 {
 		t.Fatalf("%+v", im.Status)
 	}
-	// A newer package set: the generation is built, the jail moves, the history and the events are those of an OS update.
+	// A newer package set: the generation is built for new jails; the running jail is not touched.
 	e.SetRepoVersion("15.1p2")
 	evctx, cancel := context.WithCancel(c)
 	defer cancel()
@@ -640,26 +582,22 @@ func TestImageUpgradeBuildsAndMovesTheJails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info := op.Info(); info.Project != "" || info.Resources["images"][0] != "/api/v1/images/fb" || info.Resources["jails"][0] != "/api/v1/jails/web" {
+	if info := op.Info(); info.Project != "" || info.Resources["images"][0] != "/api/v1/images/fb" || len(info.Resources["jails"]) != 0 {
 		t.Fatalf("%+v", info)
 	}
 	res, err = op.Wait(c)
 	if err != nil || res.Unchanged || res.Generation == nil || res.Generation.Number != 2 || res.From != "fb#g1" {
 		t.Fatalf("%+v %v\n%s", res, err, e.Log())
 	}
-	if j := res.Jails[0]; j.Jail != "web" || j.Project != dtest.SeedProject || j.Status != api.ImageUpgradeUpgraded || j.From != "fb#g1" || j.To != "fb#g2" || j.Record == "" {
-		t.Fatalf("%+v", j)
-	}
 	after, _ := e.Admin.Jails().Get(c, "web")
-	if after.Status.ImageGeneration != "fb#g2" || after.Status.Power != api.PowerRunning {
+	if after.Status.ImageGeneration != "fb#g1" || after.Status.Power != api.PowerRunning || after.Status.JID != before.Status.JID {
 		t.Fatalf("%+v", after.Status)
 	}
-	h, err := e.Admin.Jails().UpdateHistory(c, "web")
-	if err != nil || len(h) != 1 || h[0].ID != res.Jails[0].Record || h[0].Kind != api.UpdateKindOS || h[0].Result != api.UpdateSuccess {
+	if h, err := e.Admin.Jails().UpdateHistory(c, "web"); err != nil || len(h) != 0 {
 		t.Fatalf("%+v %v", h, err)
 	}
 	seen := map[string]bool{}
-	for !seen["image-generation-created"] || !seen["update.applied"] || !seen["image-upgraded"] {
+	for !seen["image-generation-created"] || !seen["image-upgraded"] {
 		select {
 		case ev := <-events:
 			var l api.LifecycleEvent
@@ -670,11 +608,11 @@ func TestImageUpgradeBuildsAndMovesTheJails(t *testing.T) {
 			t.Fatalf("events not seen: %v", seen)
 		}
 	}
-	// A dry run lists what would move and changes nothing.
+	// A dry run plans the build and changes nothing.
 	e.SetRepoVersion("15.1p3")
 	op, _ = e.Admin.Images().Upgrade(c, "fb", api.ImageUpgrade{DryRun: true})
 	res, err = op.Wait(c)
-	if err != nil || !res.DryRun || res.Generation != nil || len(res.Plan) == 0 || res.Jails[0].Status != api.ImageUpgradePlanned || res.Jails[0].To != "fb#g3" {
+	if err != nil || !res.DryRun || res.Generation != nil || len(res.Plan) == 0 {
 		t.Fatalf("%+v %v", res, err)
 	}
 	if im, _ := e.Admin.Images().Get(c, "fb"); len(im.Status.Generations) != 2 {

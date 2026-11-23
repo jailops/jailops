@@ -7,9 +7,8 @@
 # fixture with the CURRENT code on every `go test`: that is the guarantee that a host of any release since 0.8.0
 # upgrades in place.
 #
-# Run it for the release you are about to tag AFTER the release exists (`just release X`, then
-# `scripts/make-upgrade-fixture.sh X`), and commit the directory. `just release-pr` refuses to prepare the next release
-# while the fixture of the newest tag is missing.
+# `just release-pr` runs it for the newest tag when master lacks that tag's fixture, and puts the directory into the
+# release PR. By hand: `scripts/make-upgrade-fixture.sh X` for a release that exists, then commit the directory.
 #
 #   VERSION     a tag: v0.8.6 or 0.8.6
 #   GOPROXY     passed through (set it to off to use the module cache only)

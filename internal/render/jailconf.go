@@ -17,13 +17,13 @@ const HelperCommand = "/usr/local/libexec/jailops-priv hook"
 // DefaultDevfsRuleset is devfsrules_jail from the stock FreeBSD devfs.rules.
 const DefaultDevfsRuleset = 4
 
-// AllowList is the set of allow.* parameters jail.conf may carry; the
-// argument names omit the "allow." prefix.
+// AllowList is the set of allow.* parameters jail.conf may carry; the argument names omit the "allow." prefix. No
+// allow.chflags: the base of a jail keeps its schg flags.
 var AllowList = map[string]bool{
-	"set_hostname": true, "sysvipc": true, "raw_sockets": true, "chflags": true,
+	"set_hostname": true, "sysvipc": true, "raw_sockets": true,
 	"mlock": true, "reserved_ports": true, "read_msgbuf": true, "socket_af": true,
 	"mount": true, "mount.devfs": true, "mount.fdescfs": true, "mount.nullfs": true,
-	"mount.procfs": true, "mount.tmpfs": true, "mount.zfs": true,
+	"mount.tmpfs": true, "mount.zfs": true,
 }
 
 // JailConfInput is everything the per-jail jail.conf depends on.

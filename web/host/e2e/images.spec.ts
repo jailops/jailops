@@ -23,7 +23,6 @@ test('an empty Images page explains images and creates the base image', async ({
   await expect(page.getByTestId('image-auto')).not.toBeChecked() // the nightly upgrade is the owner's choice
   await page.getByTestId('image-auto').check()
   await expect(page.getByTestId('image-at')).toHaveValue('03:00')
-  await expect(page.getByTestId('image-packages')).toBeChecked()
   await expect(page.getByTestId('image-build')).toBeChecked()
   await expect(dialog).toContainText('takes a few minutes')
 
@@ -92,14 +91,13 @@ test('an image card turns the nightly upgrade on and off and shows its runs', as
   await go(page, 'x', '/images')
   const card = page.locator('[data-image="freebsd-15-1"]').getByTestId('auto-upgrade')
   await expect(card.getByTestId('auto-upgrade-on')).toBeChecked()
-  await expect(card.getByTestId('auto-upgrade-summary')).toHaveText('Every night at 03:00 (host time), with the packages inside the jails.')
+  await expect(card.getByTestId('auto-upgrade-summary')).toHaveText('Every night at 03:00 (host time).')
   await expect(card.getByTestId('auto-upgrade-runs').locator('tbody tr')).toHaveCount(3)
-  await expect(card.getByTestId('auto-upgrade-runs')).toContainText('5 moved, 5 with packages upgraded')
+  await expect(card.getByTestId('auto-upgrade-runs')).toContainText('freebsd-15-1#g4')
   await expect(card.getByTestId('auto-upgrade-failed')).toHaveCount(0)
 
   // another time: Save appears, and the time is checked first
   await card.getByTestId('auto-upgrade-at').fill('04:30')
-  await card.getByTestId('auto-upgrade-packages').uncheck()
   await card.getByTestId('auto-upgrade-save').click()
   await expect(card.getByTestId('auto-upgrade-summary')).toHaveText('Every night at 04:30 (host time).')
   await expect(card.getByTestId('auto-upgrade-save')).toHaveCount(0)
@@ -122,7 +120,7 @@ test('a failed night is shown plainly on the card', async ({ page }) => {
   await expect(n).toBeVisible()
   await expect(n).toHaveAttribute('role', 'alert')
   await expect(n).toContainText('The last nightly upgrade failed')
-  await expect(n).toContainText('jail db: health check /usr/local/bin/check exited 1')
+  await expect(n).toContainText('fetching the catalogue of the base repository failed')
   await expect(card.getByTestId('auto-upgrade-runs').locator('tbody tr').first()).toContainText('Failed')
 })
 

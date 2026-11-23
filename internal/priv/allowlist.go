@@ -13,8 +13,7 @@ import (
 	"jailops.net/jailops/internal/render"
 )
 
-// The command allow-list for Runner. lifecycle needs two host tools that
-// work on a jail root from the outside: pkg(8) and etcupdate(8). Each is
+// The command allow-list for Runner. lifecycle needs pkg(8) to work on a jail root from the outside. It is
 // described by one Rule below (as are the other host tools); a command that
 // matches no rule is refused, and the binary that runs is the rule's fixed
 // absolute path, never a path the caller names.
@@ -110,7 +109,7 @@ var SysctlWrites = map[string]*regexp.Regexp{
 	"kern.elf64.fallback_brand": regexp.MustCompile(`^(-1|3)$`),
 }
 
-var pfctlShow = []string{"info", "rules", "nat", "Anchors", "Tables"}
+var pfctlShow = []string{"info", "rules", "nat", "memory", "Anchors", "Tables"}
 
 // customSysctl accepts "-n <readable name>" and, for an admin,
 // "<writable name>=<value>".
@@ -213,7 +212,7 @@ func customDnctl(_ Config, _ bool, args []string) error {
 	return forbidden("dnctl: only pipe N config bw RATE, pipe delete N and pipe list are accepted")
 }
 
-// customPfctl accepts the read-only forms "-s info" and
+// customPfctl accepts the read-only forms "-s info|rules|nat|memory" and
 // "-a <jailops anchor> -s rules|nat|Anchors|Tables|info", flags in any order.
 func customPfctl(_ Config, _ bool, args []string) error {
 	var anchor, what string
@@ -243,7 +242,7 @@ func customPfctl(_ Config, _ bool, args []string) error {
 	}
 	if !anchorSet {
 		// The main ruleset is read-only state too: doctor looks for the jailops anchor lines in it.
-		if what != "info" && what != "rules" && what != "nat" {
+		if what != "info" && what != "rules" && what != "nat" && what != "memory" { // memory: the limits (doctor: pf.states)
 			return forbidden("pfctl -s %s needs -a <jailops anchor>", what)
 		}
 		return nil
@@ -254,12 +253,15 @@ func customPfctl(_ Config, _ bool, args []string) error {
 	return checkAnchor(anchor)
 }
 
-var pkgOptionValue = map[string]string{"ASSUME_ALWAYS_YES": "yes", "IGNORE_OSVERSION": "yes"}
+var pkgOptionValue = map[string]string{"ASSUME_ALWAYS_YES": "yes", "IGNORE_OSVERSION": "yes", "RUN_SCRIPTS": "false", "PKG_ENABLE_PLUGINS": "false"}
 
-// checkPkgOption accepts the few -o options image building and the shell setup need:
+// reOSVersion is a __FreeBSD_version (kern.osreldate): pkg refuses packages built for a newer one.
+var reOSVersion = regexp.MustCompile(`^[1-9][0-9]{6}$`)
+
+// checkPkgOption accepts the few -o options image building, the shell setup and the upgrade of a jail need:
 // REPOS_DIR=<path under the storage roots or the state directory>, PKG_CACHEDIR=<the same>,
-// ASSUME_ALWAYS_YES=yes, IGNORE_OSVERSION=yes, ABI=<abi>, and the limits of a download:
-// FETCH_TIMEOUT=<1 to 600 seconds> and FETCH_RETRY=<0 to 10>.
+// ASSUME_ALWAYS_YES=yes, IGNORE_OSVERSION=yes, ABI=<abi>, OSVERSION=<__FreeBSD_version>, RUN_SCRIPTS=false,
+// PKG_ENABLE_PLUGINS=false, and the limits of a download: FETCH_TIMEOUT=<1 to 600 seconds> and FETCH_RETRY=<0 to 10>.
 func checkPkgJail(_ Config, v string) error { return ValidJailName(v) }
 
 func checkPkgOption(c Config, v string) error {
@@ -270,7 +272,7 @@ func checkPkgOption(c Config, v string) error {
 	switch {
 	case k == "REPOS_DIR", k == "PKG_CACHEDIR":
 		return c.checkRulePath(pathState, val)
-	case k == "ABI" && reABI.MatchString(val):
+	case k == "ABI" && reABI.MatchString(val), k == "OSVERSION" && reOSVersion.MatchString(val):
 		return nil
 	case k == "FETCH_TIMEOUT" && inRange(val, 1, 600), k == "FETCH_RETRY" && inRange(val, 0, 10):
 		return nil
@@ -300,63 +302,6 @@ func pkgNameOK(a string) bool {
 	return true
 }
 
-var etcupdateSubs = []string{"extract", "resolve", "status", "diff", "revert"}
-
-// customEtcupdate accepts etcupdate with its flags and one optional
-// subcommand, flags before or after it:
-//
-//	etcupdate extract -d <work> -t <tar> -D <root>
-//	etcupdate -d <work> -t <tar> -D <root> -L <log>
-//
-// -D names a tree below a storage root (never the root itself); -d, -t
-// and -L name paths below the state directory or a storage root.
-func customEtcupdate(c Config, _ bool, args []string) error {
-	seen := map[string]bool{}
-	sub := ""
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch a {
-		case "-B", "-n":
-			if seen[a] {
-				return invalid("etcupdate: %s given twice", a)
-			}
-			seen[a] = true
-		case "-D", "-d", "-t", "-L":
-			if seen[a] {
-				return invalid("etcupdate: %s given twice", a)
-			}
-			seen[a] = true
-			i++
-			if i >= len(args) {
-				return invalid("etcupdate: %s needs a value", a)
-			}
-			kind := pathState
-			if a == "-D" {
-				kind = pathJailTree
-			}
-			if err := c.checkRulePath(kind, args[i]); err != nil {
-				return err
-			}
-		default:
-			switch {
-			case strings.HasPrefix(a, "-"):
-				return forbidden("etcupdate: flag %q is not allowed", a)
-			case sub == "" && slices.Contains(etcupdateSubs, a) && len(rest) == 0:
-				sub = a
-			case sub != "" && sub != "extract" && rePkgName.MatchString(a) && pkgNameOK(a) && len(rest) < 16:
-				rest = append(rest, a)
-			default:
-				return forbidden("etcupdate: argument %q is not allowed", a)
-			}
-		}
-	}
-	if !seen["-D"] {
-		return invalid("etcupdate needs -D")
-	}
-	return nil
-}
-
 // customPwdMkdb accepts only: pwd_mkdb -p -d <etc dir> <master.passwd>.
 // customPwLockRoot accepts exactly `pw -R <tree> usermod root -w no`: the tree is a jail tree (an image root being built)
 // and the only change is that root has no password to log in with.
@@ -381,58 +326,6 @@ func customPwdMkdb(c Config, _ bool, args []string) error {
 		return forbidden("pwd_mkdb: the file must be named master.passwd")
 	}
 	return nil
-}
-
-// customPkgRecords accepts only the four forms that read or change the package RECORDS of a jail root without touching
-// its files (the base records of a thin jail follow the image generation the root was cloned from):
-//
-//	pkg-records -r <tree> info -a -q
-//	pkg-records -r <tree> info --raw --raw-format ucl <name>
-//	pkg-records -r <tree> unregister -f -y <name>...
-//	pkg-records -r <tree> register -t -M <manifest in the state or work area>
-//
-// unregister deletes records only: no file is removed and no script runs. register -t records a manifest without
-// looking at files and without running scripts (-N, which installs and runs scripts, is not accepted). Every name
-// passes rePkgName and pkgNameOK, the tree is a path below a storage root that stays inside its jail's tree, and the
-// manifest is a file in the state or work area. verifyPkgRecords refuses the root of a running jail and a tree whose
-// package database path is a link, and the manifest is checked against the image generation of the jail (sealRecordManifest).
-func customPkgRecords(c Config, _ bool, args []string) error {
-	if len(args) < 4 || args[0] != "-r" {
-		return forbidden("pkg-records: the form is -r <tree> info|unregister|register ...")
-	}
-	if err := c.checkRulePath(pathJailTree, args[1]); err != nil {
-		return err
-	}
-	rest := args[3:]
-	switch args[2] {
-	case "info":
-		switch {
-		case len(rest) == 2 && rest[0] == "-a" && rest[1] == "-q":
-			return nil
-		case len(rest) == 4 && rest[0] == "--raw" && rest[1] == "--raw-format" && rest[2] == "ucl" && recordNameOK(rest[3]):
-			return nil
-		}
-		return forbidden("pkg-records info: only -a -q and --raw --raw-format ucl <name> are accepted")
-	case "unregister":
-		if len(rest) < 3 || len(rest) > 66 || rest[0] != "-f" || rest[1] != "-y" {
-			return forbidden("pkg-records unregister: only -f -y <name>... (up to 64) is accepted")
-		}
-		for _, n := range rest[2:] {
-			if !recordNameOK(n) {
-				return forbidden("pkg-records unregister: name %q is not allowed", n)
-			}
-		}
-		return nil
-	case "register":
-		if len(rest) != 3 || rest[0] != "-t" || rest[1] != "-M" {
-			return forbidden("pkg-records register: only -t -M <manifest> is accepted")
-		}
-		if !strings.HasSuffix(rest[2], ".ucl") {
-			return forbidden("pkg-records register: the manifest must be a .ucl file")
-		}
-		return c.checkRulePath(pathState, rest[2])
-	}
-	return forbidden("pkg-records: subcommand %q is not allowed", args[2])
 }
 
 // recordNameOK is a package name as pkg prints it (FreeBSD-runtime, bash): no glob, no regexp, no file.
@@ -516,25 +409,19 @@ var CommandRules = []Rule{
 		Reason: "configure and delete the dummynet pipes of the bandwidth limits, in JailOps's own range of pipe numbers only",
 	},
 	{
-		Name: "pkg", Binary: "/usr/sbin/pkg", Reason: "install and update packages in a jail root nobody runs in (-r), or inside a running jail (-j)",
+		Name: "pkg", Binary: "/usr/sbin/pkg", Reason: "build images and upgrade the root of a jail from the host (-r), or install and update packages inside a running jail (-j)",
 		Verify: verifyPkg,
 
 		Flags:      []flagRule{{Flag: "-r", Path: pathJailTree}, {Flag: "-j", Check: checkPkgJail}, {Flag: "-o", Check: checkPkgOption, Many: true}},
 		OneOfFlags: []string{"-r", "-j"},
 		Exact:      [][]string{{"config", "abi"}},
 		// the packages installed on purpose, for an app draft (internal/apps.PkgLeavesArgv)
-		RestExact:   [][]string{{"query", "-e", "%a = 0", "%n %v %R %w"}},
+		RestExact: [][]string{{"query", "-e", "%a = 0", "%n %v %R %w"},
+			// the catalogue of the private repository, read into a scratch root: what a jail's upgrade compares with
+			{"rquery", "-r", "jailops", "%n %v %sb"}},
 		Subcommands: []string{"install", "upgrade", "update", "delete", "remove", "autoremove", "info", "audit", "lock", "unlock", "fetch", "clean", "check", "version", "bootstrap", "query"},
-		Rest:        rePkgName, RestCheck: pkgNameOK, MaxRest: 64, RestFlags: []string{"-y", "-q", "-n", "-f", "-a", "-U", "-F", "-x", "-r", "-d"},
+		Rest:        rePkgName, RestCheck: pkgNameOK, MaxRest: 64, RestFlags: []string{"-y", "-q", "-n", "-f", "-a", "-U", "-F", "-x", "-r", "-d", "-s"},
 		MaxTimeoutSeconds: 3600,
-	},
-	{
-		Name: "pkg-records", Binary: "/usr/sbin/pkg", MaxTimeoutSeconds: 300, Custom: customPkgRecords, Verify: verifyPkgRecords,
-		Reason: "keep the base package records of a thin jail in step with its image generation: read both databases, unregister and register records only (no file is touched, no script runs)",
-	},
-	{
-		Name: "etcupdate", Binary: "/usr/sbin/etcupdate", MaxTimeoutSeconds: 1800, Custom: customEtcupdate,
-		Reason: "merge /etc changes into a jail root during an upgrade, and extract the /etc of an image",
 	},
 	{
 		Name: "pwd_mkdb", Binary: "/usr/sbin/pwd_mkdb", MaxTimeoutSeconds: 60, Custom: customPwdMkdb,
@@ -780,7 +667,7 @@ func pkgProgram() string {
 
 // binaryOf is the program that runs for r: its Binary, except that pkg runs as pkg itself when it is installed.
 func binaryOf(r *Rule) string {
-	if r.Name == "pkg" || r.Name == "pkg-records" {
+	if r.Name == "pkg" {
 		return pkgProgram()
 	}
 	return r.Binary

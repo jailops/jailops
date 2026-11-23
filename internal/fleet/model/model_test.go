@@ -66,7 +66,6 @@ func TestRolloutSpec(t *testing.T) {
 	for name, bad := range map[string]RolloutSpec{
 		"no selector": {},
 		"action":      {Selector: map[string]string{"a": "b"}, Action: "delete"},
-		"generation":  {Selector: map[string]string{"a": "b"}, Generation: "3"},
 		"duration":    {Selector: map[string]string{"a": "b"}, Pause: "soon"},
 		"negative":    {Selector: map[string]string{"a": "b"}, Canary: -1},
 	} {

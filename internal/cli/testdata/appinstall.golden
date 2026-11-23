@@ -4,7 +4,7 @@ $ jailops app installed
 $ jailops app install nginx --image freebsd-151 --dry-run
 Dry run: nothing was created. Installing app nginx as jail nginx would do:
   01 create-volume-nginx-usr-local-www: create volume nginx-usr-local-www for /usr/local/www
-  02 create-jail: create thin jail nginx from freebsd-151
+  02 create-jail: create jail nginx from freebsd-151
   03 start-jail: start nginx
   04 install-packages-ports: pkg -r <root> install -y nginx
   05 record-version: pkg -r <root> query %v nginx, then label jailops.app.version
@@ -65,10 +65,10 @@ nginx
 valkey
 
 $ jailops list
-NAME     STATE     IMAGE         GEN   ADDRESSES    EXPOSED   AUTOSTART   USED   AGE
-db       running   freebsd-151   g1    10.20.0.11   -         -           -      3h
-nginx    running   freebsd-151   g1    10.20.0.10   -         -           -      3h
-valkey   running   freebsd-151   g1    10.20.0.12   -         -           -      3h
+NAME     STATE     OS        IMAGE         GEN   ADDRESSES    EXPOSED   AUTOSTART   USED   AGE
+db       running   freebsd   freebsd-151   g1    10.20.0.11   -         -           -      3h
+nginx    running   freebsd   freebsd-151   g1    10.20.0.10   -         -           -      3h
+valkey   running   freebsd   freebsd-151   g1    10.20.0.12   -         -           -      3h
 
 $ jailops app install nginx --image freebsd-151
 ! already_exists: jail "nginx" already exists
@@ -78,7 +78,7 @@ $ jailops app install nginx --image freebsd-151
 $ jailops app install nginx web2 --dry-run
 Dry run: nothing was created. Installing app nginx as jail web2 would do:
   01 create-volume-web2-usr-local-www: create volume web2-usr-local-www for /usr/local/www
-  02 create-jail: create thin jail web2 from freebsd-151
+  02 create-jail: create jail web2 from freebsd-151
   03 start-jail: start web2
   04 install-packages-ports: pkg -r <root> install -y nginx
   05 record-version: pkg -r <root> query %v nginx, then label jailops.app.version

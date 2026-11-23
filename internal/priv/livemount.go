@@ -4,9 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
-	"time"
-
-	"jailops.net/jailops/internal/sys/run"
 )
 
 // checkVolumeMountTarget holds a nullfs mount that gives a running jail a volume or a host directory to the checks an
@@ -82,17 +79,16 @@ func (c Config) jailRootPath(p string) (string, bool) {
 }
 
 // nullfsMountPoints lists the nullfs mounts of the host (volumes, host directories and the mirrors of Linux jails). The
-// datasets of a jail's own tree (a thin jail's /usr/local, for one) are mounted below its root too, and are not what the
-// nesting rule is about: only a nullfs mount can be written to by another jail.
+// datasets of a jail's own tree (the delegated dataset, for one) are not what the nesting rule is about: only a nullfs mount can be written to by another jail.
 func (l *Local) nullfsMountPoints(ctx context.Context) []string {
-	res, err := l.d.Runner.Run(ctx, run.Cmd{Name: "mount", Args: []string{"-p"}, Timeout: 10 * time.Second})
+	ents, err := mountTableReader()
 	if err != nil {
 		return nil
 	}
 	var out []string
-	for _, line := range strings.Split(string(res.Stdout), "\n") {
-		if f := strings.Fields(line); len(f) >= 3 && f[2] == "nullfs" {
-			out = append(out, f[1])
+	for _, e := range ents {
+		if e.typ == "nullfs" {
+			out = append(out, e.mp)
 		}
 	}
 	return out

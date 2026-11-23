@@ -26,14 +26,14 @@ func TestImages(t *testing.T) {
 	tr.ok("image", "show", "freebsd-15", "-o", "json")
 	tr.ok("image", "list", "-o", "name")
 	tr.ok("jail", "create", "web", "--image", "freebsd-15#g1", "--network", "lan", "--storage", "default")
-	tr.do("", "image", "generation", "delete", "-y", "freebsd-15", "1") // in use
-	tr.ok("image", "generation", "delete", "-y", "freebsd-15", "3")     // the alias that pointed at it moves to g2
+	tr.ok("image", "generation", "delete", "-y", "freebsd-15", "1") // web is a copy: no jail depends on a generation
+	tr.ok("image", "generation", "delete", "-y", "freebsd-15", "3")
 	tr.ok("image", "show", "freebsd-15")
-	tr.do("", "image", "delete", "-y", "freebsd-15") // in use by web
 	tr.ok("image", "delete", "-y", "alpine-3")
-	// an image with generations and aliases is deleted as a whole once no jail uses it
-	tr.ok("jail", "delete", "--confirm-data-loss", "web")
+	// an image is deleted as a whole with its generations; web, made from it, stays
 	tr.ok("image", "delete", "-y", "freebsd-15")
+	tr.ok("jail", "show", "web")
+	tr.ok("jail", "delete", "--confirm-data-loss", "web")
 	tr.ok("image", "list", "-o", "name")
 	tr.golden("images")
 	if im, ok := collectImages(t, h); ok && len(im) != 0 {
@@ -44,44 +44,27 @@ func TestImages(t *testing.T) {
 func TestImageUpgrade(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	// A second project with a jail on the same image: an image upgrade moves the jails of every project.
-	h.srv.SeedProject(api.Project{Metadata: api.ObjectMeta{Name: "shop"}, Spec: api.ProjectSpec{
-		Networks: []api.ProjectNetwork{{Network: "lan"}}, Storage: []api.ProjectStorage{{Storage: "default"}}}})
-	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "api", Project: "shop"}, Spec: api.JailSpec{Image: "freebsd-15", Storage: "default"}})
 	tr := h.transcript()
 	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
-	tr.ok("jail", "create", "pin", "--image", "freebsd-15#g1", "--network", "lan", "--storage", "default")
 	before := len(h.mutations())
 	tr.ok("image", "upgrade", "freebsd-15", "--dry-run")
 	var u api.ImageUpgrade
 	_ = json.Unmarshal(h.lastBody("POST", "/api/v1/images/freebsd-15/upgrade"), &u)
-	if !u.DryRun || u.Project != "" || len(h.mutations()) != before+1 {
+	if !u.DryRun || len(h.mutations()) != before+1 {
 		t.Fatalf("dry-run request: %+v %v", u, h.mutations())
 	}
-	if j, _ := h.srv.JailIn("main", "web"); j.Status.ImageGeneration != "g1" {
-		t.Fatalf("dry-run moved the jail: %+v", j.Status)
-	}
+	// the build of a generation touches no jail
 	tr.ok("image", "upgrade", "freebsd-15")
-	if j, _ := h.srv.JailIn("shop", "api"); j.Status.ImageGeneration != "g2" {
-		t.Fatalf("the other project's jail did not move: %+v", j.Status)
+	if j, _ := h.srv.JailIn("main", "web"); j.Status.ImageGeneration != "g1" {
+		t.Fatalf("an image upgrade touched the jail: %+v", j.Status)
 	}
-	tr.ok("image", "upgrade", "freebsd-15", "--project", "shop", "-o", "json")
-	_ = json.Unmarshal(h.lastBody("POST", "/api/v1/images/freebsd-15/upgrade"), &u)
-	if u.Project != "shop" {
-		t.Fatalf("request: %+v", u)
-	}
-	if j, _ := h.srv.JailIn("main", "web"); j.Status.ImageGeneration != "g2" {
-		t.Fatalf("--project shop moved a jail of main: %+v", j.Status)
-	}
-	tr.ok("image", "upgrade", "freebsd-15", "--no-jails")
+	tr.ok("image", "upgrade", "freebsd-15", "-o", "json")
 	h.srv.SeedImageCurrent("freebsd-15", true)
 	tr.ok("image", "upgrade", "freebsd-15")
 	h.srv.SeedImageCurrent("freebsd-15", false)
-	h.srv.SeedUpdateFailure("main", "web", true)
-	tr.do("", "image", "upgrade", "freebsd-15") // web fails: the jails after it are not attempted, exit 1
-	tr.do("", "image", "upgrade", "freebsd-15", "--project", "nope")
+	tr.do("", "image", "upgrade", "freebsd-15", "--to", "freebsd-15-1")
 	tr.do("", "image", "upgrade", "nope")
-	tr.ok("image", "upgrade", "freebsd-15", "--no-wait", "--no-jails")
+	tr.ok("image", "upgrade", "freebsd-15", "--no-wait")
 	tr.ok("image", "generation", "list", "freebsd-15")
 	tr.golden("image_upgrade")
 }

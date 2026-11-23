@@ -48,7 +48,7 @@ function jail(name: string, power: PowerState, o: { image?: string; gen?: string
   return {
     metadata: { ...meta(name, 86400 * 40, { labels: o.labels ?? { role: name } }), project: 'web' },
     spec: {
-      image: o.image ?? 'freebsd-15-1', storage: 'default', os: linux ? 'linux' : 'freebsd', layout: linux ? 'thick' : 'thin', hostname: `${name}.example.net`,
+      image: o.image ?? 'freebsd-15-1', storage: 'default', os: linux ? 'linux' : 'freebsd', hostname: `${name}.example.net`,
       update: { healthcheck: '/usr/local/bin/check' },
       resources: { cpu: 2, memory: '2G', disk: '20G', pids: 2048 },
       network: [{ network: net, ipv4: o.ipv4 ?? 'auto', ipv6: o.ipv6 ?? 'none', mtu: 1500 }],
@@ -119,10 +119,10 @@ export function nextNight(at: string, from = Date.now()): string {
 export function autoUpgradeRuns(failed = false): NonNullable<NonNullable<Image['status']['auto_upgrade']>['recent']> {
   const run = (days: number, result: string, x: Record<string, unknown> = {}) => ({ started_at: ago(86400 * days), finished_at: ago(86400 * days - 240), result, ...x })
   return [
-    ...(failed ? [run(0.4, 'failed', { generation: 'freebsd-15-1#g5', jails_moved: 2, jails_failed: 1, detail: 'jail db: health check /usr/local/bin/check exited 1; rolled back to freebsd-15-1#g4' })] : []),
+    ...(failed ? [run(0.4, 'failed', { generation: 'freebsd-15-1#g5', detail: 'pkg: fetching the catalogue of the base repository failed' })] : []),
     run(1.4, 'unchanged'),
     run(2.4, 'unchanged'),
-    run(3.4, 'ok', { generation: 'freebsd-15-1#g4', jails_moved: 5, jails_upgraded: 5 }),
+    run(3.4, 'ok', { generation: 'freebsd-15-1#g4' }),
   ]
 }
 
@@ -133,19 +133,19 @@ export function demoFreeBSD(gen: string): string | undefined {
 }
 
 export function images(): Image[] {
-  const gen = (n: number, parent: number, pk: number, ageDays: number, refs: string[]) => ({
-    number: n, name: `freebsd-15-1#g${n}`, parent: parent || undefined, manifest: `b3f0${n}c9d2e17a4455e0e1f${n}`.padEnd(40, 'a'), packages: pk, freebsd_version: demoFreeBSD(`freebsd-15-1#g${n}`), dataset: `tank/jailops/images/freebsd-15-1/g${n}`, created_at: ago(86400 * ageDays), refs,
+  const gen = (n: number, parent: number, pk: number, ageDays: number) => ({
+    number: n, name: `freebsd-15-1#g${n}`, parent: parent || undefined, manifest: `b3f0${n}c9d2e17a4455e0e1f${n}`.padEnd(40, 'a'), packages: pk, freebsd_version: demoFreeBSD(`freebsd-15-1#g${n}`), dataset: `tank/jailops/images/freebsd-15-1/g${n}`, created_at: ago(86400 * ageDays),
   })
   return [
     {
       metadata: { ...meta('freebsd-15-1'), scope: 'fleet' },
-      spec: { os: 'freebsd', release: '15.1-RELEASE', arch: 'amd64', source: { type: 'pkgbase', repo: 'https://pkg.freebsd.org/FreeBSD:15:amd64/base_release_1' }, retention: { keep_last: 3, keep_days: 14 }, auto_upgrade: { enabled: true, packages: true } },
-      status: { generations: [gen(1, 0, 212, 60, []), gen(2, 1, 214, 45, []), gen(3, 2, 219, 20, ['mail']), gen(4, 3, 221, 3, ['web', 'db', 'proxy', 'build', 'cache'])], auto_upgrade: { next_at: nextNight('03:00'), recent: autoUpgradeRuns() } },
+      spec: { os: 'freebsd', release: '15.1-RELEASE', arch: 'amd64', source: { type: 'pkgbase', repo: 'https://pkg.freebsd.org/FreeBSD:15:amd64/base_release_1' }, retention: { keep_last: 3, keep_days: 14 }, auto_upgrade: { enabled: true } },
+      status: { generations: [gen(1, 0, 212, 60), gen(2, 1, 214, 45), gen(3, 2, 219, 20), gen(4, 3, 221, 3)], auto_upgrade: { next_at: nextNight('03:00'), recent: autoUpgradeRuns() } },
     },
     {
       metadata: { ...meta('alpine-3-22'), scope: 'fleet' },
       spec: { os: 'linux', release: '3.22', arch: 'amd64', source: { type: 'minirootfs', repo: 'https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/x86_64' }, retention: { keep_last: 2 } },
-      status: { generations: [{ number: 1, name: 'alpine-3-22#g1', manifest: 'a9c1d0'.padEnd(40, '7'), packages: 18, created_at: ago(86400 * 9), refs: ['alpine-app'] }] },
+      status: { generations: [{ number: 1, name: 'alpine-3-22#g1', manifest: 'a9c1d0'.padEnd(40, '7'), packages: 18, created_at: ago(86400 * 9) }] },
     },
   ]
 }

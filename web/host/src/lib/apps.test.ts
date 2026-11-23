@@ -79,7 +79,7 @@ describe('install form', () => {
 })
 
 describe('install steps', () => {
-  const steps = ['01 create-jail: create thin jail nginx', '02 start-jail: start nginx', '03 install-packages-ports: pkg -r /r install -y nginx', '04 health-check: GET /', '05 snapshot: snapshot every dataset']
+  const steps = ['01 create-jail: create jail nginx', '02 start-jail: start nginx', '03 install-packages-ports: pkg -r /r install -y nginx', '04 health-check: GET /', '05 snapshot: snapshot every dataset']
   const parsed = steps.map(parseStep)
   it('parses the server form', () => {
     expect(parsed[2]).toEqual({ n: 3, name: 'install-packages-ports', text: 'pkg -r /r install -y nginx' })

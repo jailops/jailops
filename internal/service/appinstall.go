@@ -24,7 +24,7 @@ import (
 )
 
 // Installing an app (docs/apps.md, "How the installation works") is one
-// operation: a thin jail with the data paths as volumes, the packages installed
+// operation: a jail with the data paths as volumes, the packages installed
 // from the host into its root with pkg -r while it has never run, then started,
 // rc.conf written, the setup commands and the services run in the jail, the
 // health check, the snapshot. Every step is a plan step. A failure before the
@@ -135,14 +135,6 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 		return api.Operation{}, api.Errorf(api.CodeNotFound, "app %q is not in the catalog", name).
 			WithHint("jailops app list shows the catalog")
 	}
-	if e.Err == nil {
-		// the persistent datasets this host configures, besides the default ones the validator knows
-		var persistent []string
-		for _, pp := range s.lcfg.Persistent {
-			persistent = append(persistent, pp.Path)
-		}
-		e.Err = apps.CheckPersistent(e.App, persistent)
-	}
 	if e.Err != nil {
 		return api.Operation{}, api.Errorf(api.CodeInvalid, "app %q: the definition %s is invalid and cannot be installed: %v", name, e.File, e.Err).
 			WithHint(s.invalidHint(e)).WithDetail("file", e.File)
@@ -204,7 +196,7 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 		limits = *req.Limits
 	}
 	spec := api.JailSpec{
-		Image: image, Storage: storage, Hostname: jail, Layout: api.LayoutThin,
+		Image: image, Storage: storage, Hostname: jail,
 		Network:   []api.NetworkAttach{{Network: network}},
 		Volumes:   apps.Volumes(jail, app.Data),
 		Resources: limits,
@@ -439,7 +431,7 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 				return s.dropVolume(ctx, proj, v.Name)
 			}, UndoOnFail: true})
 	}
-	pl.Add(plan.Step{Name: "create-jail", Describe: fmt.Sprintf("create thin jail %s from %s attaching %d volume(s), with the labels %s, %s", jail, nj.Spec.Image, len(nj.Spec.Volumes), api.LabelApp, api.LabelAppHash),
+	pl.Add(plan.Step{Name: "create-jail", Describe: fmt.Sprintf("create jail %s from %s attaching %d volume(s), with the labels %s, %s", jail, nj.Spec.Image, len(nj.Spec.Volumes), api.LabelApp, api.LabelAppHash),
 		Do: func(ctx context.Context) error {
 			defer created()
 			if err := h.Bind("create/"+key, &opRequest{Kind: "create", Jail: key, Create: &nj}); err != nil {
@@ -722,6 +714,7 @@ func (s *Service) setJailLabels(ctx context.Context, key string, set map[string]
 	s.mu.Lock()
 	if e := s.jails[key]; e != nil {
 		nj.Status.ImageGeneration = e.jail.Status.ImageGeneration
+		nj.Status.FreeBSDVersion = e.jail.Status.FreeBSDVersion
 		e.jail = nj
 	}
 	s.mu.Unlock()
@@ -743,6 +736,7 @@ func (s *Service) setJailAutostart(ctx context.Context, key string, on bool) err
 	s.mu.Lock()
 	if e := s.jails[key]; e != nil {
 		nj.Status.ImageGeneration = e.jail.Status.ImageGeneration
+		nj.Status.FreeBSDVersion = e.jail.Status.FreeBSDVersion
 		e.jail = nj
 	}
 	s.mu.Unlock()

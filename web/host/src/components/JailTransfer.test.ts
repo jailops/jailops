@@ -35,7 +35,7 @@ async function settle(until?: () => boolean): Promise<void> {
   }
 }
 
-const webJail = (): Jail => d.jails().find((j) => j.metadata.project === 'web' && j.spec.layout !== 'thick')!
+const webJail = (): Jail => d.jails().find((j) => j.metadata.project === 'web')!
 
 describe('jail export and import dialogs', () => {
   const before = getClient()
@@ -60,7 +60,6 @@ describe('jail export and import dialogs', () => {
     const j = webJail()
     mounted = mount(JailExportDialog, { props: { open: true, jail: j.metadata.name, snapshots: [], hasVolumes: true }, attachTo: document.body })
     await settle()
-    expect(text('[data-test="export-layout"]')).toContain('image')
     await body().get('[data-test="export-volumes"]').setValue(true)
     await body().get('[data-test="export-go"]').trigger('click')
     await settle(() => body().find('[data-test="export-done"]').exists())

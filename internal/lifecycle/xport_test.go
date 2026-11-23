@@ -19,7 +19,7 @@ func exportOf(t *testing.T, w *world, key string, compress, volumes bool) []byte
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	xw, err := jailxfer.NewWriter(&buf, api.ExportManifest{Name: "web", Project: "alpha", UUID: p.UUID, Layout: p.Layout})
+	xw, err := jailxfer.NewWriter(&buf, api.ExportManifest{Name: "web", Project: "alpha", UUID: p.UUID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,9 +38,8 @@ func exportOf(t *testing.T, w *world, key string, compress, volumes bool) []byte
 	return buf.Bytes()
 }
 
-func importInput(w *world, name string, layout api.Layout) ImportInput {
+func importInput(w *world, name string) ImportInput {
 	j := api.Jail{Metadata: api.ObjectMeta{Name: name, Project: "alpha", UUID: "uuid-" + name}, Spec: spec("fb")}
-	j.Spec.Layout = layout
 	j.Spec.Volumes = nil
 	return ImportInput{Jail: j, Image: w.Images.gens["fb#g1"], OS: "freebsd"}
 }
@@ -57,8 +56,8 @@ func importFile(w *world, file []byte, in ImportInput) error {
 func exportSetup(t *testing.T) *world {
 	w := newWorld(t)
 	w.created("web")
-	w.Z.WriteFile(jc+"/home", "/home/a", "mine")
-	w.Z.WriteFile(jc+"/etc", "/etc/rc.conf.local", "nginx_enable=YES")
+	w.Z.WriteFile(jc+"/root", "/home/a", "mine")
+	w.Z.WriteFile(jc+"/root", "/etc/rc.conf.local", "nginx_enable=YES")
 	return w
 }
 
@@ -70,34 +69,30 @@ func TestExportImportRoundTrip(t *testing.T) {
 		if after := w.Z.Dump(); after != before {
 			t.Fatalf("the export changed the source (snapshots left?):\n%s", after)
 		}
-		if err := importFile(w, file, importInput(w, "web3", api.LayoutThin)); err != nil {
+		if err := importFile(w, file, importInput(w, "web3")); err != nil {
 			t.Fatal(err)
 		}
 		c := "tank/jailops/projects/alpha/jails/web3"
-		if v, _ := w.Z.ReadFile(c+"/home", "/home/a"); v != "mine" {
+		if v, _ := w.Z.ReadFile(c+"/root", "/home/a"); v != "mine" {
 			t.Fatalf("home: %q", v)
 		}
-		if v, _ := w.Z.ReadFile(c+"/etc", "/etc/rc.conf.local"); v != "nginx_enable=YES" {
+		if v, _ := w.Z.ReadFile(c+"/root", "/etc/rc.conf.local"); v != "nginx_enable=YES" {
 			t.Fatalf("etc: %q", v)
 		}
 		if w.Z.PropOrEmpty(c, PropID) != "uuid-web3" || w.Z.PropOrEmpty(c, PropName) != "web3" || w.Z.PropOrEmpty(c, PropComplete) != "on" {
 			t.Fatal("identity of the new jail")
 		}
-		if got := w.Z.PropOrEmpty(c+"/etc", "mountpoint"); got != "/jailops/projects/alpha/jails/web3/root/etc" {
+		if got := w.Z.PropOrEmpty(c+"/root", "mountpoint"); got != "/jailops/projects/alpha/jails/web3/root" {
 			t.Fatalf("mountpoint %s", got)
 		}
-		if w.Z.PropOrEmpty(c+"/etc", PropID) != "uuid-web3" || w.Z.PropOrEmpty(c+"/etc", PropKind) != KindPersistent {
-			t.Fatal("persistent dataset not identified as the new jail's")
+		if w.Z.PropOrEmpty(c+"/root", PropID) != "uuid-web3" || w.Z.PropOrEmpty(c+"/root", PropKind) != KindRoot {
+			t.Fatal("the root is not identified as the new jail's")
 		}
-		if o, _ := w.Z.Origin(bg, c+"/root"); !strings.HasSuffix(o, "fb/g1@ro") {
-			t.Fatalf("a thin root is a clone of the image generation, got origin %q", o)
+		if o, _ := w.Z.Origin(bg, c+"/root"); o != "" {
+			t.Fatalf("the root is a full copy, got origin %q", o)
 		}
-		// what jail diff needs: the baseline travelled, and nothing else
-		for _, d := range []string{c + "/etc", c + "/local", c + "/home"} {
-			s, _ := w.Z.Snapshots(bg, d)
-			if len(s) != 1 || s[0] != BaselineSnap {
-				t.Fatalf("%s has snapshots %v", d, s)
-			}
+		if s, _ := w.Z.Snapshots(bg, c+"/root"); len(s) != 0 {
+			t.Fatalf("the export left snapshots on the new root: %v", s)
 		}
 		if st, err := w.S.Rebuild(bg, "alpha_web3"); err != nil || st.Jail.Metadata.Name != "web3" {
 			t.Fatalf("the new jail is not a jail: %v %v", st, err)
@@ -105,36 +100,19 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 }
 
-func TestExportOfAThickJailCarriesTheRoot(t *testing.T) {
-	w := newWorld(t)
-	j := w.jail("web")
-	j.Spec.Layout = api.LayoutThick
-	j.Spec.Volumes = nil
-	if _, err := w.S.CreateJail(bg, j, false); err != nil {
-		t.Fatal(err)
+// A file without a root (the export of a jail with the root layout of 0.9.2 and before) is refused and leaves nothing.
+func TestImportOfAFileWithoutARootIsRefused(t *testing.T) {
+	w := exportSetup(t)
+	var buf bytes.Buffer
+	xw, _ := jailxfer.NewWriter(&buf, api.ExportManifest{Name: "web"})
+	pw, _ := xw.Part(api.ExportPart{Dataset: "etc", Kind: "persistent", Snapshot: "x"})
+	_, _ = pw.Write([]byte("{}"))
+	_ = pw.Close()
+	_ = xw.Close()
+	if err := importFile(w, buf.Bytes(), importInput(w, "web3")); !api.IsCode(err, api.CodeInvalid) {
+		t.Fatalf("got %v", err)
 	}
-	w.Z.WriteFile(jc+"/root", "/usr/local/bin/app", "binary")
-	file := exportOf(t, w, "alpha_web", false, false)
-	if err := importFile(w, file, importInput(w, "web3", api.LayoutThick)); err != nil {
-		t.Fatal(err)
-	}
-	c := "tank/jailops/projects/alpha/jails/web3"
-	if v, _ := w.Z.ReadFile(c+"/root", "/usr/local/bin/app"); v != "binary" {
-		t.Fatalf("root: %q", v)
-	}
-	if o, _ := w.Z.Origin(bg, c+"/root"); o != "" {
-		t.Fatalf("a thick root is a full copy, got origin %q", o)
-	}
-	if ok, _ := w.Z.Exists(bg, c+"/etc"); ok {
-		t.Fatal("a thick jail has no persistent datasets")
-	}
-	// the other way round: a thin jail's file does not make a thick jail
-	w2 := exportSetup(t)
-	thin := exportOf(t, w2, "alpha_web", false, false)
-	if err := importFile(w2, thin, importInput(w2, "web3", api.LayoutThick)); err == nil {
-		t.Fatal("a thin file was imported as a thick jail")
-	}
-	if ok, _ := w2.Z.Exists(bg, "tank/jailops/projects/alpha/jails/web3"); ok {
+	if ok, _ := w.Z.Exists(bg, "tank/jailops/projects/alpha/jails/web3"); ok {
 		t.Fatal("a refused import left the jail behind")
 	}
 }
@@ -146,8 +124,8 @@ func TestImportOfDamagedFilesLeavesNothing(t *testing.T) {
 	for _, cut := range []int{len(file) / 2, len(file) - 10} {
 		w := exportSetup(t)
 		before := w.Z.Dump()
-		err := importFile(w, file[:cut], importInput(w, "web3", api.LayoutThin))
-		if !errors.Is(err, jailxfer.ErrTruncated) {
+		err := importFile(w, file[:cut], importInput(w, "web3"))
+		if !errors.Is(err, jailxfer.ErrTruncated) && (err == nil || !strings.Contains(err.Error(), "truncated")) {
 			t.Fatalf("cut at %d: %v", cut, err)
 		}
 		if w.Z.Dump() != before {
@@ -158,7 +136,7 @@ func TestImportOfDamagedFilesLeavesNothing(t *testing.T) {
 	bad[len(bad)-200] ^= 0xff
 	w2 := exportSetup(t)
 	before := w2.Z.Dump()
-	if err := importFile(w2, bad, importInput(w2, "web3", api.LayoutThin)); err == nil {
+	if err := importFile(w2, bad, importInput(w2, "web3")); err == nil {
 		t.Fatal("a corrupt file was accepted")
 	}
 	if w2.Z.Dump() != before {
@@ -174,15 +152,15 @@ func TestImportRefusesWhatItDoesNotKnow(t *testing.T) {
 	// a part for a dataset this host does not have, and a name that is taken
 	var buf bytes.Buffer
 	xw, _ := jailxfer.NewWriter(&buf, api.ExportManifest{Name: "web"})
-	pw, _ := xw.Part(api.ExportPart{Dataset: "evil", Kind: api.PartPersistent, Snapshot: "x"})
+	pw, _ := xw.Part(api.ExportPart{Dataset: "evil", Kind: api.PartRoot, Snapshot: "x"})
 	_, _ = pw.Write([]byte("{}"))
 	_ = pw.Close()
 	_ = xw.Close()
-	if err := importFile(w, buf.Bytes(), importInput(w, "web3", api.LayoutThin)); !api.IsCode(err, api.CodeInvalid) {
+	if err := importFile(w, buf.Bytes(), importInput(w, "web3")); !api.IsCode(err, api.CodeInvalid) {
 		t.Fatalf("got %v", err)
 	}
 	file := exportOf(t, w, "alpha_web", false, false)
-	if err := importFile(w, file, importInput(w, "web", api.LayoutThin)); !api.IsCode(err, api.CodeAlreadyExists) {
+	if err := importFile(w, file, importInput(w, "web")); !api.IsCode(err, api.CodeAlreadyExists) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -197,7 +175,7 @@ func TestImportFailureSweep(t *testing.T) {
 		return w
 	}
 	sweep(t, setup, func(w *world) error {
-		return importFile(w, file, importInput(w, "web3", api.LayoutThin))
+		return importFile(w, file, importInput(w, "web3"))
 	})
 }
 
@@ -218,7 +196,7 @@ func TestImportCrashRecovery(t *testing.T) {
 	if ok, _ := w.Z.Exists(bg, c); ok {
 		t.Fatal("the incomplete container is still there")
 	}
-	if err := importFile(w, file, importInput(w, "web3", api.LayoutThin)); err != nil {
+	if err := importFile(w, file, importInput(w, "web3")); err != nil {
 		t.Fatal(err)
 	}
 	if ok, _ := w.S.RecoverImport(bg, "alpha_web3", "uuid-web3"); ok {

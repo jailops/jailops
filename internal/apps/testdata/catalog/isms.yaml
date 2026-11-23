@@ -29,7 +29,7 @@ packages:
   - name: isms
     repo: jailops
     version: "0.8.1"
-  # the thin image has no ssh-keygen, which isms needs for its signing key
+  # the minimal image has no ssh-keygen, which isms needs for its signing key
   - name: openssh-portable
     repo: ports
 services:

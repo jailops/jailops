@@ -14,9 +14,9 @@ $ jailops update list
 ! No resources found.
 
 $ jailops update check
-JAIL   PROJECT   MODE   AVAILABLE   UPDATES                                         CHECKED
-db     main      -      yes         os freebsd-15#g1 -> freebsd-15#g2               3h
-web    main      -      yes         2 packages, os freebsd-15#g1 -> freebsd-15#g2   3h
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES      CHECKED
+db     main      -      yes         1 packages   3h
+web    main      -      yes         2 packages   3h
 
 $ jailops update check web --all
 ! usage: name jails or use --all, not both
@@ -24,23 +24,26 @@ $ jailops update check web --all
 [exit 2]
 
 $ jailops update check web
-JAIL   PROJECT   MODE   AVAILABLE   UPDATES                                         CHECKED
-web    main      -      yes         2 packages, os freebsd-15#g1 -> freebsd-15#g2   3h
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES      CHECKED
+web    main      -      yes         2 packages   3h
 
 $ jailops update list
-JAIL   PROJECT   MODE   AVAILABLE   UPDATES                                         CHECKED
-db     main      -      yes         os freebsd-15#g1 -> freebsd-15#g2               3h
-web    main      -      yes         2 packages, os freebsd-15#g1 -> freebsd-15#g2   3h
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES      CHECKED
+db     main      -      yes         1 packages   3h
+web    main      -      yes         2 packages   3h
 
 $ jailops update check --all -o json
 [
   {
     "jail": "db",
     "project": "main",
-    "os": {
-      "from": "freebsd-15#g1",
-      "to": "freebsd-15#g2"
-    },
+    "packages": [
+      {
+        "name": "postgresql17-server",
+        "from": "17.5",
+        "to": "17.6"
+      }
+    ],
     "available": true,
     "checked_at": "2026-03-01T09:00:00Z"
   },
@@ -59,10 +62,6 @@ $ jailops update check --all -o json
         "to": "8.1"
       }
     ],
-    "os": {
-      "from": "freebsd-15#g1",
-      "to": "freebsd-15#g2"
-    },
     "available": true,
     "checked_at": "2026-03-01T09:00:00Z"
   }
@@ -70,14 +69,14 @@ $ jailops update check --all -o json
 
 $ jailops --dry-run update apply web
 dry-run: would apply updates to 1 of 1 jails in project main
-JAIL   PROJECT   MODE   AVAILABLE   UPDATES                                         CHECKED
-web    main      -      yes         2 packages, os freebsd-15#g1 -> freebsd-15#g2   3h
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES      CHECKED
+web    main      -      yes         2 packages   3h
 
 $ jailops --dry-run update apply --all
 dry-run: would apply updates to 2 of 2 jails in project main
-JAIL   PROJECT   MODE   AVAILABLE   UPDATES                                         CHECKED
-db     main      -      yes         os freebsd-15#g1 -> freebsd-15#g2               3h
-web    main      -      yes         2 packages, os freebsd-15#g1 -> freebsd-15#g2   3h
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES      CHECKED
+db     main      -      yes         1 packages   3h
+web    main      -      yes         2 packages   3h
 
 $ jailops update apply
 ! usage: name the jails to update, or use --all for every jail of the project
@@ -108,14 +107,13 @@ $ jailops update apply --all
 [exit 1]
 
 $ jailops update check --all
-JAIL   PROJECT   MODE   AVAILABLE   UPDATES                             CHECKED
-db     main      -      yes         os freebsd-15#g1 -> freebsd-15#g2   3h
-web    main      -      yes         os freebsd-15#g1 -> freebsd-15#g2   3h
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES      CHECKED
+db     main      -      yes         1 packages   3h
+web    main      -      no          -            3h
 
 $ jailops update apply --all
-ID             JAIL   KIND   RESULT    CHANGE                           SNAPSHOT                AGE
-upd-<id>   db     os     success   freebsd-15#g1 -> freebsd-15#g2   jo-pre-upgrade-<id>   3h
-upd-<id>   web    os     success   freebsd-15#g1 -> freebsd-15#g2   jo-pre-upgrade-<id>   3h
+ID             JAIL   KIND       RESULT    CHANGE       SNAPSHOT        AGE
+upd-<id>   db     packages   success   1 packages   update-<id>   3h
 ! This applies updates to every jail of project "main" that has any, one after the other.
 ! Type the name "main" to confirm: 
 
@@ -131,7 +129,6 @@ upd-<id>   web    packages   failure   1 packages   update-<id>   3h
 [exit 1]
 
 $ jailops update history web -o name
-upd-<id>
 upd-<id>
 upd-<id>
 

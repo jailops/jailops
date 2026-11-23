@@ -348,7 +348,7 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		j := &api.Jail{Metadata: api.ObjectMeta{Name: jail, Project: rc.project, Labels: map[string]string{api.LabelApp: name, api.LabelAppHash: entry.detail.Hash}},
-			Spec: api.JailSpec{Image: image, OS: api.OSFreeBSD, Storage: storage, Hostname: jail, Layout: api.LayoutThin,
+			Spec: api.JailSpec{Image: image, OS: api.OSFreeBSD, Storage: storage, Hostname: jail,
 				Network: []api.NetworkAttach{{Network: network}}, Volumes: vols, Resources: limits, SysVIPC: app.SysVIPC}}
 		var steps []string
 		n := 1
@@ -359,7 +359,7 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 		for _, v := range vols {
 			step("create-volume-"+v.Name, "create volume "+v.Name+" for "+v.Mount)
 		}
-		step("create-jail", "create thin jail "+jail+" from "+image)
+		step("create-jail", "create jail "+jail+" from "+image)
 		step("start-jail", "start "+jail)
 		// one step per repository, the FreeBSD one first, as the daemon does
 		var ports, jailops []string

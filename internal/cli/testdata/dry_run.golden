@@ -46,8 +46,8 @@ metadata:
   name: w2
 spec:
   image: freebsd-15
+  os: freebsd
   storage: default
-  layout: thin
   hostname: web
   network:
     - network: lan

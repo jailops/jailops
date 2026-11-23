@@ -59,7 +59,7 @@ func (c *capAgents) ReadSnapshot(ctx context.Context, dir string) (catalog.ScanF
 	}, nil
 }
 
-// bigJail is a thin jail with ten captured datasets, like one that has never been started.
+// bigJail is a jail with eleven captured datasets, like one that has never been started.
 func bigJail(t *testing.T, r *rig, name string) JailRecord {
 	t.Helper()
 	j := r.jail(name, "uuid-"+name, nil)
@@ -67,7 +67,7 @@ func bigJail(t *testing.T, r *rig, name string) JailRecord {
 		ds := fmt.Sprintf("%s/p%d", j.Container, i)
 		mustCreate(t, r, ds, map[string]string{"jailops:managed": "on", "jailops:id": j.UUID})
 		writeFile(t, r.w.m.liveDir(ds), "f", "data "+ds)
-		j.Datasets = append(j.Datasets, Dataset{Name: ds, Kind: KindPersistent, Mountpoint: j.Datasets[0].Mountpoint + "/root/p" + fmt.Sprint(i)})
+		j.Datasets = append(j.Datasets, Dataset{Name: ds, Kind: "data", Mountpoint: j.Datasets[0].Mountpoint + "/root/p" + fmt.Sprint(i)})
 	}
 	return j
 }
@@ -79,8 +79,8 @@ func TestFileAgentsDoNotAccumulateOverAWholeBackup(t *testing.T) {
 	for _, n := range []string{"web1", "web2", "web3"} {
 		jails = append(jails, bigJail(t, r, n))
 	}
-	if got := len(capturableOrFail(t, jails[0])); got != 10 {
-		t.Fatalf("a jail of %d captured datasets, the test wants ten", got)
+	if got := len(capturableOrFail(t, jails[0])); got != 11 {
+		t.Fatalf("a jail of %d captured datasets, the test wants eleven", got)
 	}
 	var wg sync.WaitGroup
 	errs := make(chan error, len(jails))
@@ -99,8 +99,8 @@ func TestFileAgentsDoNotAccumulateOverAWholeBackup(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if ag.opens.Load() < 30 {
-		t.Fatalf("%d agents were started for 30 datasets", ag.opens.Load())
+	if ag.opens.Load() < 33 {
+		t.Fatalf("%d agents were started for 33 datasets", ag.opens.Load())
 	}
 	if m := ag.max.Load(); m > 3 {
 		t.Fatalf("%d agents were alive at once for three jails: they pile up over the backup", m)
@@ -147,7 +147,7 @@ func TestCleanupStopsTheAgentsThenUnmountsInReverseOrder(t *testing.T) {
 	if lastClose < 0 || firstUnmount < 0 || lastClose > firstUnmount {
 		t.Fatalf("an agent was still open when the first unmount came: %v", z.order)
 	}
-	if len(mounts) != 10 || len(unmounts) != 10 {
+	if len(mounts) != 11 || len(unmounts) != 11 {
 		t.Fatalf("mounts %d, unmounts %d", len(mounts), len(unmounts))
 	}
 	for i := range mounts {

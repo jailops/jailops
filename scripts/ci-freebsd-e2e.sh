@@ -30,8 +30,8 @@
 #                   for a change of the catalog itself, main/jailops-apps/apps of a packages repository checkout)
 # JAILOPS_E2E_LINUX  1 builds an Alpine image from its minirootfs (it downloads from dl-cdn.alpinelinux.org) and checks what a
 #                   Linux process of a Linux jail sees: a volume attached to the running jail and after a restart, /proc, and
-#                   that a detach takes the volume away (also a thick-only layout, the mounts of a volume in the root and below
-#                   compat/linux, a volume attached before the start). Off by default; the CI of a pull request does not set it (it needs
+#                   that a detach takes the volume away (also the mounts of a volume in the root and below compat/linux, a
+#                   volume attached before the start). Off by default; the CI of a pull request does not set it (it needs
 #                   that download): the nightly linux-e2e.yml runs it with JAILOPS_E2E_PART=linux.
 # JAILOPS_E2E_HOST  1 runs the host identity block (docs/appliance.md): it enables the module, changes the host name,
 #                   /etc/resolv.conf (to documentation addresses that resolve nothing), the NTP block of /etc/ntp.conf
@@ -851,14 +851,12 @@ run_linux() {
 		fi
 		sleep 15 # sleep-ok: the pause between the tries at a mirror
 	done
-	step "a Linux jail: thick only, a shell, volumes attached before the start and to the running jail (mounted in the root and below the compat/linux mirror), /proc and /sys as a Linux process sees them"
+	step "a Linux jail: a shell, volumes attached before the start and to the running jail (mounted in the root and below the compat/linux mirror), /proc and /sys as a Linux process sees them"
 	check "an Alpine image" $J image create e2e-alpine --os linux --release 3.22 --arch "$larch" --source-type minirootfs
 	check "build it" $J image build e2e-alpine
 	lroot=$mount/projects/demo/jails/lin/root
 	# how many nullfs mounts a path of the jail has: its place in the root and its twin below the compat/linux mirror (a Linux process sees the mirror as /)
 	twin() { mount -p -t nullfs | awk -v a="$lroot$1" -v b="$lroot/compat/linux$1" '$2 == a || $2 == b' | wc -l | tr -d ' '; }
-	expect "a thin Linux jail is refused and the answer says why" 'thick' sh -c "$J create linthin --project demo --image e2e-alpine --network lan --storage default --layout thin 2>&1; true"
-	expect_refused "the refused create made no jail" $J jail info linthin --project demo
 	check "two volumes for the Linux jail" sh -c "$J volume create linvol --project demo --storage default && $J volume create linboot --project demo --storage default"
 	linmp=$(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/linvol")
 	bootmp=$(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/linboot")
@@ -1192,31 +1190,6 @@ check "the default prompt again" $J config set --project demo web prompt default
 check "shell-setup on a jail that has everything changes nothing" $J jail shell-setup --project demo web
 expect "the shell setup left no condition" '^$' sh -c "$J jail show --project demo web -o json | grep ShellSetup || true"
 
-step "what a thin jail holds on top of its image (docs/storage.md): jail diff lists a new file and a changed rc.conf and nothing else of ours"
-check "create a jail to compare" $J create diffjail --project demo --image "$img" --network lan --storage default
-check "its shell is sh: no package is installed behind our back" $J config set diffjail --project demo shell sh
-expect "a jail that was just made holds nothing on top of its image" '^total: no changes$' $J jail diff diffjail --project demo
-expect "the baselines are not snapshots of the jail" '^\[\]$' $J jail snapshot list diffjail --project demo -o json
-expect "the baseline snapshot of a persistent dataset is there" "^$pool/jailops/projects/demo/jails/diffjail/local@jailops-base\$" zfs list -H -o name -t snapshot "$pool/jailops/projects/demo/jails/diffjail/local@jailops-base"
-check "start" $J start diffjail --project demo
-waitfor "the jail has the shell files JailOps writes" 30 $J exec --project demo diffjail -- test -f /usr/local/etc/profile.d/jailops-prompt.sh
-# the start writes files of its own into /etc and /usr/local: the diff before and after our two changes says what they are
-for ds in etc local; do check "diff $ds before" sh -c "$J jail diff diffjail --project demo --dataset $ds > $work/diff-$ds.before"; done
-check "a file in /usr/local/etc and a line in /etc/rc.conf" $J exec --project demo diffjail -- sh -c 'echo marker > /usr/local/etc/diff-marker.conf && echo diff_marker=YES >> /etc/rc.conf'
-for ds in etc local; do check "diff $ds after" sh -c "$J jail diff diffjail --project demo --dataset $ds > $work/diff-$ds.after"; done
-# what the diff lists now and did not before
-new() { grep -vxF -f "$work/diff-$1.before" "$work/diff-$1.after" | grep -v '^total:' || true; }
-[ "$(new local)" = "  + /usr/local/etc/diff-marker.conf" ] || { cat "$work/diff-local.after" >&2; fail "jail diff lists the new file of /usr/local/etc and nothing more"; }
-[ "$(new etc)" = "  M /etc/rc.conf" ] || { cat "$work/diff-etc.after" >&2; fail "jail diff lists the changed /etc/rc.conf and nothing more"; }
-expect "the other datasets are in the summary" '^home +/home +no changes$' $J jail diff diffjail --project demo --summary
-check "the root lists no mount point and no file of a persistent dataset" sh -c "! $J jail diff diffjail --project demo --dataset root | grep -E '^  . /(usr/local|home|root|etc|var/db|var/log|var/mail|var/spool)(/|\$)'"
-expect "a limit says how many lines are left out" '^  \.\.\. and [0-9]+ more \(--limit [0-9]+ lists them all\)$' $J jail diff diffjail --project demo --dataset local --limit 1
-expect "the JSON names the kinds" '"kind": "modified"' $J jail diff diffjail --project demo --dataset etc -o json
-check "stop" $J stop diffjail --project demo
-expect "a stopped jail answers too" '^  \+ /usr/local/etc/diff-marker\.conf$' $J jail diff diffjail --project demo --dataset local
-check "the diff of a stopped jail leaves it unmounted" sh -c "! mount | grep -q ' /jopsci/projects/demo/jails/diffjail/root'"
-check "delete the jail" $J delete diffjail --project demo --confirm-data-loss
-
 step "interface descriptions (ifconfig shows what JailOps made)"
 expect "the host end of the jail's epair" 'description: jailops jail=demo/web net=lan \(host side\)' ifconfig -a
 expect "the jail end, inside the jail" 'description: jailops jail=demo/web net=lan \(jail side\)' $J exec --project demo web -- ifconfig -a
@@ -1340,7 +1313,6 @@ expect "the file of /usr/local came across" '^xfer-local$' $J exec --project dem
 expect "the line of /etc/rc.conf came across" '^xfer_marker=YES$' $J exec --project demo xfera -- grep xfer_marker /etc/rc.conf
 expect "the file of /home came across" '^xfer-home$' $J exec --project demo xfera -- cat /home/xfer.txt
 expect "the copy in the other project has the same data" '^xfer-local$' $J exec --project edge xferb -- cat /usr/local/etc/xfer.marker
-expect "jail diff of the copy lists what the original had" '^  \+ /usr/local/etc/xfer\.marker$' $J jail diff xfera --project demo --dataset local
 # a file that is cut off leaves no jail and no dataset behind
 head -c "$(( $(wc -c < "$xf") - 12 ))" "$xf" > "$xf.cut"
 expect "a file that is cut off is named so" 'truncated' sh -c "$J jail import $xf.cut --project demo --as xferc 2>&1; true"
@@ -1813,61 +1785,19 @@ n=0; until $J host show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail 
 
 fi
 
-if shard_on 3; then # shard 3: the OS upgrade, image upgrades, devices and the apps of the catalog
-# base_records_missing JAIL IMAGE GEN: how many base package records of the generation the jail's own package database
-# lacks or holds at another version (0 when the jail's records follow its generation); the root of the jail is queried from
-# the host because a thin jail has no pkg of its own inside.
-base_records_missing() {
-	_jr=$mount/projects/demo/jails/$1/root
-	_gr=$(zfs get -H -o value mountpoint "$pool/jailops/images/$2/$3")
-	zfs mount "$pool/jailops/images/$2/$3" >/dev/null 2>&1 || true # already mounted
-	pkg -r "$_gr" info -a -q | sort > /tmp/e2e-gen.$$
-	pkg -r "$_jr" info -a -q | sort > /tmp/e2e-jail.$$
-	comm -23 /tmp/e2e-gen.$$ /tmp/e2e-jail.$$ | wc -l | tr -d ' '
-	rm -f /tmp/e2e-gen.$$ /tmp/e2e-jail.$$
-}
-
-step "OS upgrade of a thin jail (new generation, /etc merge, health check, root rollback)"
-expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image "$img" --start
-check "a second generation of the image" $J image build "$img" --from-generation g1
+if shard_on 3; then # shard 3: generations, in-place upgrades, image upgrades, devices and the apps of the catalog
+step "a second jail, and a second generation of its image: new jails are copied from it, no jail moves to it"
+expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image "$img" --shell bash --start
 bash_in up
 check "a file that must survive" $J exec --project demo up -- sh -c 'echo ci-keep > /root/keep'
-expect "dry run" 'g1 to g2' $J jail upgrade up --project demo --dry-run
-check "upgrade to the newer generation" $J jail upgrade up --project demo --generation g2
-expect "the jail is on the second generation" 'up +running.*#g2' $J jail list --project demo
+check "a second generation of the image" $J image build "$img" --from-generation g1
+expect "the jail stays on the generation it was copied from" 'up +running.*#g1' $J jail list --project demo
 expect "the jail still runs" 'FreeBSD' $J exec --project demo up -- uname -s
-expect "its data survived the swap" 'ci-keep' $J exec --project demo up -- cat /root/keep
-expect "bash survived the swap (/usr/local is persistent)" '^bash$' $J exec --project demo up -- /usr/local/bin/bash -c 'echo bash'
-expect "so did the prompt" '38;5;39m' in_pty up /usr/local/bin/bash -ic 'echo "$PS1"'
-expect "the base package records of the jail are those of the second generation (docs/upgrade.md, what the swap keeps)" '^0$' base_records_missing up "$img" g2
-expect "a package the admin installed is still recorded" '^bash-' pkg -r "$mount/projects/demo/jails/up/root" info -a -q
-check "a record of the base set is lost while the jail runs on the second generation" pkg -r "$mount/projects/demo/jails/up/root" unregister -f -y FreeBSD-ftp
-expect "its absence is seen" '^1$' base_records_missing up "$img" g2
-check "root rollback" $J jail rollback up --project demo
-expect "back on the first generation" 'up +running.*#g1' $J jail list --project demo
-expect "the rollback started the jail on the first generation and its start made the records follow it (docs/upgrade.md)" '^0$' base_records_missing up "$img" g1
-expect_refused "repair-packages does not open the database of a running jail" $J jail repair-packages --project demo up
-check "a record of the base set is removed behind the running jail's back" pkg -r "$mount/projects/demo/jails/up/root" unregister -f -y FreeBSD-ftp
-expect "its absence is seen" '^1$' base_records_missing up "$img" g1
-check "restart the jail" $J restart --project demo up
-expect "the start made the records follow the generation" '^0$' base_records_missing up "$img" g1
-check "stop the jail" $J stop --project demo up
-expect "repair-packages on the stopped jail finds them in step" 'in step with the image' $J jail repair-packages --project demo up
-check "start the jail again" $J start --project demo up
-
-step "a jail moves to another image (docs/upgrade.md, A new release: move the jails) and back"
-check "a second image of the same release, created and built in one step" $J image create e2e-next --release "$release" --arch "$jarch" --build
-expect "dry run names the target and what is kept" 'kept: etc, home' $J jail upgrade up --project demo --image e2e-next --dry-run
-check "move the jail" $J jail upgrade up --project demo --image e2e-next
-expect "the jail follows the new image" 'up +running.*e2e-next#g1' $J jail list --project demo
-expect "its data survived the move" 'ci-keep' $J exec --project demo up -- cat /root/keep
-expect "bash survived the move" '^bash$' $J exec --project demo up -- /usr/local/bin/bash -c 'echo bash'
-check "root rollback goes back across the images" $J jail rollback up --project demo
-expect "back on the first image" 'up +running.*'"$img"'#g1' $J jail list --project demo
-expect "the data is still there" 'ci-keep' $J exec --project demo up -- cat /root/keep
+expect "its data is there" 'ci-keep' $J exec --project demo up -- cat /root/keep
+expect "the jail's root is no clone of the image" '^-$' zfs get -H -o value origin "$pool/jailops/projects/demo/jails/up/root"
 check "stop the second jail" $J stop up --project demo
 
-step "copy with data of a running jail, layout conversion thin to thick and back, cpuset (docs/storage.md, docs/operations.md)"
+step "copy with data of a running jail, in-place upgrades, base packages, cpuset (docs/storage.md, docs/operations.md)"
 cpy=$pool/jailops/projects/demo/jails/cpy
 check "a file in the source that the copy must have" $J exec --project demo web -- sh -c 'echo ci-copy > /root/copied; sync'
 check "copy the running jail with its data" $J jail copy web cpy --data --start --project demo
@@ -1875,31 +1805,77 @@ expect "the copy has the file of the source" 'ci-copy' $J exec --project demo cp
 expect "the copy has its own address" '10\.77\.0\.' $J exec --project demo cpy -- ifconfig -a
 expect "the source still runs" 'web +running' $J list --project demo -c name,state
 expect "the copy is no clone of anything" '^-$' zfs get -H -o value origin "$cpy/root"
-expect "its datasets carry the jail's identity" '^persistent$' zfs get -H -o value jailops:kind "$cpy/home"
+expect "its root carries the jail's identity" '^root$' zfs get -H -o value jailops:kind "$cpy/root"
 check "a file made in the copy only" $J exec --project demo cpy -- sh -c 'echo only-here > /root/own'
 expect_refused "the source does not have it" $J exec --project demo web -- test -f /root/own
-check "convert the copy to thick (dry run first)" $J jail convert cpy --layout thick --dry-run --project demo
-check "convert the running copy to thick" $J jail convert cpy --layout thick --project demo
-expect "the container says thick" '^thick$' zfs get -H -o value jailops:layout "$cpy"
-expect "the thick root is a copy of its own" '^-$' zfs get -H -o value origin "$cpy/root"
-expect "the persistent datasets are put away" '^retired$' zfs get -H -o value jailops:kind "$cpy/root.old/home"
-expect "the copy runs again" 'cpy +running' $J list --project demo -c name,state
-expect "its data came along (the file of the copy and of the source)" 'only-here' $J exec --project demo cpy -- cat /root/own
-expect "also the other file" 'ci-copy' $J exec --project demo cpy -- cat /root/copied
-check "convert it back to thin" $J jail convert cpy --layout thin --project demo
-expect "the container says thin" '^thin$' zfs get -H -o value jailops:layout "$cpy"
-expect "the root is a clone of the image again" 'jailops/images' zfs get -H -o value origin "$cpy/root"
-expect "the data is in persistent datasets again" '^persistent$' zfs get -H -o value jailops:kind "$cpy/home"
-expect "its data survived both conversions" 'only-here' $J exec --project demo cpy -- cat /root/own
-expect "the copy runs" 'cpy +running' $J list --project demo -c name,state
-expect_refused "a Linux-only rule: a layout that is not one is refused" $J jail convert cpy --layout fat --project demo
+# a jail made from the image: a dataset of its own with the files copied (copy_file_range: block cloning on a pool that
+# has it), so no origin, the same files with their flags and links, and a start
+check "a new jail" $J create thk --project demo --image "$img" --network lan --storage default --start
+thk=$pool/jailops/projects/demo/jails/thk
+expect "the root has no origin" '^-$' zfs get -H -o value origin "$thk/root"
+expect "setuid files come with the copy" '^-r-sr-xr-x' ls -l "$mount/projects/demo/jails/thk/root/usr/bin/su"
+check "hard links come with the copy" test "$(stat -f %l "$mount/projects/demo/jails/thk/root/sbin/md5")" -gt 1
+expect "the jail runs" 'thk +running' $J list --project demo -c name,state
+# an in-place upgrade: pkg against the repository of the release installed in the jail, the base from the host on the
+# running root; the jail is never stopped
+thkjid=$(jls -j demo_thk jid)
+expect "the dry run of an in-place upgrade says what it would do" 'would upgrade jail thk|nothing to upgrade' $J jail upgrade thk --project demo --dry-run
+expect_refused "a release older than the installed one is refused" $J jail upgrade thk --project demo --release 14.0-RELEASE
+check "upgrade the jail in place" $J jail upgrade thk --project demo
+[ "$(jls -j demo_thk jid)" = "$thkjid" ] || fail "the upgrade stopped the jail (jid $thkjid changed)"
+check "the upgraded jail answers" $J exec --project demo thk -- freebsd-version -u
+expect "a jail that is up to date says so" 'nothing to upgrade' $J jail upgrade thk --project demo
+[ "$(jls -j demo_thk jid)" = "$thkjid" ] || fail "an upgrade with nothing to do stopped the jail (jid $thkjid changed)"
+# the base repository stays disabled inside the jail, as FreeBSD ships it: pkg there sees the ports only
+expect_refused "the upgrade enables no FreeBSD-base repository inside the jail" sh -c "cat $mount/projects/demo/jails/thk/root/usr/local/etc/pkg/repos/*.conf 2>/dev/null | tr -d ' \t\n' | grep -q 'FreeBSD-base:{[^}]*enabled:yes'"
+check "a ports package installs plainly in the upgraded jail" $J exec --project demo thk -- sh -c 'pkg bootstrap -y >/dev/null 2>&1; pkg install -y bash'
+# a base package added from the host, and the rollback of it
+check "add a base package from the host" $J jail base add thk FreeBSD-rescue --project demo
+expect "the added base package is listed" 'FreeBSD-rescue' $J jail base list thk --project demo
+check "the added base package is in the root" test -e "$mount/projects/demo/jails/thk/root/rescue/sh"
+[ "$(jls -j demo_thk jid)" = "$thkjid" ] || fail "adding a base package stopped the jail (jid $thkjid changed)"
+expect "the rollback point of the upgrade is kept" 'jo-pre-upgrade-' zfs list -H -t snapshot -o name "$thk/root"
+expect_refused "a running jail is not rolled back (its services would die of the files changing)" $J jail rollback thk --project demo --confirm-data-loss
+check "the administrator stops the jail for the rollback" $J stop thk --project demo
+check "roll the base package back" $J jail rollback thk --project demo --confirm-data-loss
+check "start the rolled back jail" $J start thk --project demo
+expect_refused "the rolled back jail does not have the base package" test -e "$mount/projects/demo/jails/thk/root/rescue/sh"
+expect "the rolled back jail runs" 'thk +running' $J list --project demo -c name,state
+# a root that holds what an attack on host-side pkg plants is refused, reported, and checked again on the next run
+# (a link pkg never writes through, such as tzsetup's /etc/localtime, is the jail's own business)
+check "plant a link out of the root on a file of the base" $J exec --project demo thk -- sh -c 'mv /etc/crontab /etc/crontab.e2e && ln -s /etc/master.passwd /etc/crontab && ln -sf /usr/share/zoneinfo/UTC /etc/localtime'
+expect "the jail is refused as suspected" 'suspected_compromised: jail thk: etc/crontab is a symbolic link out of the root' sh -c "$J jail upgrade thk --project demo 2>&1; true"
+expect "doctor names it (and fails)" 'jail\.suspected_compromised +FAIL' sh -c "$J doctor 2>&1; true"
+check "remove the link" $J exec --project demo thk -- sh -c 'rm /etc/crontab && mv /etc/crontab.e2e /etc/crontab'
+# a chain of links that stays in the root lexically and leaves it once resolved is caught too
+check "plant a chain of links: etc/ssl -> ../var/e2echain, var/e2echain -> a host directory" $J exec --project demo thk -- sh -c 'mv /etc/ssl /etc/ssl.e2e && ln -s ../var/e2echain /etc/ssl && ln -s /tmp/e2e-hostssl /var/e2echain'
+expect "the chain is refused as suspected" 'suspected_compromised: jail thk: etc/ssl is a symbolic link \(to ../var/e2echain\) whose path escapes the root' sh -c "$J jail upgrade thk --project demo 2>&1; true"
+expect_refused "nothing was written to the host through the chain" test -e /tmp/e2e-hostssl
+check "remove the chain" $J exec --project demo thk -- sh -c 'rm /etc/ssl /var/e2echain && mv /etc/ssl.e2e /etc/ssl'
+expect "a clean jail goes on (its /etc/localtime link is no finding)" 'nothing to upgrade|upgraded' $J jail upgrade thk --project demo
+# several jails, one after the other, with a summary
+check "a second jail" $J create thk2 --project demo --image "$img" --network lan --storage default --start
+expect "a bulk upgrade names every jail" 'thk2' $J jail upgrade thk thk2 --project demo
+# the root is the jail's own: a file made in it is not in the generation it was copied from (read through the
+# generation's own mountpoint, mounted for the check when it is not)
+check "a file made in the jail" $J exec --project demo thk -- sh -c 'echo thick-only > /etc/jailops-thick-only'
+thkgen=$pool/jailops/images/$(zfs get -H -o value jailops:image "$thk")/g$(zfs get -H -o value jailops:gen "$thk/root")
+thkgenmounted=$(zfs get -H -o value mounted "$thkgen")
+[ "$thkgenmounted" = yes ] || check "mount the generation the jail came from" zfs mount "$thkgen"
+thkgenmp=$(zfs get -H -o value mountpoint "$thkgen")
+check "the generation the jail came from is readable" test -e "$thkgenmp/etc/rc"
+check "the jail has the file" test -e "$mount/projects/demo/jails/thk/root/etc/jailops-thick-only"
+expect_refused "the generation does not have it" test -e "$thkgenmp/etc/jailops-thick-only"
+[ "$thkgenmounted" = yes ] || zfs unmount "$thkgen"
+check "stop and delete the jail" $J jail delete thk --stop --confirm-data-loss --project demo
+check "stop and delete the second jail" $J jail delete thk2 --stop --confirm-data-loss --project demo
 check "pin the copy to CPU 0" $J config set cpy --project demo resources.cpuset=0 --restart
 cpyjid=$(jls -j demo_cpy jid)
 expect "cpuset shows the CPUs of the running jail" 'mask: 0$' cpuset -g -j "$cpyjid"
 expect_refused "a CPU the host does not have is refused" $J config set cpy --project demo resources.cpuset=0-4095
 check "stop the copy" $J stop cpy --project demo
 check "delete the copy" $J delete --confirm-data-loss cpy --project demo
-expect_refused "the copy is gone, with its root.old" zfs list -H "$cpy"
+expect_refused "the copy is gone" zfs list -H "$cpy"
 
 step "devices: a jail given a device mounts a private devfs ruleset that is loaded, and sees no disk"
 upnode=$mount/projects/demo/jails/up/root/dev
@@ -1913,28 +1889,25 @@ check "the jail's /dev is the jail's, not the host's" sh -c "[ \"\$(ls $upnode |
 check "stop the jail again" $J stop up --project demo
 check "take the device away again" $J config unset --project demo up devfs.tun.device
 
-step "automatic upgrade of an image (the nightly run, started by the clock of the daemon)"
+step "automatic upgrade of an image (the nightly run, started by the clock of the daemon): a generation, no jail touched"
 expect "the nightly upgrade is off until it is asked for" 'Nightly: +off' $J image show "$img"
 expect_refused "a time of day that does not exist is refused" $J image set "$img" --auto-upgrade --upgrade-at 25:00
-# the jail `up` is on the first generation while the newest is the second (the rollback above), and it gets a package
-# that is behind: the nightly run must move it and upgrade the package, though the repository has nothing new for the image
+# the jail `up` gets a package that is behind: the nightly run of the image builds the next generation for new jails and
+# leaves the running jail alone (a jail is patched by its own update policy)
 check "start the second jail" $J start up --project demo
 check_net "refresh the package catalogue of the second jail" pkg -j demo_up update -q
 check_net "install a package into the second jail" pkg -j demo_up install -y nano
 check "make that package look old" pkg -j demo_up shell "UPDATE packages SET version = '0.1' WHERE name = 'nano';"
 expect "the package is behind" '^0\.1$' pkg -j demo_up query %v nano
+upjid=$(jls -j demo_up jid)
 check "turn it on for two minutes from now" $J image set "$img" --auto-upgrade --upgrade-at "$(date -v+2M +%H:%M)"
-expect "the image names it and its next run" 'Nightly: +every night at [0-9:]+: generation and jails and their packages; next ' $J image show "$img"
-n=0
-until $J image show "$img" | grep -q 'Automatic upgrades'; do
-	n=$((n + 1)); [ $n -gt 150 ] && fail "the automatic upgrade did not run within five minutes"; sleep 2
-done
-expect "the run moved the two jails that were behind and upgraded the package" ' ok +2 moved, 1 packages upgraded' $J image show "$img"
-expect "the second jail is on the newest generation" 'up +running.*#g2' $J jail list --project demo
-if [ "$(pkg -j demo_up query %v nano)" = 0.1 ]; then fail "the package of the second jail was not upgraded"; fi
-expect "the second jail still runs" 'FreeBSD' $J exec --project demo up -- uname -s
-check "stop the second jail again" $J stop up --project demo
+expect "the image names it and its next run" 'Nightly: +every night at [0-9:]+: the next generation, for new jails; next ' $J image show "$img"
+waitfor "the automatic upgrade ran" 300 sh -c "$J image show $img | grep -q 'Automatic upgrades'"
 if $J image show "$img" | grep -E '^ +[0-9-]+ [0-9:]+ +failed'; then fail "the automatic upgrade failed"; fi
+expect "the second jail stays on its generation" 'up +running.*#g1' $J jail list --project demo
+[ "$(jls -j demo_up jid)" = "$upjid" ] || fail "the nightly run restarted the second jail"
+expect "the nightly run left the package of the running jail alone" '^0\.1$' pkg -j demo_up query %v nano
+check "stop the second jail again" $J stop up --project demo
 check "turn it off" $J image set "$img" --auto-upgrade=false
 expect "off again" 'Nightly: +off' $J image show "$img"
 # the run history follows a rename of the image (the rename block below checks it too when this block ran before it)
@@ -1942,7 +1915,7 @@ check "rename the image: its run history comes along" $J image rename "$img" e2e
 expect "the nightly runs moved with it" 'Automatic upgrades' $J image show e2e-hist
 check "rename it back" $J image rename e2e-hist "$img" -y
 
-step "an app from the catalog (nginx: thin jail, pkg -r from the host, rc.conf, service, health check, snapshot)"
+step "an app from the catalog (nginx: a jail, pkg -r from the host, rc.conf, service, health check, snapshot)"
 # the catalog is a directory of local files: the reference copy (or JAILOPS_E2E_CATALOG), copied where the daemon may read it
 appdir=$work/apps
 catalog=${JAILOPS_E2E_CATALOG:-internal/apps/testdata/catalog}
@@ -1956,10 +1929,9 @@ check "restart jailopsd with the catalog" service jailopsd restart
 n=0; until $J app list >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
 expect "the catalog lists nginx as valid" '^nginx .*valid' $J app list -o wide
 expect "a dry run lists the steps" 'install-packages-ports: pkg -r .* install -y nginx' $J app install nginx --project demo --network lan --storage default --dry-run
-expect "an app's jail gets bash and the prompt like any new jail" 'set-up-shell: install bash' $J app install nginx --project demo --network lan --storage default --dry-run
+expect "an app's jail gets the shell and the prompt like any new jail" 'set-up-shell: ' $J app install nginx --project demo --network lan --storage default --dry-run
 check "install nginx" $J app install nginx --project demo --network lan --storage default
-expect "the app's jail has bash as its shell" '^/usr/local/bin/bash$' $J config get --project demo nginx shell
-check "bash is in the app's jail" test -x "$mount/projects/demo/jails/nginx/root/usr/local/bin/bash"
+expect "the app's jail names no shell of its own: the host's default (sh)" 'not set' sh -c "$J config get --project demo nginx shell 2>&1; true"
 check "the prompt is in the app's jail" grep -F -q "PS1='" "$mount/projects/demo/jails/nginx/root/usr/local/etc/profile.d/jailops-prompt.sh"
 expect "the jail runs and carries the labels" 'jailops.app=nginx' $J label --project demo nginx
 expect "the app is listed as installed" 'nginx +nginx +[^ ]+ +running' $J app installed --project demo
@@ -2041,7 +2013,7 @@ pg_access_check() { # postgresql-access: who may connect to a database, from the
 	check "install postgresql as pgacc" $J app install postgresql pgacc --project demo --network lan --storage default
 	for c in pgc1 pgc2; do
 		check "create the client jail $c" $J create "$c" --project demo --image "$img" --network lan --storage default --start
-		# the PostgreSQL client into the running thin jail, inside it, as package updates do
+		# the PostgreSQL client into the running jail, inside it, as package updates do
 		check_net "psql in $c" pkg -j "demo_$c" install -y postgresql18-client
 		check "the library cache of $c" $J exec --project demo "$c" -- /sbin/ldconfig -m /usr/local/lib
 	done
@@ -2271,12 +2243,12 @@ expect "its file is there" 'ci-marker' $J exec --project demo web-renamed -- cat
 expect_retry "its anchor" 'jailops/demo/web-renamed' pfctl -sA
 check "stop it" $J stop web-renamed --project demo
 check "and rename it back" $J rename web-renamed web --project demo -y
-# an image: the generations move, the clones of running jails follow, the nightly runs move with it
+# an image: the generations move, the jails' references follow, the nightly runs move with it
 # the run history of the nightly upgrade moves with the image; it exists when the block of the automatic upgrade ran before (shard 3 checks it there)
 had_history=0; if $J image show "$img" | grep -q 'Automatic upgrades'; then had_history=1; fi
 check "rename the image while a jail on it runs" $J image rename "$img" e2e-img -y
 expect "the jails follow" 'web-restored +running +e2e-img' $J jail list --project demo
-expect "a thin root is a clone of the renamed generation" "^$pool/jailops/images/e2e-img/g[0-9]+@ro\$" zfs get -H -o value origin "$pool/jailops/projects/demo/jails/web-restored/root"
+expect "the root of the jail is no clone of a generation" '^-$' zfs get -H -o value origin "$pool/jailops/projects/demo/jails/web-restored/root"
 expect "the generations are mounted under the new name" "^$mount/images/e2e-img/g1\$" zfs get -H -o value mountpoint "$pool/jailops/images/e2e-img/g1"
 if [ $had_history = 1 ]; then expect "the nightly runs moved with it" 'Automatic upgrades' $J image show e2e-img; fi
 expect "the jail still runs" 'FreeBSD' $J exec --project demo web-restored -- uname -s

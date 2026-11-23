@@ -1,66 +1,26 @@
 package service_test
 
 import (
-	"errors"
+	"slices"
 	"strings"
-	"sync"
 	"testing"
 
 	"jailops.net/jailops/internal/daemon/dtest"
-	"jailops.net/jailops/internal/sys/jailos"
-	"jailops.net/jailops/internal/sys/run"
+	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/sdk/api"
 )
 
-const autoPkgDryRun = `Installed packages to be UPGRADED:
-	curl: 8.5.0 -> 8.6.0
-
-Number of packages to be upgraded: 1
-`
-
-// pkgScript answers the package commands the automatic upgrade runs inside the running jails.
-type pkgScript struct {
-	mu     sync.Mutex
-	cmds   []string
-	failHC bool
-}
-
-func (p *pkgScript) fn(name string, o jailos.ExecOpts) (run.Result, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	line := strings.Join(o.Argv, " ")
-	p.cmds = append(p.cmds, name+": "+line)
-	switch {
-	case line == "/bin/true" && p.failHC:
-		return run.Result{Stderr: []byte("not healthy")}, errors.New("exit status 1")
-	}
-	return run.Result{}, nil
-}
-
-// upgrades counts the `pkg -r ROOT upgrade -y` commands the host ran: a FreeBSD jail has no pkg of its own.
-func upgrades(e *dtest.Env) int {
-	n := 0
-	for _, c := range e.Run.Calls() {
-		if c.Cmd.Name == "pkg" && len(c.Cmd.Args) > 3 && c.Cmd.Args[0] == "-j" && c.Cmd.Args[2] == "upgrade" && c.Cmd.Args[3] == "-y" {
-			n++
-		}
-	}
-	return n
-}
-
-func TestAutoUpgradeBuildsMovesAndUpgradesPackages(t *testing.T) {
+// An image's automatic upgrade builds the next generation and touches no jail: no package is upgraded inside a jail,
+// no jail moves or restarts. A jail takes its patches by its own update policy.
+func TestAutoUpgradeBuildsAGenerationAndTouchesNoJail(t *testing.T) {
 	e, s := tickingEnv(t)
 	twoProjectJails(t, e, s)
 	host := as(globalAdmin, "")
-	ps := &pkgScript{}
-	e.Jails.SetExecFn(ps.fn)
-	e.SetPkgUpgrades(autoPkgDryRun)
-
-	if _, err := s.PatchImage(host, "fb", map[string]any{"spec": map[string]any{"auto_upgrade": map[string]any{"enabled": true, "at": "03:00", "packages": true}}}, -1); err != nil {
+	if _, err := s.PatchImage(host, "fb", map[string]any{"spec": map[string]any{"auto_upgrade": map[string]any{"enabled": true, "at": "03:00"}}}, -1); err != nil {
 		t.Fatal(err)
 	}
 	im, _ := s.GetImage(host, "fb")
-	if au := im.Spec.AutoUpgrade; au == nil || !au.Enabled || au.At != "03:00" || !au.Packages {
+	if au := im.Spec.AutoUpgrade; au == nil || !au.Enabled || au.At != "03:00" {
 		t.Fatalf("%+v", im.Spec)
 	}
 	if im.Status.AutoUpgrade == nil || im.Status.AutoUpgrade.NextAt.IsZero() || len(im.Status.AutoUpgrade.Recent) != 0 {
@@ -70,63 +30,33 @@ func TestAutoUpgradeBuildsMovesAndUpgradesPackages(t *testing.T) {
 		t.Fatal("a bad time of day was accepted")
 	}
 
-	// Nothing new: no generation, no jail moved, but the packages inside the running jail are still upgraded.
-	run1 := s.AutoUpgradeImage(host, "fb")
-	if run1.Result != api.ImageUpgradeRunOK || run1.Generation != "" || run1.JailsMoved != 0 || run1.JailsUpgraded != 1 || run1.Detail != "" {
+	calls := len(e.Run.Calls()) // the jails' own setup ran pkg before
+	// Nothing new: no generation.
+	if run1 := s.AutoUpgradeImage(host, "fb"); run1.Result != api.ImageUpgradeRunUnchanged || run1.Generation != "" {
 		t.Fatalf("%+v\n%s", run1, e.Log())
 	}
-	// Only the packages the host names are upgraded: the base system (FreeBSD-*) moves with the image generation.
-	for _, c := range e.Run.Calls() {
-		if c.Cmd.Name == "pkg" && len(c.Cmd.Args) > 3 && c.Cmd.Args[2] == "upgrade" {
-			if got := strings.Join(c.Cmd.Args[3:], " "); strings.Contains(got, "FreeBSD-") || !strings.HasSuffix(got, " curl") {
-				t.Fatalf("pkg upgrade names %q", got)
-			}
-		}
-	}
-	if n := upgrades(e); n != 1 {
-		t.Fatalf("pkg upgrade ran %d times (only the running jail, web)", n)
-	}
-
-	// A newer package set: g2, three thin jails move (the pin does not), the running jail's packages follow.
+	// A newer package set: g2 is built for new jails; the running jail keeps its generation, jid and start time.
 	e.SetRepoVersion("15.1p2")
-	e.SetPkgUpgrades(autoPkgDryRun) // the repository has newer packages again
-	run2 := s.AutoUpgradeImage(host, "fb")
-	if run2.Result != api.ImageUpgradeRunOK || run2.Generation != "fb#g2" || run2.JailsMoved != 3 || run2.JailsUpgraded != 1 || run2.JailsFailed != 0 {
+	alpha := as(globalAdmin, dtest.SeedProject)
+	before, _ := s.GetJail(alpha, "web")
+	if run2 := s.AutoUpgradeImage(host, "fb"); run2.Result != api.ImageUpgradeRunOK || run2.Generation != "fb#g2" {
 		t.Fatalf("%+v\n%s", run2, e.Log())
 	}
-	if gen, _ := generationOf(t, s, "alpha", "web"); gen != "fb#g2" {
-		t.Fatalf("web is on %s", gen)
+	after, _ := s.GetJail(alpha, "web")
+	if after.Status.ImageGeneration != "fb#g1" || after.Status.Power != api.PowerRunning || after.Status.JID != before.Status.JID || !after.Status.StartedAt.Equal(before.Status.StartedAt) {
+		t.Fatalf("the automatic upgrade moved or restarted web: %+v -> %+v", before.Status, after.Status)
 	}
-	h, _ := s.UpdateHistory(as(globalAdmin, dtest.SeedProject), "web")
-	var kinds []string
-	for _, r := range h {
-		if r.Scheduled {
-			kinds = append(kinds, string(r.Kind))
+	for _, c := range e.Run.Calls()[calls:] {
+		if c.Cmd.Name == "pkg" && (slices.Contains(c.Cmd.Args, "-j") || strings.Contains(strings.Join(c.Cmd.Args, " "), "/jails/")) {
+			t.Fatalf("the image's automatic upgrade ran pkg on a jail: %v", c.Cmd.Args)
 		}
 	}
-	if strings.Join(kinds, ",") != "packages,os,packages" {
-		t.Fatalf("web history %v", kinds)
+	if h := mustHistory(t, s, "web"); len(h) != 0 {
+		t.Fatalf("update records from the image's run: %+v", h)
 	}
-
 	im, _ = s.GetImage(host, "fb")
-	if st := im.Status.AutoUpgrade; st == nil || len(st.Recent) != 2 || st.Recent[0].Generation != "fb#g2" || st.Recent[1].JailsMoved != 0 {
+	if st := im.Status.AutoUpgrade; st == nil || len(st.Recent) != 2 || st.Recent[0].Generation != "fb#g2" {
 		t.Fatalf("status after two runs: %+v", st)
-	}
-
-	// A jail that fails its health check stops the run, and the run says which jail and why.
-	e.SetRepoVersion("15.1p3")
-	e.SetPkgUpgrades(autoPkgDryRun)
-	ps.failHC = true
-	run3 := s.AutoUpgradeImage(host, "fb")
-	if run3.Result != api.ImageUpgradeRunFailed || run3.JailsFailed != 1 || !strings.Contains(run3.Detail, "alpha/db") || !strings.Contains(run3.Detail, "health check") {
-		t.Fatalf("%+v\n%s", run3, e.Log())
-	}
-	if run3.JailsUpgraded != 0 {
-		t.Fatalf("packages were upgraded after a failed move: %+v", run3)
-	}
-	im, _ = s.GetImage(host, "fb")
-	if st := im.Status.AutoUpgrade; len(st.Recent) != 3 || st.Recent[0].Result != api.ImageUpgradeRunFailed {
-		t.Fatalf("%+v", st)
 	}
 }
 
@@ -134,23 +64,26 @@ func TestAutoUpgradeLeavesPinnedJailsAndNeedsAGeneration(t *testing.T) {
 	e, s := tickingEnv(t)
 	twoProjectJails(t, e, s)
 	host := as(globalAdmin, "")
-	ps := &pkgScript{}
-	e.Jails.SetExecFn(ps.fn)
-	e.SetPkgUpgrades(autoPkgDryRun)
 	// web is pinned to its generation.
 	if _, err := s.PatchJail(as(globalAdmin, dtest.SeedProject), "web", map[string]any{"spec": map[string]any{"image": "fb#g1"}}, -1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.PatchImage(host, "fb", map[string]any{"spec": map[string]any{"auto_upgrade": map[string]any{"enabled": true, "packages": true}}}, -1); err != nil {
+	if _, err := s.PatchImage(host, "fb", map[string]any{"spec": map[string]any{"auto_upgrade": map[string]any{"enabled": true}}}, -1); err != nil {
 		t.Fatal(err)
 	}
 	e.SetRepoVersion("15.1p2")
 	r := s.AutoUpgradeImage(host, "fb")
-	if r.Result != api.ImageUpgradeRunOK || r.JailsMoved != 2 {
+	if r.Result != api.ImageUpgradeRunOK || r.Generation != "fb#g2" {
 		t.Fatalf("%+v\n%s", r, e.Log())
 	}
 	if gen, _ := generationOf(t, s, "alpha", "web"); gen != "fb#g1" {
 		t.Fatalf("a pinned jail moved to %s", gen)
+	}
+	// the pinned jail gets no pending note: its pin is the user's choice
+	for _, rec := range mustHistory(t, s, "web") {
+		if rec.Kind == api.UpdateKindOS {
+			t.Fatalf("a pinned jail got %+v", rec)
+		}
 	}
 
 	// An image without a generation fails with the command that makes one.
@@ -163,4 +96,13 @@ func TestAutoUpgradeLeavesPinnedJailsAndNeedsAGeneration(t *testing.T) {
 	if r.Result != api.ImageUpgradeRunFailed || !strings.Contains(r.Detail, "jailops image build empty") {
 		t.Fatalf("%+v", r)
 	}
+}
+
+func mustHistory(t *testing.T, s *service.Service, name string) []api.UpdateRecord {
+	t.Helper()
+	h, err := s.UpdateHistory(as(globalAdmin, dtest.SeedProject), name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
 }

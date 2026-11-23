@@ -301,6 +301,9 @@ func New(t testing.TB, o Options) *Env {
 		e.Host = newHostSim(t, filepath.Join(e.Dir, "host"), o.HostManage)
 	}
 	e.Cfg = daemon.Defaults()
+	// the tests of the shell machinery are about bash (installed in the background, the prompt files): the host default
+	// of a real daemon is sh, and a test that wants it says so with Mutate
+	e.Cfg.Jails.Shell = api.ShellBash
 	e.Cfg.Pool = "tank"
 	e.Cfg.Dataset = "tank/jailops"
 	e.Cfg.MountBase = "/jailops"
@@ -572,7 +575,7 @@ func (e *Env) script() {
 		return run.Result{}, nil
 	}})
 	e.Run.Add(run.Rule{Name: "tar", Args: []string{run.RestArgs}, Fn: func(c run.Cmd) (run.Result, error) {
-		if len(c.Args) < 3 || c.Args[0] != "-C" || c.Args[2] != "-xpzf" { // tar -C <root> -cf <file> ./etc: the /etc merge
+		if len(c.Args) < 3 || c.Args[0] != "-C" || c.Args[2] != "-xpzf" { // only the unpacking of a Linux rootfs makes files
 			return run.Result{}, nil
 		}
 		root := c.Args[1]
@@ -581,7 +584,7 @@ func (e *Env) script() {
 		return run.Result{}, nil
 	}})
 	e.Files.Put("/etc/resolv.conf", []byte("nameserver 192.0.2.53\n"))
-	for _, n := range []string{"etcupdate", "uname", "pfctl", "ifconfig", "kldstat", "cp", "jexec", "mount", "umount", "jail", "devfs", "pwd_mkdb", "pw-lock-root", "chmod"} {
+	for _, n := range []string{"uname", "pfctl", "ifconfig", "kldstat", "cp", "jexec", "mount", "umount", "jail", "devfs", "pwd_mkdb", "pw-lock-root", "chmod"} {
 		e.Run.Add(run.Rule{Name: n, Args: []string{run.RestArgs}})
 	}
 }

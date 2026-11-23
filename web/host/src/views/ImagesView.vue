@@ -38,24 +38,20 @@ watch(() => route.query.create, (c) => {
   void router.replace({ query: { ...route.query, create: undefined } })
 }, { immediate: true })
 
-/** Every jail on any generation of the image (the server's used-by data). */
-function jailsOn(img: Image): string[] {
-  return [...new Set((img.status.generations ?? []).flatMap((g) => g.refs ?? []))].sort()
-}
-// Building and upgrading are tier 2: they ask first and name the jails on the image.
+// Building and upgrading ask first. Either makes the next generation, for the jails made from then on; no jail that
+// exists is touched.
 function build(img: Image): void {
   const last = Math.max(0, ...(img.status.generations ?? []).map((g) => g.number))
   const n = img.metadata.name
   confirmAction({
-    title: s.images.buildTitle(n), confirmLabel: s.images.build, text: s.images.buildText, items: jailsOn(img), itemsLabel: s.images.jailsOnImage,
+    title: s.images.buildTitle(n), confirmLabel: s.images.build, text: s.images.buildText,
     run: () => runOp(`${s.images.build}: ${n}`, () => api.images.build(n, { from_generation: last || undefined })),
   })
 }
 function upgrade(img: Image): void {
   const n = img.metadata.name
-  const jails = jailsOn(img)
   confirmAction({
-    title: s.images.upgradeTitle(n), confirmLabel: s.images.upgrade, text: jails.length ? s.images.upgradeText : s.images.noJails, items: jails, itemsLabel: s.images.jailsOnImage,
+    title: s.images.upgradeTitle(n), confirmLabel: s.images.upgrade, text: s.images.upgradeText,
     run: () => runOp(`${s.images.upgrade}: ${n}`, () => api.images.upgrade(n, {})),
   })
 }
@@ -97,7 +93,7 @@ function upgrade(img: Image): void {
           <p v-if="!img.status.generations?.length" class="body faint" data-test="image-no-generation">{{ s.images.noBuild }}</p>
           <div v-else class="table-wrap">
             <table class="rtable">
-              <thead><tr><th>{{ s.images.generations }}</th><th>{{ s.images.created }}</th><th>{{ s.images.freebsd }}</th><th class="hide-sm">{{ s.images.manifest }}</th><th class="num">{{ s.images.packagesCol }}</th><th>{{ s.images.usedBy }}</th></tr></thead>
+              <thead><tr><th>{{ s.images.generations }}</th><th>{{ s.images.created }}</th><th>{{ s.images.freebsd }}</th><th class="hide-sm">{{ s.images.manifest }}</th><th class="num">{{ s.images.packagesCol }}</th></tr></thead>
               <tbody>
                 <tr v-for="g in [...(img.status.generations ?? [])].sort((a, b) => b.number - a.number)" :key="g.number">
                   <td class="nowrap" :data-label="s.images.generations"><span class="mono">g{{ g.number }}</span> <span v-if="g.parent" class="faint">{{ s.images.parent(g.parent) }}</span></td>
@@ -105,10 +101,6 @@ function upgrade(img: Image): void {
                   <td class="mono" :data-label="s.images.freebsd" :title="s.images.freebsdHint" data-test="generation-freebsd">{{ g.freebsd_version || '-' }}</td>
                   <td class="mono faint hide-sm" :data-label="s.images.manifest" :title="g.manifest">{{ g.manifest.slice(0, 12) }}</td>
                   <td class="num" :data-label="s.images.packagesCol">{{ g.packages ?? '-' }}</td>
-                  <td :data-label="s.images.usedBy">
-                    <span v-if="!g.refs?.length" class="faint">{{ s.images.unused }}</span>
-                    <template v-else><router-link v-for="r in g.refs" :key="r" class="mono refl" :to="`/jails/${r}`">{{ r }}</router-link></template>
-                  </td>
                 </tr>
               </tbody>
             </table>
@@ -123,7 +115,6 @@ function upgrade(img: Image): void {
 </template>
 
 <style>
-.refl { margin-right: 10px; }
 .img-src { overflow-wrap: anywhere; }
 .img-lead { margin: 0 0 12px; max-width: 80ch; }
 .img-new { margin-bottom: 12px; }

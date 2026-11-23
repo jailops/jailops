@@ -51,7 +51,7 @@ func TestJailExportImportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := xr.Manifest()
-	if m.Name != "web" || m.Project != dtest.SeedProject || m.Image.Name != "fb" || m.Layout != api.LayoutThin {
+	if m.Name != "web" || m.Project != dtest.SeedProject || m.Bundle.ImageGeneration != "fb#g1" || len(m.Parts) == 0 || m.Parts[0].Kind != api.PartRoot {
 		t.Fatalf("manifest: %+v", m)
 	}
 	req := api.JailImportRequest{As: "web2"}
@@ -114,21 +114,20 @@ func TestJailImportNameCollision(t *testing.T) {
 	}
 }
 
-// A thin jail needs its image on the importing host: the preflight and the import both refuse it, and say which.
-func TestJailImportThinNeedsTheImage(t *testing.T) {
+// A file without a root (the export of a jail with the root layout of 0.9.2 and before) is refused by the preflight, which says why.
+func TestJailImportRefusesAFileWithoutARoot(t *testing.T) {
 	e, ctx := xportEnv(t)
 	file := exportOf(t, e.Admin, ctx, "web", api.JailExportRequest{})
 	m, err := sdk.ReadExportManifest(bytes.NewReader(file))
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Image.Name = "elsewhere"
-	m.Bundle.Spec.Image = "elsewhere"
+	m.Parts = []api.ExportPart{{Dataset: "etc", Kind: "persistent", Snapshot: "x"}}
 	pf, err := e.Admin.Jails().ImportPreflight(ctx, api.JailImportPreflight{Manifest: m, Request: api.JailImportRequest{As: "web2"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pf.OK || !strings.Contains(strings.Join(append(pf.Errors, pf.Missing...), " "), "elsewhere") {
+	if pf.OK || !strings.Contains(strings.Join(pf.Errors, " "), "root layout of JailOps 0.9.2") {
 		t.Errorf("%+v", pf)
 	}
 }

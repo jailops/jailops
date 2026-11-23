@@ -20,8 +20,7 @@ func (a *app) appInstall(d *kindDesc[api.AppSummary]) *cobra.Command {
 		Use:   "install APP [JAIL]",
 		Short: "Install an app of the catalog as a new jail",
 		Long: `Create a jail that runs an app of the catalog, as one operation on the server:
-a thin jail from the image with the app's data paths as persistent datasets,
-started, the packages installed from the host with pkg -r, the services enabled
+a jail copied from the image with the app's data paths as volumes, started, the packages installed from the host with pkg -r, the services enabled
 in rc.conf, the setup commands and the services run in the jail, the health
 check, and a snapshot named app-installed of the fresh installation. The jail
 carries the labels jailops.app, jailops.app.hash and jailops.app.version.

@@ -31,8 +31,8 @@ metadata:
     updated_at: "2026-03-01T09:00:00Z"
   spec:
     image: freebsd-15
+    os: freebsd
     storage: default
-    layout: thin
     hostname: web
     network:
       - network: lan

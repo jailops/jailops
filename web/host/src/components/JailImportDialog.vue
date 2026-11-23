@@ -150,7 +150,7 @@ const go = () => check.submit(async () => {
         <span id="im-file-e" class="field-error" role="alert" data-test="import-file-error">{{ fileProblem }}</span>
       </div>
       <template v-if="manifest">
-        <p data-test="import-summary">{{ s.xport.fileSummary(manifest.name, manifest.project, manifest.layout, manifest.image?.name ?? '') }}</p>
+        <p data-test="import-summary">{{ s.xport.fileSummary(manifest.name, manifest.project) }}</p>
         <Callout v-if="manifest.warnings?.length" tone="warn" data-test="import-file-warnings">
           <ul class="im-list"><li v-for="w in manifest.warnings" :key="w">{{ capFirst(w) }}</li></ul>
         </Callout>

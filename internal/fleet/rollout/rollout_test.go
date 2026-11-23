@@ -40,21 +40,20 @@ func TestStoreRoundTripIsAtomic(t *testing.T) {
 
 func TestHealthy(t *testing.T) {
 	ok := api.JailStatus{Power: api.PowerRunning, ImageGeneration: "g2"}
-	if h, _ := healthy(ok, "g2"); !h {
-		t.Fatal("a running jail on the target is healthy")
+	if h, _ := healthy(ok); !h {
+		t.Fatal("a running jail is healthy")
 	}
 	for name, st := range map[string]api.JailStatus{
 		"stopped":   {Power: api.PowerStopped, ImageGeneration: "g2"},
-		"old gen":   {Power: api.PowerRunning, ImageGeneration: "g1"},
 		"not ready": {Power: api.PowerRunning, ImageGeneration: "g2", Conditions: []api.Condition{{Type: "Ready", Status: api.ConditionFalse, Since: time.Now()}}},
 		"unknown":   {Power: api.PowerRunning, ImageGeneration: "g2", Conditions: []api.Condition{{Type: "Healthy", Status: api.ConditionUnknown}}},
 	} {
-		if h, why := healthy(st, "g2"); h || why == "" {
+		if h, why := healthy(st); h || why == "" {
 			t.Errorf("%s: healthy=%v why=%q", name, h, why)
 		}
 	}
 	other := api.JailStatus{Power: api.PowerRunning, ImageGeneration: "g2", Conditions: []api.Condition{{Type: "Backup", Status: api.ConditionFalse}}}
-	if h, _ := healthy(other, "g2"); !h {
+	if h, _ := healthy(other); !h {
 		t.Fatal("unrelated conditions must not gate")
 	}
 }

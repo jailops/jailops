@@ -15,7 +15,7 @@ func copySetup(t *testing.T) *world {
 	if _, err := w.S.CreateJail(bg, j, false); err != nil {
 		t.Fatal(err)
 	}
-	w.Z.WriteFile(jc+"/home", "/home/a", "data")
+	w.Z.WriteFile(jc+"/root", "/home/a", "data")
 	if _, err := w.S.SnapshotJail(bg, "alpha_web", "keep", ""); err != nil { // source has snapshots
 		t.Fatal(err)
 	}
@@ -39,13 +39,13 @@ func TestCopyIsIndependentFullCopy(t *testing.T) {
 		t.Fatalf("the copy attaches %v (%v)", r.Jail.Spec.Volumes, err)
 	}
 	c2 := "tank/jailops/projects/alpha/jails/web2"
-	for _, d := range []string{c2, c2 + "/root", c2 + "/etc", c2 + "/home"} {
+	for _, d := range []string{c2, c2 + "/root"} {
 		if o, _ := w.Z.Origin(bg, d); o != "" {
 			t.Errorf("%s is a clone of %s: a copy must be a full send/receive", d, o)
 		}
 	}
 	// the source's snapshots are not pinned by the copy, and no temp snapshot is left
-	for _, d := range []string{jc, jc + "/root", jc + "/home", c2, c2 + "/root", c2 + "/home"} {
+	for _, d := range []string{jc, jc + "/root", c2, c2 + "/root"} {
 		s, _ := w.Z.Snapshots(bg, d)
 		for _, n := range s {
 			if strings.HasPrefix(n, "jo-copy-") {
@@ -53,13 +53,13 @@ func TestCopyIsIndependentFullCopy(t *testing.T) {
 			}
 		}
 	}
-	if v, _ := w.Z.ReadFile(c2+"/home", "/home/a"); v != "data" {
+	if v, _ := w.Z.ReadFile(c2+"/root", "/home/a"); v != "data" {
 		t.Fatal(v)
 	}
 	if got := w.Z.PropOrEmpty(c2+"/root", PropID); got != "uuid-web2" || w.Z.PropOrEmpty(c2, PropName) != "web2" || w.Z.PropOrEmpty(c2, PropComplete) != "on" {
 		t.Fatal("identity not rewritten")
 	}
-	if got := w.Z.PropOrEmpty(c2+"/etc", "mountpoint"); got != "/jailops/projects/alpha/jails/web2/root/etc" {
+	if got := w.Z.PropOrEmpty(c2+"/root", "mountpoint"); got != "/jailops/projects/alpha/jails/web2/root" {
 		t.Fatal(got)
 	}
 	var rec Record
@@ -124,18 +124,17 @@ func TestCopyCrashRecovery(t *testing.T) {
 func TestRebuildFromDatasets(t *testing.T) {
 	w := newWorld(t)
 	w.running("web")
-	upgrade(w, api.JailUpgrade{Generation: "g2"})
 	r, err := w.S.Rebuild(bg, "alpha_web")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Jail.Metadata.Name != "web" || r.Jail.Metadata.UUID != "uuid-web" || r.Jail.Status.ImageGeneration != "fb#g2" || r.Jail.Status.Power != api.PowerRunning {
-		t.Fatalf("%+v", r.Jail)
+	if r.Jail.Metadata.Name != "web" || r.Jail.Metadata.UUID != "uuid-web" || r.Jail.Status.ImageGeneration != "fb#g1" || r.Jail.Status.Power != api.PowerRunning || r.UnsupportedLayout {
+		t.Fatalf("%+v", r)
 	}
-	if len(r.Problems) != 0 || len(r.Notes) != 1 || r.Notes[0] != "leftover root.old" {
+	if len(r.Problems) != 0 || len(r.Notes) != 0 {
 		t.Fatalf("%v %v", r.Problems, r.Notes)
 	}
-	if r.Jail.Spec.Volumes[0].Name != "db" || r.Jail.Spec.Layout != api.LayoutThin {
+	if r.Jail.Spec.Volumes[0].Name != "db" {
 		t.Fatal(r.Jail.Spec)
 	}
 }
@@ -151,7 +150,6 @@ func TestRebuildProblems(t *testing.T) {
 			w.Files.Data["/jailops/projects/alpha/jails/web/spec.json"] = []byte("{oops")
 			delete(w.Files.Data, "/jailops/projects/alpha/jails/web/spec.json.previous")
 		}, "spec.json", true},
-		{"missing persistent dataset", func(w *world) { w.Z.DestroyRecursive(bg, jc+"/home") }, "persistent dataset is missing: " + jc + "/home", false},
 		{"missing volume", func(w *world) { w.Z.DestroyRecursive(bg, "tank/jailops/projects/alpha/volumes/db") }, "volume dataset is missing: db", false},
 		{"incomplete creation", func(w *world) { w.Z.Set(bg, jc, map[string]string{PropComplete: "off"}) }, "creation did not complete", false},
 		{"uuid mismatch", func(w *world) { w.Z.Set(bg, jc, map[string]string{PropID: "other"}) }, "uuid mismatch", false},
@@ -211,23 +209,23 @@ func TestRebuildAllIgnoresForeign(t *testing.T) {
 // the source and the copy does not carry it.
 func TestCopyFromASnapshotOfTheSource(t *testing.T) {
 	w := copySetup(t)
-	w.Z.WriteFile(jc+"/home", "/home/later", "newer")
+	w.Z.WriteFile(jc+"/root", "/home/later", "newer")
 	if _, err := w.S.CopyJailFrom(bg, "alpha_web", "alpha_web2", "uuid-web2", "7", "keep", false); err != nil {
 		t.Fatal(err)
 	}
 	c2 := "tank/jailops/projects/alpha/jails/web2"
-	if v, _ := w.Z.ReadFile(c2+"/home", "/home/a"); v != "data" {
+	if v, _ := w.Z.ReadFile(c2+"/root", "/home/a"); v != "data" {
 		t.Fatalf("the data of the snapshot is not in the copy: %q", v)
 	}
-	if v, ok := w.Z.ReadFile(c2+"/home", "/home/later"); ok {
+	if v, ok := w.Z.ReadFile(c2+"/root", "/home/later"); ok {
 		t.Fatalf("a file written after the snapshot is in the copy: %q", v)
 	}
-	for _, d := range []string{jc, jc + "/root", jc + "/home"} {
+	for _, d := range []string{jc, jc + "/root"} {
 		if ok, _ := w.Z.Exists(bg, d+"@keep"); !ok {
 			t.Errorf("%s@keep was dropped from the source", d)
 		}
 	}
-	for _, d := range []string{c2, c2 + "/root", c2 + "/home"} {
+	for _, d := range []string{c2, c2 + "/root"} {
 		s, _ := w.Z.Snapshots(bg, d)
 		if len(s) != 0 {
 			t.Errorf("%s carries snapshots %v", d, s)

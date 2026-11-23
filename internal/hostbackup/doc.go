@@ -28,9 +28,8 @@
 //     failed verification, last full read too old, change of the ctime setting).
 //     Missing-chunk queries of the engine's parallel workers are batched
 //     (batch.go). The jail is not stopped; Hooks may quiesce an application
-//     around the snapshot only. The thin root is not captured; the container
-//     dataset (spec.json, bundle.json) and the persistent datasets are, and so
-//     is the root of a thick jail. A volume is no part of a jail's capture: it is
+//     around the snapshot only. The container dataset (spec.json, bundle.json)
+//     and the root are captured. A volume is no part of a jail's capture: it is
 //     a record of its own (IsVolume, from Deps.Volumes) with one dataset, backed
 //     up as its own unit, so a volume that many jails attach is copied once.
 //   - Policies and schedule (scheduler.go). Service.Run evaluates api.BackupPolicy
@@ -43,10 +42,9 @@
 //     the policy sets exclude_volumes (RunOptions.NoVolumes for one run). RunNow runs a policy at once. Retention is the backup
 //     node's job and is not done here.
 //   - Restore (restore.go). Preflight gathers the real host state (through Host)
-//     and applies backup.Preflight; a missing image generation on the target
-//     storage is refused. RestoreWith creates the jail's datasets below the
-//     placement the daemon chooses, extracts them with engine.Restore, rebuilds
-//     the thin root as a clone of the image generation, ensures networks,
+//     and applies backup.Preflight. RestoreWith creates the jail's datasets below
+//     the placement the daemon chooses, extracts them with engine.Restore (a
+//     backup without a root is refused), ensures networks,
 //     policies and address sets, applies network_map and keep_ip, registers the
 //     jail with a new UUID unless replace is set, and leaves it stopped unless
 //     RestoreOptions.Start. A volume of the jail that the project lacks is

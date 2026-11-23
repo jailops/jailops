@@ -24,7 +24,20 @@ func (s *Service) ready(ctx context.Context, name string) (*jailState, error) {
 	return st, nil
 }
 
-// PlanStart orders a start: mount the persistent datasets, render the
+// own is ready for an operation that changes the jail beyond stopping and deleting it: a jail with an unsupported root
+// layout is refused (refuseUnsupported).
+func (s *Service) own(ctx context.Context, name string) (*jailState, error) {
+	st, err := s.ready(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if err := st.refuseUnsupported(); err != nil {
+		return nil, err
+	}
+	return st, nil
+}
+
+// PlanStart orders a start: mount the root, render the
 // configuration through the hooks, create the jail with jail(8) and check
 // readiness. A failure undoes everything in reverse.
 func (s *Service) PlanStart(ctx context.Context, name string) (*plan.Plan, error) {
@@ -32,29 +45,30 @@ func (s *Service) PlanStart(ctx context.Context, name string) (*plan.Plan, error
 		return nil, err
 	}
 	return plan.New("start-jail "+name,
-		plan.Step{Name: "mount", Describe: "zfs mount root, persistent datasets and volumes of " + name,
+		plan.Step{Name: "mount", Describe: "zfs mount root and volumes of " + name,
 			Do:   func(ctx context.Context) error { return s.mountTree(ctx, name) },
 			Undo: func(ctx context.Context) error { return s.unmountTree(ctx, name) }, UndoOnFail: true},
 		// Before jail(8) makes the devfs of this start (it does that before the hooks run): what an earlier stop that did
 		// not finish left below the root would be stacked under it. Best effort; the helper touches a jail that does not
 		// run only.
-		// The tree is put right before it is rendered: the mounts a stop that did not finish left are taken off, and the base
-		// package records of a thin jail follow the generation of its root (after a root swap the persistent /var/db still
-		// holds the old ones; best effort, a failure is told and never stops the start). One step, so that the step list
-		// of a start that a crash interrupted under the previous version still matches its journal record.
-		plan.Step{Name: "heal-mounts", Describe: "take the mounts a stop that did not finish left below the root of " + name + " off, and bring its base package records in step with its image generation",
+		// The tree is put right before it is rendered: the mounts a stop that did not finish left are taken off.
+		plan.Step{Name: "heal-mounts", Describe: "take the mounts a stop that did not finish left below the root of " + name + " off",
 			Do: func(ctx context.Context) error {
 				if s.Files != nil {
 					_, _ = s.Files.HealJail(ctx, name)
 				}
-				s.baseRecordsAtStart(ctx, name)
 				return nil
 			}},
 		plan.Step{Name: "render", Describe: "render jail.conf, rc.conf and firewall anchor for " + name,
 			Do:   func(ctx context.Context) error { return s.Hooks.PreStart(ctx, name) },
 			Undo: func(ctx context.Context) error { return s.Hooks.PostStop(ctx, name) }},
 		plan.Step{Name: "jail-start", Describe: "jail -c " + name,
-			Do: func(ctx context.Context) error { return s.Jails.Start(ctx, name) },
+			Do: func(ctx context.Context) error {
+				if err := s.markStarted(ctx, name); err != nil {
+					return err
+				}
+				return s.Jails.Start(ctx, name)
+			},
 			// Jails.Stop succeeds when the jail is not running, so this is safe
 			// even if jail(8) failed half-way.
 			Undo: func(ctx context.Context) error { return s.stopWithLostMounts(ctx, name) }, UndoOnFail: true},
@@ -72,6 +86,8 @@ func (s *Service) StartJail(ctx context.Context, name string) error {
 	// Refused here, not in PlanStart: the plan is rebuilt to roll an interrupted start back after a reboot, when the
 	// keys are not loaded.
 	if st, err := s.observe(ctx, name); err != nil {
+		return err
+	} else if err := st.refuseUnsupported(); err != nil {
 		return err
 	} else if err := s.refuseLocked(ctx, st); err != nil {
 		return err

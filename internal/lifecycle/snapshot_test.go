@@ -25,30 +25,26 @@ func TestSnapshotIsOneAtomicOperation(t *testing.T) {
 		t.Fatalf("%d zfs snapshot calls, want exactly one: %v", snaps, w.F.Log)
 	}
 	c := "tank/jailops/projects/alpha/jails/web"
-	for _, d := range []string{c, c + "/root", c + "/etc", c + "/home"} {
+	for _, d := range []string{c, c + "/root"} {
 		if ok, _ := w.Z.Exists(bg, d+"@before"); !ok {
 			t.Errorf("%s has no snapshot", d)
 		}
 	}
-	if len(r.Datasets) != 10 {
+	if len(r.Datasets) != 2 {
 		t.Fatal(r.Datasets)
 	}
 	if got := w.Z.PropOrEmpty(c+"@before", PropGen); got != "1" {
 		t.Fatalf("gen on snapshot %q", got)
 	}
-	// written reporting covers data datasets only
-	w.Z.WriteFile(c+"/home", "/home/a", "12345")
+	// written reporting covers the root, not the volumes
+	w.Z.WriteFile(c+"/root", "/home/a", "12345")
 	w.Z.WriteFile(dbVol, "/db", "123")
-	w.Z.WriteFile(c+"/etc", "/etc/x", "9999999")
 	l, err := w.S.ListSnapshots(bg, "alpha_web")
 	if err != nil || len(l) != 1 {
 		t.Fatal(l, err)
 	}
-	if l[0].TotalWritten != 5 || l[0].Written[c+"/home"] != 5 {
+	if l[0].TotalWritten != 5 || l[0].Written[c+"/root"] != 5 {
 		t.Fatalf("%+v", l[0])
-	}
-	if _, ok := l[0].Written[c+"/etc"]; ok {
-		t.Fatal("system dataset counted as data")
 	}
 	if _, err := w.S.SnapshotJail(bg, "alpha_web", "before", ""); !api.IsCode(err, api.CodeAlreadyExists) {
 		t.Fatal(err)

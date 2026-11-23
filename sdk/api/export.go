@@ -7,16 +7,13 @@ const ExportFormat = 1
 
 // The kinds of an ExportPart.
 const (
-	PartRoot       = "root"       // the root of a thick jail
-	PartPersistent = "persistent" // etc, local, var-*, home: the datasets that hold what is unique in a thin jail
-	PartVolume     = "volume"     // a volume of the project, with --with-volumes
+	PartRoot   = "root"   // the root of the jail
+	PartVolume = "volume" // a volume of the project, with --with-volumes
 )
 
-// ExportPart is one ZFS stream of an export file. A persistent dataset that has a baseline snapshot is two parts: the
-// baseline (full) and the export snapshot (incremental from the baseline), so that `jailops jail diff` still has its
-// base on the target.
+// ExportPart is one ZFS stream of an export file.
 type ExportPart struct {
-	// Dataset names the dataset relative to the jail: root, etc, local, var-log, home; for a volume its own name.
+	// Dataset names the dataset relative to the jail (root); for a volume its own name.
 	Dataset string `json:"dataset"`
 	Kind    string `json:"kind"`
 	// Snapshot is the snapshot the stream ends at; From, when set, makes it incremental from that snapshot.
@@ -39,16 +36,6 @@ type ExportVolume struct {
 	Shared bool `json:"shared,omitempty"`
 }
 
-// ExportImage says which image a thin jail's root came from; the file does not hold the root.
-type ExportImage struct {
-	Name       string `json:"name"`
-	Generation int    `json:"generation,omitempty"`
-	// Release is the FreeBSD release of the image ("15.1-RELEASE"), and FreeBSDVersion the patch level it was built at.
-	Release        string `json:"release,omitempty"`
-	FreeBSDVersion string `json:"freebsd_version,omitempty"`
-	Manifest       string `json:"manifest,omitempty"`
-}
-
 // ExportManifest is the first record of an export file. The jail, the objects it refers to and the datasets that
 // follow are all named here; nothing the target needs to decide is only in the streams.
 type ExportManifest struct {
@@ -59,10 +46,7 @@ type ExportManifest struct {
 	Project string            `json:"project"`
 	UUID    string            `json:"uuid"`
 	Labels  map[string]string `json:"labels,omitempty"`
-	Layout  Layout            `json:"layout"`
 	OS      OS                `json:"os,omitempty"`
-	// Image is set for a thin jail.
-	Image ExportImage `json:"image"`
 	// Bundle is the closure of the jail: its spec, frozen copies of the networks, firewall policies and address sets it
 	// refers to, and the names of the sealed secrets it needs (never their values).
 	Bundle  RestoreBundle  `json:"bundle"`

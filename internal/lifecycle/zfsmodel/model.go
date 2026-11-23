@@ -421,6 +421,12 @@ func (m *Model) Get(_ context.Context, name, prop string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if prop == "mounted" { // a read-only property of the real ZFS
+		if d.mounted {
+			return "yes", nil
+		}
+		return "no", nil
+	}
 	return d.props[prop], nil
 }
 

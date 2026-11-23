@@ -3,27 +3,19 @@ package priv
 import (
 	"context"
 	"strings"
-	"time"
-
-	"jailops.net/jailops/internal/sys/run"
 )
 
-// mountPoints lists the mount points of the host (mount -p, fstab format), one per mount. A list that cannot be read is
-// nil: the check that needs it then has nothing to compare and says nothing.
+// mountPoints lists the host's mounts keyed by "<mount point>\x00<source>", one per mount. It reads the table with a
+// syscall (mountTableReader), never by running a program: the after-check of a live mount must not exec a binary a
+// tenant could have covered with that very mount. A table that cannot be read is nil, and callers fail closed.
 func (l *Local) mountPoints(ctx context.Context) map[string]string {
-	res, err := l.d.Runner.Run(ctx, run.Cmd{Name: "mount", Args: []string{"-p"}, Timeout: 10 * time.Second})
+	ents, err := mountTableReader()
 	if err != nil {
 		return nil
 	}
-	return parseMountPoints(string(res.Stdout))
-}
-
-func parseMountPoints(out string) map[string]string {
 	m := map[string]string{}
-	for _, line := range strings.Split(out, "\n") {
-		if f := strings.Fields(line); len(f) >= 3 {
-			m[f[1]+"\x00"+f[0]] = f[1]
-		}
+	for _, e := range ents {
+		m[e.mp+"\x00"+e.dev] = e.mp
 	}
 	return m
 }
@@ -45,16 +37,17 @@ func landedElsewhere(before, after map[string]string, dest string) []string {
 // after, and a mount that appeared anywhere but at the path it was asked for is unmounted at once (the window is that
 // of one mount(8) call, and what is left behind is nothing). before is nil when the list could not be read.
 func (l *Local) checkMountLanded(ctx context.Context, before map[string]string, dest string) error {
-	if before == nil {
-		return nil
-	}
 	after := l.mountPoints(ctx)
-	if after == nil {
-		return nil
+	// Fail closed: a table we cannot read before or after the mount leaves us unable to tell where the mount landed, so
+	// we undo the path we asked for and refuse rather than leave a mount we could not verify. With getfsstat this is
+	// effectively unreachable, but the safe answer when the check cannot run is no.
+	if before == nil || after == nil {
+		_ = forceUnmount(dest)
+		return forbidden("mount %s: the host's mount table could not be read, so the mount could not be verified; it was undone", dest)
 	}
 	stray := landedElsewhere(before, after, dest)
 	for _, mp := range stray {
-		_, _ = l.d.Runner.Run(ctx, run.Cmd{Name: "umount", Args: []string{"-f", mp}, Timeout: 20 * time.Second})
+		_ = forceUnmount(mp)
 	}
 	if len(stray) > 0 {
 		return forbidden("the mount landed on %s and not on %s (a link in the path): it was unmounted", strings.Join(stray, ", "), dest)

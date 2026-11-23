@@ -22,7 +22,9 @@ import (
 //   - 0.8.4: the proxy devices of a jail are IPv4 entries of its exposure (spec.expose);
 //   - 1.0: a jail's update.strategy and update.window are gone (`strategy: manual` is `mode: manual`), boot.stop_timeout is
 //     boot.stop_timeout_seconds, and the by and at of an expose entry are gone (the audit log names who and when);
-//   - 1.0: the keys of a profile's config are the paths of the spec (ConfigKeyRenamed).
+//   - 1.0: the keys of a profile's config are the paths of the spec (ConfigKeyRenamed);
+//   - 0.9.3: a jail's layout is gone (every jail is one root of its own): `layout` is dropped. That a jail has the
+//     old root layout, its datasets say (ConditionUnsupportedLayout). The generation of a rollout is dropped too.
 //
 // The redirect rules of firewall policies are not rewritten here: they became exposures of the jails that used the
 // policy, which a spec alone does not name (the store does it when it loads the policy).
@@ -81,6 +83,11 @@ func UpgradeFields(kind Kind, spec map[string]any) []string {
 			}
 			notes = append(notes, "down is read as disabled")
 		}
+	case KindRollout:
+		if _, has := spec["generation"]; has {
+			delete(spec, "generation")
+			notes = append(notes, "generation is dropped (a jail is upgraded in place)")
+		}
 	case KindImage:
 		if _, has := spec["aliases"]; has {
 			delete(spec, "aliases")
@@ -113,6 +120,10 @@ func UpgradeFields(kind Kind, spec map[string]any) []string {
 // upgradeJailFields is the jail part of UpgradeFields that needs no other object.
 func upgradeJailFields(spec map[string]any) []string {
 	var notes []string
+	if v, has := spec["layout"]; has {
+		delete(spec, "layout")
+		notes = append(notes, fmt.Sprintf("layout %v is dropped (a jail is one root of its own)", v))
+	}
 	if boot, ok := spec["boot"].(map[string]any); ok {
 		if v, has := boot["stop_timeout"]; has {
 			delete(boot, "stop_timeout")
@@ -129,7 +140,7 @@ func upgradeJailFields(spec map[string]any) []string {
 				up["mode"] = "manual"
 				notes = append(notes, "update.strategy manual is read as update.mode manual")
 			} else {
-				notes = append(notes, fmt.Sprintf("update.strategy %v is dropped (a thin jail follows its image, a thick one updates in place)", v))
+				notes = append(notes, fmt.Sprintf("update.strategy %v is dropped (a jail is upgraded in place)", v))
 			}
 		}
 		if _, has := up["window"]; has {

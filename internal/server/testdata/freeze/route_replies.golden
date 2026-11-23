@@ -61,8 +61,9 @@ GET /api/v1/jails sync
 GET /api/v1/jails/{name} sync
 GET /api/v1/jails/{name}/access sync
 GET /api/v1/jails/{name}/app-draft sync
+GET /api/v1/jails/{name}/audit sync
+GET /api/v1/jails/{name}/base sync
 GET /api/v1/jails/{name}/console/{id}/output stream
-GET /api/v1/jails/{name}/diff sync
 GET /api/v1/jails/{name}/export stream
 GET /api/v1/jails/{name}/files/{path...} stream
 GET /api/v1/jails/{name}/logs sync
@@ -163,13 +164,11 @@ POST /api/v1/jails/{name}/config async
 POST /api/v1/jails/{name}/console stream
 POST /api/v1/jails/{name}/console/{id}/input stream
 POST /api/v1/jails/{name}/console/{id}/resize stream
-POST /api/v1/jails/{name}/convert async
 POST /api/v1/jails/{name}/copy async
 POST /api/v1/jails/{name}/exec stream
 POST /api/v1/jails/{name}/expose sync
 POST /api/v1/jails/{name}/provision async
 POST /api/v1/jails/{name}/rename either
-POST /api/v1/jails/{name}/repair-packages async
 POST /api/v1/jails/{name}/rollback async
 POST /api/v1/jails/{name}/shell-setup async
 POST /api/v1/jails/{name}/snapshots async

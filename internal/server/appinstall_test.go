@@ -142,7 +142,7 @@ func execArgvs(e *dtest.Env, jail string) []string {
 	return out
 }
 
-// The whole flow: a thin jail with the data paths as volumes and the labels,
+// The whole flow: a jail with the data paths as volumes and the labels,
 // started, the packages installed from the host, rc.conf written, the setup
 // commands and the services run in the jail, the health check, the snapshot,
 // and a result that says how to reach the app.
@@ -169,8 +169,15 @@ func TestAppInstall(t *testing.T) {
 	if res.App != "web" || !strings.HasPrefix(res.Hash, "sha256:") || res.Version != "15.1p1" || res.Snapshot != "app-installed" || res.DryRun {
 		t.Fatalf("%+v", res)
 	}
-	if j.Metadata.Name != "web" || j.Status.Power != api.PowerRunning || j.Spec.Image != "fb151" || j.Spec.Layout != api.LayoutThin || j.Spec.Hostname != "web" {
+	if j.Metadata.Name != "web" || j.Status.Power != api.PowerRunning || j.Spec.Image != "fb151" || j.Spec.Hostname != "web" {
 		t.Fatalf("%+v %+v", j.Spec, j.Status)
+	}
+	// the app's jail is an ordinary jail: one root of its own, copied from the image, and nothing else below it
+	if o, _ := e.ZFS.Origin(c, "tank/jailops/projects/alpha/jails/web/root"); o != "" {
+		t.Fatalf("the app's root is a clone of %q", o)
+	}
+	if rows, _ := e.ZFS.List(c, zfs.ListOpts{Root: "tank/jailops/projects/alpha/jails/web", Recursive: true}); len(rows) != 2 {
+		t.Fatalf("the app's jail has datasets besides its root: %+v", rows)
 	}
 	if l := j.Metadata.Labels; l[api.LabelApp] != "web" || l[api.LabelAppHash] != res.Hash || l[api.LabelAppVersion] != "15.1p1" {
 		t.Fatalf("labels %v", l)
@@ -746,15 +753,14 @@ func TestAppInstallCreateFailsAfterCreation(t *testing.T) {
 	}
 }
 
-// A definition whose data path is a persistent dataset of every jail is
-// refused before the operation starts, with the validator's message; so is
-// one that names a path this host keeps persistent.
-func TestAppInstallRefusesPersistentPaths(t *testing.T) {
+// A definition whose data path is a directory of every jail's own root is refused before the operation starts, with
+// the validator's message.
+func TestAppInstallRefusesRootPaths(t *testing.T) {
 	bad := strings.Replace(appWeb, "{path: /usr/local/www/web}", "{path: /var/log}", 1)
 	e, c := appEnv(t, map[string]string{"web": bad})
 	_, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151", Network: "lan", Storage: "default"})
 	wantCode(t, err, api.CodeInvalid)
-	if !strings.Contains(err.Error(), "data[1].path: /var/log is a persistent dataset of every jail") {
+	if !strings.Contains(err.Error(), "data[1].path: /var/log is a directory of every jail's own root") {
 		t.Fatalf("%v", err)
 	}
 	for o, err := range e.Admin.Operations().List(c) {

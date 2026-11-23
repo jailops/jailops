@@ -25,8 +25,7 @@ sets), and its data. The jail keeps running, and is busy (no stop, no upgrade) u
 holds is the state of the datasets at one moment, as if the host had lost power then: a database recovers as it does
 after a crash.
 
-A thin jail's data is its persistent datasets (etc, local, var, home): the root is the image's and is not in the file,
-so the file is small and the importing host needs the same image. A thick jail, and a Linux jail, carries its root.
+The file carries the root of the jail, with its base, its packages and its data.
 Volumes are not in the file unless you ask for them with --with-volumes; a volume that is a directory of the host never
 is. An encrypted volume is written as it is stored and stays encrypted: the file holds no key and the volume is locked
 after the import.
@@ -126,8 +125,7 @@ then its data, which is received into new datasets and verified. A file that is 
 behind. FILE - reads the standard input.
 
 The new jail has a new uuid and does not start at boot. It gets new addresses, or with --keep-ip the ones in the file
-when they are free here. A thin jail's root is made from the image of the same name on this host, so the image has to
-exist (the error says how to make it); the jail then runs on this host's newest generation of it. Networks of the file
+when they are free here. The root comes from the file; the image it was copied from need not exist here. Networks of the file
 that this host lacks are mapped with --network-map OLD=NEW (a network belongs to the host and is never made by an
 import); volumes the file carries become volumes of the project, renamed with --volume-map OLD=NEW when the name is
 taken. Firewall policies and address sets the project lacks are made from the file. An encrypted volume stays locked:
@@ -226,8 +224,7 @@ func parseMap(flag string, vals []string) (map[string]string, error) {
 
 func (a *app) printImportPlan(m api.ExportManifest, pf api.RestorePreflight) {
 	w := a.env.Stdout
-	layout := string(m.Layout)
-	fprintf(w, "file: jail %s of project %s (%s, image %s)\n", m.Name, m.Project, layout, m.Image.Name)
+	fprintf(w, "file: jail %s of project %s (image %s)\n", m.Name, m.Project, orText(m.Bundle.ImageGeneration, m.Bundle.Spec.Image))
 	for _, l := range m.Warnings {
 		fprintln(w, "  note: "+l)
 	}

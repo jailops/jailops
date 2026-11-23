@@ -293,7 +293,7 @@ func Validate(app *api.App) error {
 	if err := validatePorts(app.Ports); err != nil {
 		return err
 	}
-	if err := CheckPersistent(*app, PersistentPaths); err != nil {
+	if err := CheckRootPaths(*app, RootPaths); err != nil {
 		return err
 	}
 	if err := validateData(app.Data); err != nil {
@@ -502,14 +502,12 @@ var systemPrefixes = []string{
 	"/var/run", "/var/tmp", "/var/empty",
 }
 
-// PersistentPaths are the persistent datasets of every jail in the default
-// layout (lifecycle.DefaultPersistent). A data or config path is never one
-// of them: a volume there would hide the jail's own dataset.
-var PersistentPaths = []string{"/etc", "/usr/local", "/var/db", "/var/log", "/var/mail", "/var/spool", "/home", "/root"}
+// RootPaths are directories of every jail's own root. A data or config path is never one of them: a volume there
+// would hide what the root holds (the system, its configuration, the package database, the logs).
+var RootPaths = []string{"/etc", "/usr/local", "/var/db", "/var/log", "/var/mail", "/var/spool", "/home", "/root"}
 
-// CheckPersistent refuses data and config paths equal to one of persistent;
-// the installer checks the host's configured list with it too.
-func CheckPersistent(app api.App, persistent []string) error {
+// CheckRootPaths refuses data and config paths equal to one of paths.
+func CheckRootPaths(app api.App, persistent []string) error {
 	for i, d := range app.Data {
 		if slices.Contains(persistent, d.Path) {
 			return persistentErr(fmt.Sprintf("data[%d].path", i), d.Path)
@@ -524,7 +522,7 @@ func CheckPersistent(app api.App, persistent []string) error {
 }
 
 func persistentErr(field, p string) error {
-	return invalid(field, "%s is a persistent dataset of every jail, not a path of the application; name a directory below it", p)
+	return invalid(field, "%s is a directory of every jail's own root, not a path of the application; name a directory below it", p)
 }
 
 // dataParents are the directories a data path must lie below (not be).

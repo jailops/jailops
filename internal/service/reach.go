@@ -626,6 +626,9 @@ func computeReach(an *render.Anchor, rc reachCtx, nets map[netip.Addr]string, ou
 	if len(out.Exposed) > 0 {
 		out.Notes = append(out.Notes, "what the host's own pf.conf drops before the jailops anchor is not shown (jailops doctor, pf.inbound)")
 	}
+	if len(an.Uplinks) > 0 || len(an.Forwards) > 0 {
+		out.Notes = append(out.Notes, "what the Internet reaches is what these rows say only if the host's pf.conf blocks inbound traffic by default: JailOps opens the uplink for what the policies admit and never closes it (jailops doctor: pf.host_default_deny)")
+	}
 	sortExposed(out.Exposed)
 	return out
 }

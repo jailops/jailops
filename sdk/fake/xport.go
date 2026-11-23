@@ -37,7 +37,7 @@ func (s *Server) jailExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := api.ExportManifest{Format: api.ExportFormat, Created: s.now().UTC(), Name: c.Metadata.Name, Project: c.Metadata.Project,
-		UUID: c.Metadata.UUID, Layout: c.Spec.Layout, Image: api.ExportImage{Name: c.Spec.Image},
+		UUID: c.Metadata.UUID, OS: c.Spec.OS,
 		Bundle: api.RestoreBundle{Spec: c.Spec}, Parts: []api.ExportPart{}}
 	if r.URL.Query().Get("with_volumes") == "true" {
 		m.Warnings = append(m.Warnings, "the fake carries no volumes")

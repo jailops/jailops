@@ -13,14 +13,13 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// rolloutFleet applies three web jails (a, b, c) on one host and then makes a
-// newer image generation available.
+// rolloutFleet applies three web jails (a, b, c) on one host; running are started.
 func rolloutFleet(t *testing.T, running ...string) *fleettest.Env {
 	t.Helper()
 	e := fleettest.New(t, "testfleet", "web1")
 	e.StandardObjects()
 	for _, n := range []string{"a", "b", "c"} {
-		e.Jail("web1", n, "tier: web", "")
+		e.Write("projects/"+fleettest.Project+"/jails/"+n+".yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: [web1]\nmetadata:\n  name: "+n+"\n  labels: {tier: web}\nspec:\n  image: freebsd-15\n  storage: default\n  network:\n    - network: internal\n      ipv4: auto\n  firewall:\n    policies: [web]\n")
 	}
 	e.Write("rollouts/web-upgrade.yaml", `apiVersion: jailops/v1
 kind: Rollout
@@ -35,9 +34,6 @@ spec:
   health_gate: {timeout: 150ms, interval: 5ms}
 `)
 	mustOK(t, run(t, e, "sync", "--apply"))
-	srv := e.Hosts["web1"].Server
-	srv.SeedGeneration("freebsd-15")
-	srv.SeedGeneration("freebsd-15")
 	c := client(t, e.Hosts["web1"]).Project(fleettest.Project)
 	for _, n := range running {
 		op, err := c.Jails().Start(context.Background(), n)
@@ -68,11 +64,11 @@ func TestRolloutRunsInBatches(t *testing.T) {
 	contains(t, r.out, "batch 3/3")
 	contains(t, r.out, "rollout web-upgrade: done")
 	for _, n := range []string{"a", "b", "c"} {
-		if g := getJail(t, e.Hosts["web1"], n).Status.ImageGeneration; g != "g2" {
-			t.Fatalf("%s is on %s", n, g)
+		if got := upgradeCalls(e, n); got != 1 {
+			t.Fatalf("jail %s was upgraded %d times, want 1", n, got)
 		}
 	}
-	// Done rollouts can run again (nothing to upgrade, all already on target).
+	// Done rollouts can run again.
 	mustOK(t, run(t, e, "rollout", "run", "web-upgrade"))
 	r = mustOK(t, run(t, e, "rollout", "list"))
 	contains(t, r.out, "web-upgrade")
@@ -88,14 +84,14 @@ func TestRolloutAbortsOnHealthGateFailureAndResumes(t *testing.T) {
 		t.Fatal("ran past the last batch")
 	}
 	for _, n := range []string{"a", "b"} {
-		if g := getJail(t, e.Hosts["web1"], n).Status.ImageGeneration; g != "g2" {
-			t.Fatalf("%s is on %s", n, g)
+		if got := upgradeCalls(e, n); got != 1 {
+			t.Fatalf("jail %s was upgraded %d times, want 1", n, got)
 		}
 	}
 	// A failed rollout is not silently restarted.
 	mustFail(t, run(t, e, "rollout", "run", "web-upgrade"), "rollout resume")
 	st := mustOK(t, run(t, e, "rollout", "status", "web-upgrade"))
-	contains(t, st.out, "web1/c g1 -> g2: unhealthy")
+	contains(t, st.out, "web1/c: unhealthy")
 
 	// Fix the jail, resume: only c is looked at, and c is not upgraded twice.
 	c := client(t, e.Hosts["web1"]).Project(fleettest.Project)
@@ -123,17 +119,14 @@ func TestRolloutCanaryFailureLeavesTheRestUntouched(t *testing.T) {
 	r := mustFail(t, run(t, e, "rollout", "run", "web-upgrade"), "boom")
 	contains(t, r.out, "rollout web-upgrade: failed")
 	for _, n := range []string{"b", "c"} {
-		if g := getJail(t, e.Hosts["web1"], n).Status.ImageGeneration; g != "g1" {
-			t.Fatalf("%s was touched after the canary failed: %s", n, g)
-		}
 		if got := upgradeCalls(e, n); got != 0 {
 			t.Fatalf("%s: %d upgrade calls", n, got)
 		}
 	}
 	// Resume retries the canary (the injected failure is spent) and finishes.
 	mustOK(t, run(t, e, "rollout", "resume", "web-upgrade"))
-	if g := getJail(t, e.Hosts["web1"], "c").Status.ImageGeneration; g != "g2" {
-		t.Fatalf("c is on %s", g)
+	if got := upgradeCalls(e, "c"); got != 1 {
+		t.Fatalf("c: %d upgrade calls", got)
 	}
 	// --restart discards an unfinished state; resume of a finished one is a no-op.
 	mustOK(t, run(t, e, "rollout", "resume", "web-upgrade"))
@@ -148,8 +141,8 @@ func TestRolloutOnlyTouchesOwnedJails(t *testing.T) {
 	})
 	r := mustOK(t, run(t, e, "rollout", "run", "web-upgrade"))
 	contains(t, r.out, "skip web1/stranger: not owned by this fleet")
-	if g := getJail(t, e.Hosts["web1"], "stranger").Status.ImageGeneration; g != "g1" {
-		t.Fatalf("a foreign jail was upgraded: %s", g)
+	if got := upgradeCalls(e, "stranger"); got != 0 {
+		t.Fatalf("a foreign jail was upgraded %d times", got)
 	}
 	mustFail(t, run(t, e, "rollout", "run", "nope"), "unknown rollout")
 }
@@ -199,5 +192,23 @@ func TestRolloutResumeAttachesToRunningOperation(t *testing.T) {
 	}
 	if got := upgradeCalls(e, "a"); got != 1 {
 		t.Fatalf("jail a upgraded %d times; resume must wait for operation %s", got, op)
+	}
+}
+
+// A rollout upgrades every jail in place, in batches, and sends no generation or image.
+func TestRolloutUpgradesJailsInPlace(t *testing.T) {
+	e := rolloutFleet(t, "a", "b", "c")
+	r := mustOK(t, run(t, e, "rollout", "run", "web-upgrade"))
+	contains(t, r.out, "upgrade web1/a in place")
+	contains(t, r.out, "upgrade web1/c in place")
+	for _, n := range []string{"a", "b", "c"} {
+		if upgradeCalls(e, n) != 1 {
+			t.Fatalf("jail %s: %d upgrade calls", n, upgradeCalls(e, n))
+		}
+		for _, rq := range e.Hosts["web1"].Server.Requests() {
+			if rq.Method == "POST" && rq.Path == "/api/v1/jails/"+n+"/upgrade" && (strings.Contains(string(rq.Body), "generation") || strings.Contains(string(rq.Body), "image")) {
+				t.Fatalf("a jail was sent a generation or an image: %s", rq.Body)
+			}
+		}
 	}
 }

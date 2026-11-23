@@ -33,9 +33,9 @@ concurrency:
 jobs:
   # A release commit changes version.txt and CHANGELOG.md and nothing else: the tree it comes from passed this workflow already on its
   # parent. When the change is only those two files and the tree of the parent has a green run (the run of the parent itself, or of any
-  # commit with the same tree: a squash merge is a new commit of the tree its pull request ran), the slow jobs (the race detector, the
-  # fuzzers, the browsers and the FreeBSD VMs) are skipped, so a release PR and the push of its merge take minutes. Anything else runs
-  # everything, docs included: tests and the prose lint read the docs.
+  # commit with the same tree: a squash merge is a new commit of the tree its pull request ran), release_only says so to the jobs that
+  # read it. The slow jobs (the fuzzers, the browsers and the FreeBSD VMs) follow heavy alone: they run every night, by hand and on the
+  # pull request of a release (release/*), which is the full run `just release` looks for on the tree it tags.
   # `just release` still asks for a green run of exactly the commit it tags: the jobs that run here make it.
   changes:
     name: What changed

@@ -220,7 +220,7 @@ func TestLockedJailRefusesAnUpgradeButRecovers(t *testing.T) {
 	if _, err := w.S.PlanStart(bg, "alpha_web"); err != nil {
 		t.Fatalf("the start plan of a recovery: %v", err)
 	}
-	if _, _, err := w.S.PlanUpgrade(bg, "alpha_web", UpgradeRequest{Stamp: "9", Resume: &SwitchState{FromGen: 1}}); api.IsCode(err, api.CodeLocked) {
+	if _, _, err := w.S.PlanUpgrade(bg, "alpha_web", UpgradeRequest{Stamp: "9", Resume: &SwitchState{Snapshot: "jo-pre-upgrade-9"}}); api.IsCode(err, api.CodeLocked) {
 		t.Fatalf("the upgrade plan of a recovery: %v", err)
 	}
 }

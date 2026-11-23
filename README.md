@@ -8,7 +8,7 @@ JailOps targets **FreeBSD 15.1 and later**; older releases are not looked at, an
 
 What is available today and what comes next: [the roadmap](https://jailops.net/status/).
 
-- Thin jails as ZFS clones of immutable, upgradable pkgbase image generations
+- Every jail an independent system on its own ZFS root, block-cloned from a pkgbase image and upgraded in place while it runs
 - Routed VNET networks with deterministic IPv4 and IPv6 allocation, one link per jail. No DHCP, no radvd, no SLAAC
 - PF anchors per jail
 - Encrypted, deduplicated backups to a keyless backup node, with restore and restore tests

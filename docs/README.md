@@ -18,16 +18,17 @@ register of what is settled and what is open.
 | [export-import.md](export-import.md) | Moving a jail as a file: export, import, what is in the file, volumes and encrypted data |
 | [storage.md](storage.md) | Storages on big pools, volumes, host directories, quotas, what is and is not backed up |
 | [backup-restore.md](backup-restore.md) | The backup node, the key and its escrow, policies, verification, restoring |
-| [lifecycle.md](lifecycle.md) | **Updating FreeBSD, the host and the jails**: the model, what works with what, the runbooks for every situation (a patch level, a new release, JailOps, thin, thick and Linux jails, packages), what to test after every step, and the way back |
-| [automating-updates.md](automating-updates.md) | One administrator's way: a script in periodic(8) that updates the host's patch level, the image and the packages inside the jails every night, line by line, and the move of that host to 15.2 and to 16.0 with the command line |
-| [upgrade.md](upgrade.md) | The mechanisms behind the runbooks: upgrading JailOps, image generations and the nightly upgrade, moving a jail to a new release, rollback scopes, managed updates |
-| [thick-jail-upgrades.md](thick-jail-upgrades.md) | Updating a thick or Linux jail by hand: a checkpoint, the update, the checks, going back |
+| [lifecycle.md](lifecycle.md) | **Updating FreeBSD, the host and the jails**: the model, what works with what, the runbooks for every situation (a patch level, a new release, JailOps, FreeBSD and Linux jails, images, packages), what to test after every step, and the way back |
+| [automating-updates.md](automating-updates.md) | One administrator's way: a script in periodic(8) that updates the host's patch level, the image and the jails every night, line by line, and the move of that host to 15.2 and to 16.0 with the command line |
+| [upgrade.md](upgrade.md) | The mechanisms behind the runbooks: upgrading JailOps, image generations and the nightly upgrade, the in-place upgrade of a jail and a new release, rollback scopes, managed updates, the jails with an unsupported root layout |
+| [thick-jail-upgrades.md](thick-jail-upgrades.md) | The in-place upgrade of a jail, and a Linux jail: the checkpoint, the upgrade, the checks, going back |
 | [supported-versions.md](supported-versions.md) | Which FreeBSD releases JailOps supports, what supported means, and how hosts and jails move to a new release |
 | [1.0.md](1.0.md) | What 1.0.0 promises and what it does not, and the gates a release has to pass |
 | [compatibility.md](compatibility.md) | Which releases of clients, servers, hubs and helpers work together, what a stop in the middle of a change leaves, and the rules for 1.x |
 | [upgrade-guarantee.md](upgrade-guarantee.md) | What an upgrade keeps, how stored state is converted, how the guarantee is tested, and what a release that changes a stored shape does |
 | [roadmap.md](roadmap.md) | What is planned for 0.7.0 and later, in order |
 | [operations.md](operations.md) | Runbooks (lost admin access, a stolen credential, a compromised daemon, a lost backup key, a new host, a firewall lock-out, going back one version), recovery objectives, and what to monitor (`/readyz`, doctor) |
+| [audit.md](audit.md) | `jailops jail audit`: a read-only look at a jail for security problems and better settings, each with its fix |
 | [troubleshooting.md](troubleshooting.md) | `jailops doctor` checks by id, `jailops explain` codes, common failures |
 | [testing-on-freebsd.md](testing-on-freebsd.md) | Running the end-to-end and PF scripts on a VM of your own, one run at a time with the VM lock |
 | [linux-jails.md](linux-jails.md) | Alpine and Debian jails under the Linuxulator: limits and prerequisites |

@@ -38,11 +38,6 @@ func JailSpec(name string, s api.JailSpec) error {
 			return Invalid("resources.disk_reservation", "disk_reservation %q is not a size", s.Resources.DiskReservation)
 		}
 	}
-	switch s.Layout {
-	case "", api.LayoutThin, api.LayoutThick:
-	default:
-		return Invalid("layout", "layout %q must be thin or thick", s.Layout)
-	}
 	if s.Hostname != "" {
 		if err := Hostname("hostname", s.Hostname); err != nil {
 			return err
@@ -414,16 +409,6 @@ func provision(p api.Provision) error {
 				return Invalid(fmt.Sprintf("provision.commands[%d]", i), "a command word is not valid")
 			}
 		}
-	}
-	return nil
-}
-
-// LayoutFits refuses the thin layout for a Linux jail: the persistent datasets of a thin jail are ZFS mounts that the
-// nullfs mirror of the root at compat/linux does not show, so a Linux process would see empty directories. It is asked
-// when a jail is made, with the operating system of its image.
-func LayoutFits(s api.JailSpec) error {
-	if s.Layout == api.LayoutThin && s.OS == api.OSLinux {
-		return Invalid("layout", "a Linux jail is thick: the thin layout is for FreeBSD jails (leave --layout out)")
 	}
 	return nil
 }

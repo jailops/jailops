@@ -262,7 +262,7 @@ func (a *app) printAppInfo(w io.Writer, det api.AppDetail) {
 	kv("Category", d.Category)
 	kv("License", dash(d.License))
 	kv("Homepage", dash(d.Homepage))
-	kv("Image", fmt.Sprintf("FreeBSD %s or later, thin jail", d.Image.ReleaseMin))
+	kv("Image", fmt.Sprintf("FreeBSD %s or later", d.Image.ReleaseMin))
 	kv("File", fmt.Sprintf("%s (%s)", det.File, det.Hash))
 	if det.Source == api.AppSourceLocal {
 		src := "local (the host's apps.local_dir)"

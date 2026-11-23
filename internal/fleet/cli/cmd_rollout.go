@@ -156,7 +156,7 @@ func printState(w interface{ Write([]byte) (int, error) }, st *rollout.State) {
 		fmt.Fprintf(w, "  error: %s\n", st.Error)
 	}
 	for _, it := range st.Items {
-		line := fmt.Sprintf("  %-10s %s/%s %s -> %s", it.State, it.Host, it.Jail, it.From, it.To)
+		line := fmt.Sprintf("  %-10s %s/%s", it.State, it.Host, it.Jail)
 		if it.Error != "" {
 			line += ": " + it.Error
 		}

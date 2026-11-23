@@ -540,8 +540,8 @@ func TestAJailThatWasNeverStartedIsBackedUpWithItsDatasetsUnmounted(t *testing.T
 			unmounts = append(unmounts, ds)
 		}
 	}
-	// the thin root is not captured, so it is not mounted; the container comes first, and everything is unmounted again
-	if len(mounts) != 4 || mounts[0] != j.Container || len(unmounts) != 4 || unmounts[3] != j.Container {
+	// the container comes first, and everything is unmounted again
+	if len(mounts) != 5 || mounts[0] != j.Container || len(unmounts) != 5 || unmounts[4] != j.Container {
 		t.Fatalf("mounts %v, unmounts %v", mounts, unmounts)
 	}
 	for ds, down := range z.down {

@@ -207,15 +207,41 @@ func TestJailRollbackConfirmation(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "2.0 KiB written") {
 		t.Fatalf("flag: %d %s", code, out)
 	}
-	// Root rollback needs an earlier generation: the fake says invalid.
+	// Root rollback needs the snapshot of an upgrade: the fake has none.
 	_, _, code = tr.do("", "jail", "rollback", "web")
-	if code != 2 {
-		t.Fatalf("root without history: %d", code)
+	if code != 4 {
+		t.Fatalf("root without an upgrade: %d", code)
 	}
-	h.srv.SeedGeneration("freebsd-15")
-	tr.ok("jail", "upgrade", "web")
-	tr.ok("jail", "rollback", "web", "--scope", "root")
 	tr.golden("jail_rollback")
+}
+
+// The root of a thick jail goes back to the snapshot its last in-place upgrade took, and the command asks for the
+// confirmation a data rollback asks for: the root holds the jail's data.
+func TestJailRollbackThick(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	tr := h.transcript()
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
+	_, errs, code := tr.do("", "jail", "rollback", "web")
+	if code != 4 || !strings.Contains(errs, "no snapshot from an in-place upgrade") {
+		t.Fatalf("no snapshot: %d %s", code, errs)
+	}
+	tr.ok("jail", "snapshot", "create", "web", "jo-pre-upgrade-100")
+	_, errs, code = tr.do("", "jail", "rollback", "web")
+	if code != 2 || !strings.Contains(errs, "--confirm-data-loss") {
+		t.Fatalf("no answer: %d %s", code, errs)
+	}
+	out, _, _ := tr.do("web\n", "jail", "rollback", "web")
+	if !strings.Contains(out, "Rolling back the root of jail web to snapshot jo-pre-upgrade-100") {
+		t.Fatalf("typed: %s", out)
+	}
+	var rb api.JailRollback
+	if err := json.Unmarshal(h.lastBody("POST", "/api/v1/jails/web/rollback"), &rb); err != nil {
+		t.Fatal(err)
+	}
+	if rb.Scope != api.RollbackRoot || rb.Snapshot != "" || !rb.ConfirmDataLoss {
+		t.Fatalf("request: %+v", rb)
+	}
 }
 
 func TestJailUpgrade(t *testing.T) {
@@ -462,5 +488,62 @@ func TestOpShowIsReadable(t *testing.T) {
 	}
 	if out, _, _ = h.run("", "op", "show", id, "-o", "yaml"); !strings.Contains(out, "status: success") {
 		t.Fatalf("yaml form changed: %s", out)
+	}
+}
+
+// `jail base add` sends the packages as add_packages of an upgrade; `jail base list` shows the installed base packages.
+func TestJailBase(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	tr := h.transcript()
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
+	if _, errs, code := tr.do("", "jail", "base", "add", "web", "nginx"); code != 2 || !strings.Contains(errs, "not a base package") {
+		t.Fatalf("a ports name: %d %s", code, errs)
+	}
+	tr.ok("jail", "base", "add", "web", "FreeBSD-ssh", "FreeBSD-ee")
+	var up api.JailUpgrade
+	if err := json.Unmarshal(h.lastBody("POST", "/api/v1/jails/web/upgrade"), &up); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(up.AddPackages, " ") != "FreeBSD-ssh FreeBSD-ee" {
+		t.Fatalf("request: %+v", up)
+	}
+	if out := tr.ok("jail", "base", "list", "web"); !strings.Contains(out, "FreeBSD-runtime") {
+		t.Fatalf("list: %s", out)
+	}
+}
+
+// A jail is upgraded in place; several jails are upgraded one after the other and summarised.
+func TestJailUpgradeInPlaceAndBulk(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	tr := h.transcript()
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
+	tr.ok("jail", "create", "db", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
+	if out := tr.ok("jail", "upgrade", "web"); !strings.Contains(out, "nothing to upgrade") {
+		t.Fatalf("single: %s", out)
+	}
+	var up api.JailUpgrade
+	_ = json.Unmarshal(h.lastBody("POST", "/api/v1/jails/web/upgrade"), &up)
+	if up.Release != "" || up.NoPackages {
+		t.Fatalf("request: %+v", up)
+	}
+	out := tr.ok("jail", "upgrade", "--all", "--no-packages")
+	for _, want := range []string{"JAIL", "web", "db", "nothing to upgrade"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("summary lacks %q:\n%s", want, out)
+		}
+	}
+	_ = json.Unmarshal(h.lastBody("POST", "/api/v1/jails/web/upgrade"), &up)
+	if !up.NoPackages {
+		t.Fatalf("no-packages not sent: %+v", up)
+	}
+	if _, errs, code := tr.do("", "jail", "upgrade", "web", "--generation", "g2"); code != 2 || !strings.Contains(errs, "unknown flag") {
+		t.Fatalf("--generation: %d %s", code, errs)
+	}
+	tr.ok("jail", "upgrade", "web", "--release", "15.2-RELEASE")
+	_ = json.Unmarshal(h.lastBody("POST", "/api/v1/jails/web/upgrade"), &up)
+	if up.Release != "15.2-RELEASE" {
+		t.Fatalf("release not sent: %+v", up)
 	}
 }

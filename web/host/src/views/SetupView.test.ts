@@ -79,7 +79,7 @@ describe('the wizard: base image', () => {
     await w.get('[data-test="setup-image"]').trigger('submit')
     await settle(() => step().includes('Done'))
     expect(writes(sent)).toEqual(['POST /images', 'POST /images/freebsd-15-1/generations'])
-    expect((sent.find((r) => r.method === 'POST' && r.path === '/images')?.body as { spec: unknown }).spec).toMatchObject({ auto_upgrade: { enabled: true, packages: true } })
+    expect((sent.find((r) => r.method === 'POST' && r.path === '/images')?.body as { spec: unknown }).spec).toMatchObject({ auto_upgrade: { enabled: true } })
     expect(w.get('[data-test="setup-done"]').text()).toContain('Image freebsd-15-1 (FreeBSD 15.1-RELEASE), first generation built, upgraded every night at 03:00')
     expect(w.get('[data-test="setup-apps"]').text()).toBe('Install your first app')
     expect(w.find('[data-test="setup-image-link"]').exists()).toBe(false)

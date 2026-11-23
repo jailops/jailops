@@ -8,7 +8,6 @@ package api
 var Enums = map[string][]string{
 	"BackupKeyStatus.status":         {"none", "present", "escrowed"},
 	"Condition.status":               {ConditionTrue, ConditionFalse, ConditionUnknown},
-	"DiffEntry.kind":                 {"added", "modified", "removed", "renamed"},
 	"FirewallPolicySpec.default_in":  {"allow", "deny"},
 	"FirewallPolicySpec.default_out": {"allow", "deny"},
 	"FirewallRule.action":            {"allow", "deny"},
@@ -35,12 +34,14 @@ type ConditionSpec struct {
 var Conditions = []ConditionSpec{
 	{"Jail", "Autostart", []string{"DependencyFailed", "Locked", "NotStarted", "StartFailed", "Started"}},
 	{"Jail", ConditionFirewallApplied, []string{"Applied", "NotLoaded", "PFNotApplying", "StatesPending", "Unverified"}},
-	{"Jail", "BasePackages", []string{"OutOfStep"}},
 	{"Jail", "Healthy", []string{"Degraded"}},
 	{"Jail", "InSync", []string{"Drift", "InSync"}},
 	{"Jail", "Limits", []string{"NotEnforced"}},
 	{"Jail", "Ready", []string{"Invalid", "Running", "Stopped"}},
 	{"Jail", "ShellSetup", []string{"Failed", ShellInstalling}},
+	{"Jail", "UpgradeIncomplete", []string{"RollbackFailed"}},
+	{"Jail", "SuspectedCompromised", []string{"PreflightFinding"}},
+	{"Jail", ConditionUnsupportedLayout, []string{"EarlierRelease"}},
 	{"Network", "NDPFlood", []string{"Flooded"}},
 	{"Network", "NDPProxy", []string{"Answering", "BadRange", "NoCapture", "StartFailed", "Starting", "Stopped", "SyncFailed", "Unsupported"}},
 	{"Network", "Ready", []string{"ApplyFailed", "Applied", "Invalid", "Precondition"}},

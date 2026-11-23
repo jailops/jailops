@@ -160,19 +160,24 @@ func TestPromptFileIsInertInTheShells(t *testing.T) {
 		if err := os.WriteFile(f, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		// POSIX sh reads the file as it is and assigns nothing (BASH_VERSION is unset in sh).
+		// a shell that is not interactive (a script, sh -c) assigns nothing
 		out, err := exec.Command("sh", "-c", `PS1=x; . "$1"; printf %s "$PS1"`, "sh", f).CombinedOutput()
 		if err != nil || string(out) != "x" {
 			t.Fatalf("sh with %q: %q %v", ps1, out, err)
+		}
+		// an interactive sh assigns the text as it is (FreeBSD's sh reads the same prompt file)
+		out, err = exec.Command("sh", "-i", "-c", `PS1=x; . "$1"; printf %s "$PS1"`, "sh", f).Output()
+		if err != nil || string(out) != ps1 {
+			t.Fatalf("sh -i with %q: %q %v", ps1, out, err)
 		}
 		// bash assigns the text exactly and expanding it as a prompt runs nothing.
 		bash, err := exec.LookPath("bash")
 		if err != nil {
 			continue // the sh part above holds on every system; bash is checked where it is installed
 		}
-		cmd := exec.Command(bash, "--norc", "--noprofile", "-c", `PS1=x; . "$1"; printf '%s\n' "$PS1"; printf '%s' "${PS1@P}" >/dev/null`, "bash", f)
+		cmd := exec.Command(bash, "--norc", "--noprofile", "-i", "-c", `PS1=x; . "$1"; printf '%s\n' "$PS1"; printf '%s' "${PS1@P}" >/dev/null`, "bash", f)
 		cmd.Dir = dir
-		out, err = cmd.CombinedOutput()
+		out, err = cmd.Output()
 		if err != nil || string(out) != ps1+"\n" {
 			t.Fatalf("bash with %q: %q %v", ps1, out, err)
 		}
@@ -195,7 +200,7 @@ func TestRefusedPromptEscapesWouldRun(t *testing.T) {
 			t.Fatalf("CheckPrompt accepts %q", ps1)
 		}
 		dir := t.TempDir()
-		cmd := exec.Command(bash, "--norc", "--noprofile", "-c", `PS1=$1; printf '%s' "${PS1@P}" >/dev/null`, "bash", ps1)
+		cmd := exec.Command(bash, "--norc", "--noprofile", "-i", "-c", `PS1=$1; printf '%s' "${PS1@P}" >/dev/null`, "bash", ps1)
 		cmd.Dir = dir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%q: %s %v", ps1, out, err)
@@ -231,9 +236,9 @@ func FuzzPromptFile(f *testing.F) {
 		if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command(bash, "--norc", "--noprofile", "-c", `PS1=x; . "$1"; printf '%s' "$PS1"; printf '%s' "${PS1@P}" >/dev/null`, "bash", file)
+		cmd := exec.Command(bash, "--norc", "--noprofile", "-i", "-c", `PS1=x; . "$1"; printf '%s' "$PS1"; printf '%s' "${PS1@P}" >/dev/null`, "bash", file)
 		cmd.Dir = dir
-		out, err := cmd.CombinedOutput()
+		out, err := cmd.Output()
 		if err != nil || string(out) != exp {
 			t.Fatalf("%q: %q %v", ps1, out, err)
 		}
@@ -272,9 +277,9 @@ func TestPromptAsBashShowsIt(t *testing.T) {
 		if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command(bash, "--norc", "--noprofile", "-c", `PS1=x; . "$1"; cd /tmp; printf '%s' "${PS1@P}"`, "bash", file)
+		cmd := exec.Command(bash, "--norc", "--noprofile", "-i", "-c", `PS1=x; . "$1"; cd /tmp; printf '%s' "${PS1@P}"`, "bash", file)
 		cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir}, env...)
-		out, err := cmd.CombinedOutput()
+		out, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("%v: %s", err, out)
 		}
@@ -301,5 +306,25 @@ func TestPromptAsBashShowsIt(t *testing.T) {
 	// a prompt text with placeholders reads the variables when it is shown
 	if got := run(api.EffectivePS1(`{jail}.{project}.{host}> `, api.DefaultPromptColor), "JAILOPS_JAIL=web", "JAILOPS_PROJECT=shop", "JAILOPS_HOST=babel"); got != "web.shop.babel> " {
 		t.Errorf("placeholders: %q", got)
+	}
+}
+
+func TestShrcHookSetAppendsTheBlockAfterTheFilesOwnLines(t *testing.T) {
+	own := "PS1=\"\\u@\\h:\\w \\$ \"\n"
+	got, err := ShrcHookSet(own, true)
+	if err != nil || !strings.HasPrefix(got, own) || !strings.HasSuffix(got, promptEnd+"\n") || !strings.Contains(got, api.PromptFile) {
+		t.Fatalf("%q %v", got, err)
+	}
+	if again, _ := ShrcHookSet(got, true); again != got {
+		t.Fatalf("the same block twice changes nothing:\n%s", again)
+	}
+	if none, _ := ShrcHookSet(got, false); none != own {
+		t.Fatalf("no prompt removes the block and nothing else: %q", none)
+	}
+	if empty, _ := ShrcHookSet("", true); !strings.HasPrefix(empty, promptBegin) {
+		t.Fatalf("%q", empty)
+	}
+	if _, err := ShrcHookSet(promptBegin+"\nx\n", true); err == nil {
+		t.Fatal("a block without an end is an error")
 	}
 }

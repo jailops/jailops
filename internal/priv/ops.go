@@ -37,7 +37,6 @@ const (
 	OpZFSHolds          = "zfs.holds"
 	OpZFSBookmark       = "zfs.bookmark"
 	OpZFSWritten        = "zfs.written"
-	OpZFSDiff           = "zfs.diff"
 	OpZFSGUID           = "zfs.guid"
 	OpZFSClones         = "zfs.clones"
 	OpZFSOrigin         = "zfs.origin"
@@ -79,7 +78,6 @@ const (
 	OpNetIPv6Forwarding = "net.ipv6_forwarding"
 
 	OpFSRead     = "fs.read_file"
-	OpFSTreeDiff = "fs.tree_diff"
 	OpFSWrite    = "fs.write_file"
 	OpFSMkdir    = "fs.mkdir"
 	OpFSVolOwner = "fs.volume_owner"
@@ -97,7 +95,12 @@ const (
 	// that runs uses (stalemounts.go, netheal.go).
 	OpMountsStale = "mounts.stale"
 	OpJailHeal    = "jail.heal"
-	OpNetHeal     = "net.heal"
+	OpJailCheck   = "jail.check_root"
+	// jail.audit_root reads the root of a jail for `jailops jail audit` (rootaudit.go): the checks of jail.check_root,
+	// what the audit needs of master.passwd (no hash), a few configuration files, the set-id files, the checksums of
+	// the base's programs and the nosuid of the mounts. Nothing is written.
+	OpJailAudit = "jail.audit_root"
+	OpNetHeal   = "net.heal"
 	// dns.unbound writes the names of the running jails for the host's unbound into the one file root named
 	// (unbound-conf) and has unbound read it again; the text is made by the helper (dnsunbound.go).
 	OpDNSUnbound = "dns.unbound"
@@ -197,12 +200,6 @@ type zfsBookmarkArgs struct {
 	Snapshot string `json:"snapshot"`
 	Bookmark string `json:"bookmark"`
 }
-type zfsDiffArgs struct {
-	From, To string
-	Limit    int
-	Skip     []string
-}
-
 type zfsWrittenArgs struct {
 	Dataset string `json:"dataset"`
 	Since   string `json:"since,omitempty"`
@@ -421,9 +418,6 @@ func init() {
 		v, err := h.ZFS().Written(ctx, a.Dataset, a.Since)
 		return guidRes{v}, err
 	})
-	register(OpZFSDiff, false, func(ctx context.Context, h Host, a zfsDiffArgs, _ *callIO) (any, error) {
-		return h.ZFS().Diff(ctx, a.From, a.To, a.Limit, a.Skip)
-	})
 	register(OpZFSGUID, false, func(ctx context.Context, h Host, a nameArgs, _ *callIO) (any, error) {
 		v, err := h.ZFS().GUID(ctx, a.Name)
 		return guidRes{v}, err
@@ -604,9 +598,6 @@ func init() {
 		b, err := h.ReadFile(ctx, a.Path)
 		return dataRes{b}, err
 	})
-	register(OpFSTreeDiff, false, func(ctx context.Context, h Host, a TreeDiffReq, _ *callIO) (any, error) {
-		return h.TreeDiff(ctx, a)
-	})
 	register(OpFSWrite, false, func(ctx context.Context, h Host, a WriteFileReq, _ *callIO) (any, error) {
 		return empty{}, h.WriteFile(ctx, a)
 	})
@@ -628,6 +619,12 @@ func init() {
 	register(OpMountsStale, false, func(ctx context.Context, h Host, _ empty, _ *callIO) (any, error) {
 		m, err := h.StaleMounts(ctx)
 		return StaleMountsRes{Mounts: m}, err
+	})
+	register(OpJailCheck, false, func(ctx context.Context, h Host, a RootCheckReq, _ *callIO) (any, error) {
+		return empty{}, h.CheckRoot(ctx, a)
+	})
+	register(OpJailAudit, false, func(ctx context.Context, h Host, a RootAuditReq, _ *callIO) (any, error) {
+		return h.AuditRoot(ctx, a)
 	})
 	register(OpJailHeal, false, func(ctx context.Context, h Host, a HealJailReq, _ *callIO) (any, error) {
 		return h.HealJail(ctx, a.Jail)

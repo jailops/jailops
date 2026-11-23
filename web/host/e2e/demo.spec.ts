@@ -310,7 +310,7 @@ test('updates: apply is blocked until the dry-run preview has run', async ({ pag
   await open(page, '/jails/web')
   await tabOf(page, 'updates')
   await expect(page.getByTestId('available')).toContainText('2 packages')
-  await expect(page.getByTestId('history')).toContainText('Rolled back')
+  await expect(page.getByTestId('history')).toContainText('Failed')
   await page.getByTestId('update-apply').click()
   await expect(page.getByTestId('update-go')).toBeDisabled()
   await page.getByTestId('update-preview').click()

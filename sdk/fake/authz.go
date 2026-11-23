@@ -142,12 +142,18 @@ func classify(pattern string) (api.Permission, string) {
 		case strings.HasSuffix(path, "/app-draft"):
 			// it runs commands in the jail: the role that may exec
 			return api.PermOperator, scopeProject
+		case strings.HasSuffix(path, "/audit"):
+			// the helper reads the tenant's files as root of the host and the jail runs sockstat: the role that may exec
+			return api.PermOperator, scopeProject
 		case read:
 			return api.PermReadonly, scopeProject
+		case strings.HasSuffix(path, "/upgrade"):
+			// pkg runs as root of the host against the jail's own root: a global administrator's operation
+			return api.PermAdmin, scopeGlobal
 		case strings.HasSuffix(path, "/state"), strings.HasSuffix(path, "/snapshots"), strings.Contains(path, "/snapshots/"),
-			strings.HasSuffix(path, "/rollback"), strings.HasSuffix(path, "/upgrade"), strings.HasSuffix(path, "/config"), strings.HasSuffix(path, "/exec"),
+			strings.HasSuffix(path, "/rollback"), strings.HasSuffix(path, "/config"), strings.HasSuffix(path, "/exec"),
 			strings.HasSuffix(path, "/access/allow"), strings.HasSuffix(path, "/access/deny"),
-			strings.HasSuffix(path, "/unlock"), strings.HasSuffix(path, "/lock"), strings.HasSuffix(path, "/shell-setup"), strings.HasSuffix(path, "/repair-packages"):
+			strings.HasSuffix(path, "/unlock"), strings.HasSuffix(path, "/lock"), strings.HasSuffix(path, "/shell-setup"):
 			return api.PermOperator, scopeProject
 		}
 		return api.PermAdmin, scopeProject

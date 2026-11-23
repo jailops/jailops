@@ -35,14 +35,12 @@ describe('the nightly upgrade of an image', () => {
     const w = mount(ImageAutoUpgrade, { props: { image: freebsd(), editable: true } })
     expect(checked(w, 'auto-upgrade-on')).toBe(true)
     expect((w.get('[data-test="auto-upgrade-at"]').element as HTMLInputElement).value).toBe('03:00')
-    expect(checked(w, 'auto-upgrade-packages')).toBe(true)
-    expect(w.get('[data-test="auto-upgrade-summary"]').text()).toBe('Every night at 03:00 (host time), with the packages inside the jails.')
+    expect(w.get('[data-test="auto-upgrade-summary"]').text()).toBe('Every night at 03:00 (host time).')
     expect(w.get('[data-test="auto-upgrade-next"]').text()).toMatch(/^Next run: \d{4}-\d{2}-\d{2}/)
     const rows = w.findAll('[data-test="auto-upgrade-runs"] tbody tr')
     expect(rows.map((r) => r.attributes('data-result'))).toEqual(['unchanged', 'unchanged', 'ok'])
     expect(rows[0].text()).toContain('Nothing new')
     expect(rows[2].text()).toContain('freebsd-15-1#g4')
-    expect(rows[2].text()).toContain('5 moved, 5 with packages upgraded')
     // nothing changed: no Save, no failure notice
     expect(w.find('[data-test="auto-upgrade-save"]').exists()).toBe(false)
     expect(w.find('[data-test="auto-upgrade-failed"]').exists()).toBe(false)
@@ -56,8 +54,7 @@ describe('the nightly upgrade of an image', () => {
     expect(n.classes()).toContain('danger')
     expect(n.attributes('role')).toBe('alert')
     expect(n.text()).toContain('The last nightly upgrade failed')
-    expect(n.text()).toContain('jail db: health check /usr/local/bin/check exited 1')
-    expect(w.findAll('[data-test="auto-upgrade-runs"] tbody tr')[0].text()).toContain('2 moved, 1 failed')
+    expect(n.text()).toContain('fetching the catalogue of the base repository failed')
   })
 
   it('saves a change with a merge patch of spec.auto_upgrade, and checks the time first', async () => {
@@ -69,17 +66,16 @@ describe('the nightly upgrade of an image', () => {
     expect(w.text()).toContain('Required.')
     expect(sent.filter((r) => r.method === 'PATCH')).toEqual([])
     await w.get('[data-test="auto-upgrade-at"]').setValue('04:15')
-    await w.get('[data-test="auto-upgrade-packages"]').setValue(false)
     await w.get('form').trigger('submit')
     await settle()
     const patch = sent.find((r) => r.method === 'PATCH')
     expect(patch?.path).toBe('/images/freebsd-15-1')
-    expect(patch?.body).toEqual({ spec: { auto_upgrade: { enabled: true, at: '04:15', packages: false } } })
+    expect(patch?.body).toEqual({ spec: { auto_upgrade: { enabled: true, at: '04:15' } } })
     expect(w.emitted('saved')).toHaveLength(1)
     w.unmount()
   })
 
-  it('turns it on with the packages proposed, and off', async () => {
+  it('turns it on, and off', async () => {
     const off = freebsd()
     off.spec.auto_upgrade = undefined
     off.status.auto_upgrade = undefined
@@ -88,16 +84,15 @@ describe('the nightly upgrade of an image', () => {
     expect(checked(w, 'auto-upgrade-on')).toBe(false)
     expect(w.find('[data-test="auto-upgrade-at"]').exists()).toBe(false)
     await w.get('[data-test="auto-upgrade-on"]').setValue(true)
-    expect(checked(w, 'auto-upgrade-packages')).toBe(true)
     await w.get('form').trigger('submit')
     await settle()
-    expect(sent.find((r) => r.method === 'PATCH')?.body).toEqual({ spec: { auto_upgrade: { enabled: true, packages: true } } })
+    expect(sent.find((r) => r.method === 'PATCH')?.body).toEqual({ spec: { auto_upgrade: { enabled: true } } })
 
     const on = mount(ImageAutoUpgrade, { props: { image: freebsd(), editable: true } })
     await on.get('[data-test="auto-upgrade-on"]').setValue(false)
     await on.get('form').trigger('submit')
     await settle()
-    expect(sent.filter((r) => r.method === 'PATCH').at(-1)?.body).toEqual({ spec: { auto_upgrade: { enabled: false, packages: true } } })
+    expect(sent.filter((r) => r.method === 'PATCH').at(-1)?.body).toEqual({ spec: { auto_upgrade: { enabled: false } } })
   })
 
   it('is read-only for everyone but a global admin', () => {
@@ -120,7 +115,7 @@ describe('the new release notice', () => {
     const n = w.get('[data-test="new-release"]')
     expect(n.classes()).toContain('info')
     expect(n.text()).toContain('This host runs FreeBSD 15.2-RELEASE')
-    expect(n.text()).toContain('the jails that exist stay on the release of their image')
+    expect(n.text()).toContain('A jail that exists stays on its release until you upgrade it')
     await w.get('[data-test="new-release-go"]').trigger('click')
     expect(w.emitted('create')).toHaveLength(1)
     const ro = mount(NewReleaseNotice, { props: { images: images(), mayCreate: false } })

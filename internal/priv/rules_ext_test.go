@@ -511,6 +511,7 @@ func TestReadFileAllowList(t *testing.T) {
 func TestExtendedRulesRunThroughTheRunner(t *testing.T) {
 	r := newRuleEnv(t)
 	ctx := context.Background()
+	withMountStubs(t, func() ([]mountEntry, error) { return nil, nil }) // the after-check reads an (empty) table by syscall, not the runner
 	e := r.env
 	e.runner.On("/sbin/ifconfig", []string{"-j", "shop_web", "jo0123456789ab", "up"}, "")
 	e.runner.On("/sbin/route", []string{"-j", "shop_web", "add", "default", "10.20.0.1"}, "")
@@ -544,7 +545,7 @@ func TestExtendedRulesRunThroughTheRunner(t *testing.T) {
 }
 
 func TestCommandTableIsComplete(t *testing.T) {
-	want := []string{"sysctl", "kldstat", "kldload", "pfctl", "fetch", "tar", "chmod", "mount", "umount", "jail", "devfs", "jexec", "ifconfig", "route", "uname", "rctl", "dnctl", "pkg", "pkg-records", "etcupdate", "pwd_mkdb", "pw-lock-root", "freebsd-version", "netstat", "debootstrap"}
+	want := []string{"sysctl", "kldstat", "kldload", "pfctl", "fetch", "tar", "chmod", "mount", "umount", "jail", "devfs", "jexec", "ifconfig", "route", "uname", "rctl", "dnctl", "pkg", "pwd_mkdb", "pw-lock-root", "freebsd-version", "netstat", "debootstrap"}
 	have := map[string]bool{}
 	for _, r := range CommandRules {
 		have[r.Name] = true
@@ -627,10 +628,10 @@ func TestLiveVolumeMountIsHeldToTheFstabChecks(t *testing.T) {
 		"devfs " + filepath.Join(r.root, "dev") + " devfs rw 0 0",
 		r.root + " " + filepath.Join(r.root, "compat", "linux") + " nullfs rw 0 0",
 		vol + " " + filepath.Join(r.root, "srv", "mail") + " nullfs rw 0 0",
-		// the datasets of a thin jail's own tree are mounted below the root as well: they are not volumes
+		// datasets of the jail's own tree mounted below the root (the old root layout) are not volumes
 		"tank/jail/local " + filepath.Join(r.root, "usr", "local") + " zfs rw 0 0",
 	}, "\n") + "\n"
-	r.env.runner.On("mount", []string{"-p"}, list)
+	withMountStubs(t, func() ([]mountEntry, error) { return mountTableFrom(list), nil })
 	os.MkdirAll(filepath.Join(r.root, "usr", "local", "www"), 0o755)
 	r.ok(t, mount(filepath.Join(r.root, "usr", "local", "www"))...)
 	r.ok(t, "mount", "-t", "nullfs", vol, filepath.Join(r.root, "srv", "other"))

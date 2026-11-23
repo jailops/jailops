@@ -131,18 +131,12 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 		if p == nil && err == nil {
 			return fail(fmt.Errorf("the upgrade plan cannot be rebuilt"))
 		}
-		return recover(p, err)
-	case "convert":
-		if !haveReq || req.Convert == nil || req.ConvertState == nil {
-			return fail(fmt.Errorf("the convert request was not recorded"))
+		o := recover(p, err)
+		if o.Action == api.RecoveryRolledBack {
+			// the replay finished the undo: the note of an earlier failed rollback no longer holds
+			s.life.ClearUpgradeIncomplete(ctx, rest)
 		}
-		cr := *req.Convert
-		cr.Stamp, cr.Resume = req.Stamp, req.ConvertState
-		p, _, err := s.life.PlanConvert(ctx, rest, cr)
-		if p == nil && err == nil {
-			return fail(fmt.Errorf("the convert plan cannot be rebuilt"))
-		}
-		return recover(p, err)
+		return o
 	case "rollback":
 		if !haveReq || req.Rollback == nil {
 			return fail(fmt.Errorf("the rollback request was not recorded"))
@@ -156,7 +150,7 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 		}
 		ro := *req.Rollback
 		ro.Stamp, ro.Resume = req.Stamp, req.State
-		p, _, err := s.life.PlanRollbackRoot(ctx, rest, ro, req.TargetGen)
+		p, _, err := s.life.PlanRollbackRoot(ctx, rest, ro)
 		if p == nil && err == nil {
 			return fail(fmt.Errorf("the rollback plan cannot be rebuilt"))
 		}

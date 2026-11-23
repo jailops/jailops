@@ -142,13 +142,12 @@ func TestShellWaitsForTheBashOfTheBackground(t *testing.T) {
 	}
 }
 
-// A start after the first one, while bash is still missing, lets the host fetch it into the stopped root, three
-// times at most; a failed setup in the background is not repeated at every start after that.
+// A jail whose bash cannot be fetched starts anyway; every start makes one attempt from inside the running jail, and the
+// host never fetches it into the root.
 func TestRestartsOfAJailWithoutBashAreBounded(t *testing.T) {
 	e, s := tickingEnv(t)
 	alpha := as(globalAdmin, dtest.SeedProject)
 	e.SetPkgInstallErr(errors.New("pkg: no network"))
-	defer service.SetBashBeforeStartDeadline(300 * time.Millisecond)()
 	defer service.SetShellSetupDeadline(300 * time.Millisecond)()
 
 	op, err := s.CreateJail(alpha, dtest.WebJail("web"))
@@ -191,10 +190,10 @@ func TestRestartsOfAJailWithoutBashAreBounded(t *testing.T) {
 		act("restart")
 		time.Sleep(400 * time.Millisecond)
 	}
-	// three tries of the host (the constant of the service), each followed by an attempt in the jail; later starts
-	// repeat neither
-	if host, jail := pkgCalls(); host != 3 || jail != 3 {
-		t.Errorf("after six restarts: %d installs from the host and %d in the jail, want 3 and 3", host, jail)
+	// the host never runs pkg -r in a root that has run (a tenant-controlled root: the security review, S1); each start
+	// makes one attempt from inside the jail and none loops
+	if host, jail := pkgCalls(); host != 0 || jail != 7 {
+		t.Errorf("after six restarts: %d installs from the host and %d in the jail, want 0 and 7", host, jail)
 	}
 }
 

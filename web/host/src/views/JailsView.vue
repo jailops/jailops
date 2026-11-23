@@ -12,7 +12,6 @@ import { loadFilter, saveFilter } from '@/lib/jailFilter'
 import JailFilter from '@/components/JailFilter.vue'
 import LabelChips from '@/components/LabelChips.vue'
 import BulkLabelDialog from '@/components/BulkLabelDialog.vue'
-import BulkUpgradeDialog from '@/components/BulkUpgradeDialog.vue'
 import RunCommandDialog from '@/components/RunCommandDialog.vue'
 import { session } from '@jailops/shared/composables/session'
 import { projectState } from '@/composables/project'
@@ -60,7 +59,6 @@ const sel = ref<Set<string>>(new Set())
 const filters: Array<PowerState | ''> = ['', 'running', 'stopped', 'starting', 'stopping', 'error', 'locked']
 const unlocking = ref('')
 const labelling = ref(false)
-const upgrading = ref(false)
 const scope = () => `${session.user}|${projectState.current}`
 
 if (!q.value && !state.value) {
@@ -165,7 +163,6 @@ function one(n: string, a: Lifecycle, power: string): void {
       <div class="row-actions">
         <button class="btn btn-sm" type="button" @click="bulkStart"><Icon name="play" />{{ s.jails.startSel }}</button>
         <button class="btn btn-sm" type="button" data-test="bulk-stop" @click="bulkStop"><Icon name="square" />{{ s.jails.stopSel }}</button>
-        <button class="btn btn-sm" type="button" data-test="bulk-upgrade" @click="upgrading = true"><Icon name="arrowUp" />{{ s.jails.upgradeSel }}</button>
         <button v-if="runOK" class="btn btn-sm" type="button" data-test="bulk-run" @click="running = true"><Icon name="terminal" />{{ s.jails.runSel }}</button>
         <button v-if="labelsOK" class="btn btn-sm" type="button" data-test="bulk-labels" @click="labelling = true"><Icon name="tag" />{{ s.labels.bulk }}</button>
       </div>
@@ -225,7 +222,6 @@ function one(n: string, a: Lifecycle, power: string): void {
         </div>
       </div>
     </LoadState>
-    <BulkUpgradeDialog :open="upgrading" :jails="chosenJails" @close="upgrading = false" @done="l.reload" />
     <RunCommandDialog :open="running" :jails="chosenJails" @close="running = false" />
     <BulkLabelDialog :open="labelling" :jails="chosenJails" :known="known" @close="labelling = false" @done="l.reload" />
     <UnlockDialog :open="!!unlocking" :volume="unlocking" @close="unlocking = ''" @done="l.reload" />

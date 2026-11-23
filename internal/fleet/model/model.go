@@ -342,8 +342,6 @@ type RolloutSpec struct {
 	Selector map[string]string `json:"selector"`
 	// Action is "upgrade" (the only action).
 	Action string `json:"action,omitempty"`
-	// Generation pins the target generation ("g3"); empty means the newest.
-	Generation string `json:"generation,omitempty"`
 	// Canary is the number of jails upgraded first, alone. Default 1.
 	Canary int `json:"canary,omitempty"`
 	// BatchSize is the size of every later batch. Default 1.
@@ -398,14 +396,9 @@ func (r RolloutSpec) Validate() error {
 	if r.Canary < 0 || r.BatchSize < 0 {
 		return fmt.Errorf("canary and batch_size must not be negative")
 	}
-	if r.Generation != "" && !genRe.MatchString(r.Generation) {
-		return fmt.Errorf("generation %q must look like g3", r.Generation)
-	}
 	_, _, _, err := r.Durations()
 	return err
 }
-
-var genRe = regexp.MustCompile(`^g[1-9][0-9]*$`)
 
 // CheckName enforces the API's name rule (api.NamePattern): lowercase letters, digits and hyphens, starting with
 // a letter.

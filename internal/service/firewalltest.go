@@ -331,6 +331,9 @@ func testCaveats(src, dst testEnd) []string {
 	if dst.jail != nil {
 		c = append(c, "on the way out of the host only the destination jail's anchor is evaluated, not the anchors of other jails")
 	}
+	if src.jail == nil && !src.host && dst.jail != nil {
+		c = append(c, "a connection from outside that no rule of the jail admits is closed by the jail's policy: JailOps opens the uplink for what the policies admit and never closes it, so \"blocked\" assumes that the host's pf.conf blocks inbound traffic by default (jailops doctor: pf.host_default_deny)")
+	}
 	if src.jail != nil {
 		c = append(c, "the source address is the jail's own, as it is on the jail's port, before any translation (NAT)")
 	}

@@ -16,8 +16,8 @@ $ jailops jail list -o json
     },
     "spec": {
       "image": "freebsd-15",
+      "os": "freebsd",
       "storage": "default",
-      "layout": "thin",
       "hostname": "web",
       "update": {},
       "resources": {},
@@ -60,8 +60,8 @@ $ jailops jail list -o yaml
     updated_at: "2026-03-01T09:00:00Z"
   spec:
     image: freebsd-15
+    os: freebsd
     storage: default
-    layout: thin
     hostname: web
     network:
       - network: lan
@@ -94,8 +94,8 @@ $ jailops jail show web -o json
   },
   "spec": {
     "image": "freebsd-15",
+    "os": "freebsd",
     "storage": "default",
-    "layout": "thin",
     "hostname": "web",
     "update": {},
     "resources": {},
@@ -137,8 +137,8 @@ metadata:
   updated_at: "2026-03-01T09:00:00Z"
 spec:
   image: freebsd-15
+  os: freebsd
   storage: default
-  layout: thin
   hostname: web
   network:
     - network: lan
@@ -162,7 +162,7 @@ $ jailops jail info web -o json
   "hostname": "web",
   "power": "running",
   "jid": 1,
-  "layout": "thin",
+  "os": "freebsd",
   "image": "freebsd-15",
   "generation": "g1",
   "storage": "default",
@@ -256,7 +256,7 @@ uuid: <uuid>
 hostname: web
 power: running
 jid: 1
-layout: thin
+os: freebsd
 image: freebsd-15
 generation: g1
 storage: default
@@ -778,10 +778,7 @@ $ jailops image list -o json
           "number": 1,
           "name": "freebsd-15#g1",
           "manifest": "sha256:<hex>",
-          "created_at": "2026-03-01T09:00:00Z",
-          "refs": [
-            "web"
-          ]
+          "created_at": "2026-03-01T09:00:00Z"
         }
       ]
     }
@@ -808,8 +805,6 @@ $ jailops image list -o yaml
         name: freebsd-15#g1
         manifest: sha256:<hex>
         created_at: "2026-03-01T09:00:00Z"
-        refs:
-          - web
 
 $ jailops image show freebsd-15 -o json
 {
@@ -836,10 +831,7 @@ $ jailops image show freebsd-15 -o json
         "number": 1,
         "name": "freebsd-15#g1",
         "manifest": "sha256:<hex>",
-        "created_at": "2026-03-01T09:00:00Z",
-        "refs": [
-          "web"
-        ]
+        "created_at": "2026-03-01T09:00:00Z"
       }
     ]
   }
@@ -865,8 +857,6 @@ status:
       name: freebsd-15#g1
       manifest: sha256:<hex>
       created_at: "2026-03-01T09:00:00Z"
-      refs:
-        - web
 
 $ jailops operation list -o json
 [
@@ -895,8 +885,8 @@ $ jailops operation list -o json
       },
       "spec": {
         "image": "freebsd-15",
+        "os": "freebsd",
         "storage": "default",
-        "layout": "thin",
         "hostname": "web",
         "update": {},
         "resources": {},
@@ -949,8 +939,8 @@ $ jailops operation list -o json
       },
       "spec": {
         "image": "freebsd-15",
+        "os": "freebsd",
         "storage": "default",
-        "layout": "thin",
         "hostname": "web",
         "update": {},
         "resources": {},
@@ -1006,8 +996,8 @@ $ jailops operation list -o yaml
       updated_at: "2026-03-01T09:00:00Z"
     spec:
       image: freebsd-15
+      os: freebsd
       storage: default
-      layout: thin
       hostname: web
       network:
         - network: lan
@@ -1043,8 +1033,8 @@ $ jailops operation list -o yaml
       updated_at: "2026-03-01T09:00:00Z"
     spec:
       image: freebsd-15
+      os: freebsd
       storage: default
-      layout: thin
       hostname: web
       network:
         - network: lan
@@ -1090,7 +1080,7 @@ $ jailops doctor -o json
   {
     "name": "extensions",
     "status": "ok",
-    "message": "all 67 known extensions present"
+    "message": "all 66 known extensions present"
   },
   {
     "name": "zfs",
@@ -1129,7 +1119,7 @@ $ jailops doctor -o yaml
   message: "1.0"
 - name: extensions
   status: ok
-  message: all 67 known extensions present
+  message: all 66 known extensions present
 - name: zfs
   status: ok
   message: pool tank

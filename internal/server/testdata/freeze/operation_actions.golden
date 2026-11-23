@@ -5,16 +5,13 @@ backup.verify
 image.auto_upgrade
 image.build
 image.generation_delete
-image.move
 image.upgrade
 jail.configure
-jail.convert
 jail.copy
 jail.create
 jail.delete
 jail.import
 jail.provision
-jail.repair_packages
 jail.restart
 jail.restore
 jail.rollback

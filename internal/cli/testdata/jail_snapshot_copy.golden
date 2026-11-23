@@ -72,8 +72,8 @@ $ jailops jail show web2 -o json
   },
   "spec": {
     "image": "freebsd-15",
+    "os": "freebsd",
     "storage": "default",
-    "layout": "thin",
     "hostname": "web",
     "update": {},
     "resources": {},
@@ -100,8 +100,8 @@ metadata:
   name: web3
 spec:
   image: freebsd-15
+  os: freebsd
   storage: default
-  layout: thin
   hostname: web
   network:
     - network: lan

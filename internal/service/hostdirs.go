@@ -418,20 +418,31 @@ func (s *Service) remountHostDirUsers(ctx context.Context, o object[api.VolumeSp
 	return all
 }
 
-// hostDirAdmission refuses a project operator that attaches a volume of a host directory the jail did not have: only a
-// global administrator gives jails the host's directories. The volumes already attached stay.
+// hostDirAdmission refuses a project operator that attaches a volume of a host directory the jail did not have, or that
+// changes an existing host-directory attachment in a way that widens it: moving its mount point, or turning it from
+// read-only to writable. Only a global administrator gives jails the host's directories, and those are exactly the two
+// ways a kept name would otherwise grant more of the host's files than the global administrator allowed. A host
+// directory already attached the same way stays. Comparing only the name let an operator flip read_only to false or
+// move the mount of a volume the jail already carried.
 func (s *Service) hostDirAdmission(ctx context.Context, project string, now, was []api.VolumeAttach) error {
 	if isGlobalAdmin(ActorFrom(ctx)) {
 		return nil
 	}
 	for _, v := range now {
-		if slices.ContainsFunc(was, func(w api.VolumeAttach) bool { return w.Name == v.Name }) {
+		o, err := s.volKind.p(project).get(v.Name)
+		if err != nil || !o.Spec.IsHostDir() {
 			continue
 		}
-		if o, err := s.volKind.p(project).get(v.Name); err == nil && o.Spec.IsHostDir() {
-			return api.Errorf(api.CodeForbidden, "volume %q is a directory of the host: attaching it is granted by a global administrator only", v.Name).
-				WithHint("the volume's files are the host's, outside the project's storage")
+		i := slices.IndexFunc(was, func(w api.VolumeAttach) bool { return w.Name == v.Name })
+		if i >= 0 && was[i].Mount == v.Mount && !(was[i].ReadOnly && !v.ReadOnly) {
+			continue // the same host directory, mounted where it was and no more writable than it was
 		}
+		what := "attaching it"
+		if i >= 0 {
+			what = "moving where it is mounted, or making it writable,"
+		}
+		return api.Errorf(api.CodeForbidden, "volume %q is a directory of the host: %s is granted by a global administrator only", v.Name, what).
+			WithHint("the volume's files are the host's, outside the project's storage")
 	}
 	return nil
 }

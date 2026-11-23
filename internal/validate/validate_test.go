@@ -88,7 +88,6 @@ func TestJailSpec(t *testing.T) {
 		field string
 	}{
 		{"image", func(s *api.JailSpec) { s.Image = "bad ref" }, "image"},
-		{"layout", func(s *api.JailSpec) { s.Layout = "nullfs" }, "layout"},
 		{"hostname", func(s *api.JailSpec) { s.Hostname = "a b" }, "hostname"},
 		{"hostname dot", func(s *api.JailSpec) { s.Hostname = "a..b" }, "hostname"},
 		{"memory", func(s *api.JailSpec) { s.Resources.Memory = "lots" }, "resources.memory"},

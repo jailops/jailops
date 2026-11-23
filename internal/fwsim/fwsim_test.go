@@ -281,7 +281,12 @@ func TestICMP(t *testing.T) {
 	}
 	check(t, "echo from the jail", Evaluate(a, Packet{Family: "inet6", Proto: "icmp6", Src: jail6, Dst: peer6, ICMPType: "echoreq"}, fromJail), Pass, "default")
 	// neighbour discovery from the jail uses its own addresses
-	check(t, "neighbour solicitation", Evaluate(a, Packet{Family: "inet6", Proto: "icmp6", Src: jail6, Dst: peer6, ICMPType: "neighbrsol"}, fromJail), Pass, render.StageNeighbour)
+	// and only towards link-local and solicited-node destinations: never to a global address
+	check(t, "neighbour solicitation to the gateway", Evaluate(a, Packet{Family: "inet6", Proto: "icmp6", Src: jail6, Dst: netip.MustParseAddr("fe80::1"), ICMPType: "neighbrsol"}, fromJail), Pass, render.StageNeighbour)
+	check(t, "neighbour solicitation to a solicited-node group", Evaluate(a, Packet{Family: "inet6", Proto: "icmp6", Src: jail6, Dst: netip.MustParseAddr("ff02::1:ff00:1"), ICMPType: "neighbrsol"}, fromJail), Pass, render.StageNeighbour)
+	if r := Evaluate(a, Packet{Family: "inet6", Proto: "icmp6", Src: jail6, Dst: peer6, ICMPType: "neighbrsol"}, fromJail); r.Rule != nil && r.Rule.Origin.Stage == render.StageNeighbour {
+		t.Errorf("a neighbour solicitation to a global address must not pass as neighbour discovery: %+v", r)
+	}
 	check(t, "router advertisement from the jail", Evaluate(a, Packet{Family: "inet6", Proto: "icmp6", Src: jail6, Dst: peer6, ICMPType: "routeradv"}, fromJail), Block, render.StageIPv6Control)
 }
 

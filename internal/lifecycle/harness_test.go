@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +72,20 @@ type world struct {
 	// merge simulates etcupdate: it writes into the jail's etc dataset.
 	mergeOut string
 	mergeErr error
-	started  []string // generation of the root at each jail start
+	// pkgVersion is the version `pkg query` reports for FreeBSD-runtime; pkgFail fails a pkg sub command.
+	pkgVersion string
+	pkgFail    func(sub string, argv []string) error
+	// installed and repo are the FreeBSD-* packages of the jail and of the repository catalogue (name to version);
+	// a pkg upgrade or install brings the installed ones to the version of the repository.
+	installed, repo map[string]string
+	// repoOSVersion is the FreeBSD_version the repository's packages were built for (0: any): pkg update refuses it when
+	// OSVERSION is older.
+	repoOSVersion int
+	// pkgDryRunOut, when set, is what pkg's dry runs print instead of pkgDryRun's answer.
+	pkgDryRunOut string
+	// suspected, when set, is what the helper's detection finds in the root (pkg -r on it is refused).
+	suspected string
+	started   []string // generation of the root at each jail start
 	// attach is what Config.Attached answers: the volumes attached to each jail key.
 	attach map[string][]Attached
 }
@@ -99,6 +114,9 @@ func newWorld(t *testing.T) *world {
 	w.Images.newest["fb"] = 1
 	w.Images.newest["alp"] = 1
 	w.Exec.Handler = w.handle
+	w.pkgVersion = "15.0p3"
+	w.installed = map[string]string{"FreeBSD-runtime": "15.0p2", "FreeBSD-utilities": "15.0"}
+	w.repo = map[string]string{"FreeBSD-runtime": "15.0p3", "FreeBSD-utilities": "15.0", "FreeBSD-ssh": "15.0", "FreeBSD-ee": "15.0"}
 	w.Files.Trees["/jailops/projects/alpha/jails/web/root/etc"] = []string{"rc.conf"}
 	w.attach = map[string][]Attached{}
 	w.S = &Service{
@@ -129,7 +147,87 @@ func (w *world) addGen(image string, n int, os, rel string) {
 	w.Images.gens[name] = api.ImageGeneration{Number: n, Name: name, Dataset: ds, Manifest: fmt.Sprintf("sha256:m%d", n)}
 }
 
+// ImageSpec answers the spec of an image from its first generation: the release and OS the generation datasets carry.
+func (f *fakeImages) ImageSpec(ctx context.Context, image string) (api.ImageSpec, error) {
+	g, ok := f.gens[image+"#g1"]
+	if !ok {
+		return api.ImageSpec{}, api.Errorf(api.CodeNotFound, "no image %s", image)
+	}
+	os, _ := f.z.Get(ctx, g.Dataset, PropOS)
+	rel, _ := f.z.Get(ctx, g.Dataset, PropOSRelease)
+	src := api.ImageSource{Type: "pkgbase"}
+	if os == string(api.OSLinux) {
+		src.Type = "minirootfs"
+	}
+	return api.ImageSpec{OS: api.OS(os), Release: rel, Arch: "amd64", Source: src}, nil
+}
+
 func (w *world) handle(argv []string) ([]byte, error) {
+	if argv[0] == "pkg" && len(argv) > 2 && argv[1] == "-r" && argv[2] == rootMPt && w.suspected != "" {
+		// the helper's detection refuses a root that holds what an attack on host-side pkg plants
+		return []byte("forbidden: suspected_compromised: " + w.suspected), errors.New("forbidden: suspected_compromised: " + w.suspected)
+	}
+	if argv[0] == "pkg" {
+		// pkg -r <root> -o ... <sub> ...: the sub command is what follows the last option
+		sub, rest := "", []string(nil)
+		for i := 1; i < len(argv); i++ {
+			if argv[i] == "-r" || argv[i] == "-o" || argv[i] == "-j" {
+				i++
+				continue
+			}
+			sub, rest = argv[i], argv[i+1:]
+			break
+		}
+		dry := slices.Contains(rest, "-n")
+		// pkgFail fails what changes something; pkg's dry runs answer from installed and repo
+		if w.pkgFail != nil && !dry {
+			if err := w.pkgFail(sub, argv); err != nil {
+				return []byte("pkg: " + err.Error()), err
+			}
+		}
+		list := func(m map[string]string, size int) []byte {
+			var b strings.Builder
+			for n, v := range m {
+				fmt.Fprintf(&b, "%s %s %d\n", n, v, size)
+			}
+			return []byte(b.String())
+		}
+		switch {
+		case sub == "update" && w.repoOSVersion > 0 && slices.ContainsFunc(argv, func(a string) bool {
+			v, ok := strings.CutPrefix(a, "OSVERSION=")
+			return ok && v < fmt.Sprint(w.repoOSVersion)
+		}):
+			return []byte("Newer FreeBSD version for package FreeBSD-runtime:\nIgnore the mismatch and continue? [y/N]: pkg: repository jailops contains packages for wrong OS version: FreeBSD:15:amd64\n"), errors.New("exit status 1")
+		case dry && (sub == "upgrade" || sub == "install") && w.pkgDryRunOut != "":
+			return []byte(w.pkgDryRunOut), nil
+		case dry && (sub == "upgrade" || sub == "install"):
+			return w.pkgDryRun(sub, rest), nil
+		}
+		switch sub {
+		case "rquery":
+			return list(w.repo, 2<<20), nil
+		case "query":
+			if len(rest) == 2 && rest[0] == "-a" && rest[1] == "%n %Fp %Fs" { // the files of the packages, for an audit
+				return []byte("FreeBSD-runtime /bin/sh 1$aa\nFreeBSD-runtime /etc/rc 1$bb\nnginx /usr/local/sbin/nginx 1$cc\n"), nil
+			}
+			if len(rest) == 2 && rest[1] == "FreeBSD-runtime" {
+				return []byte("FreeBSD-runtime " + w.pkgVersion + "\n"), nil
+			}
+			return list(w.installed, 1<<20), nil
+		case "upgrade", "install":
+			if sub == "upgrade" {
+				for n := range w.installed {
+					w.installed[n] = w.repo[n]
+				}
+			}
+			for _, n := range rest {
+				if v, ok := w.repo[n]; ok && strings.HasPrefix(n, "FreeBSD-") {
+					w.installed[n] = v
+				}
+			}
+		}
+		return nil, nil
+	}
 	if argv[0] != "etcupdate" || argv[1] == "extract" {
 		return nil, nil
 	}
@@ -141,6 +239,50 @@ func (w *world) handle(argv []string) ([]byte, error) {
 	jail := path.Base(path.Dir(args["-D"]))
 	w.Z.WriteFile(fmt.Sprintf("tank/jailops/projects/alpha/jails/%s/etc", jail), "/etc/merged", "from "+args["-t"])
 	return []byte(w.mergeOut), w.mergeErr
+}
+
+// pkgDryRun answers `pkg upgrade -n` and `pkg install -n` as pkg 2.x does, from installed and repo.
+func (w *world) pkgDryRun(sub string, rest []string) []byte {
+	var up, re, nw []string
+	force := slices.Contains(rest, "-f")
+	if sub == "upgrade" {
+		for n, v := range w.installed {
+			rv, ok := w.repo[n]
+			switch {
+			case !ok || !strings.HasPrefix(n, "FreeBSD-"):
+			case rv != v:
+				up = append(up, fmt.Sprintf("\t%s: %s -> %s\n", n, v, rv))
+			case force:
+				re = append(re, fmt.Sprintf("\t%s-%s\n", n, v))
+			}
+		}
+	} else {
+		for _, n := range rest {
+			if v, ok := w.repo[n]; ok && strings.HasPrefix(n, "FreeBSD-") && w.installed[n] == "" {
+				nw = append(nw, fmt.Sprintf("\t%s: %s [jailops]\n", n, v))
+			}
+		}
+	}
+	if len(up)+len(re)+len(nw) == 0 {
+		if sub == "install" {
+			return []byte("Checking integrity... done (0 conflicting)\nThe most recent versions of packages are already installed\n")
+		}
+		return []byte(fmt.Sprintf("Checking for upgrades (%d candidates): .......... done\nYour packages are up to date.\n", len(w.installed)))
+	}
+	var b strings.Builder
+	b.WriteString("Checking integrity... done (0 conflicting)\nThe following packages will be affected (of 0 checked):\n\n")
+	for _, sec := range []struct {
+		head  string
+		items []string
+	}{{"New packages to be INSTALLED:", nw}, {"Installed packages to be UPGRADED:", up}, {"Installed packages to be REINSTALLED:", re}} {
+		if len(sec.items) == 0 {
+			continue
+		}
+		sort.Strings(sec.items)
+		b.WriteString(sec.head + "\n" + strings.Join(sec.items, "") + "\n")
+	}
+	b.WriteString("Number of packages to be upgraded: 1\n\nThe process will require 2 MiB more space.\n1 MiB to be downloaded.\n")
+	return []byte(b.String())
 }
 
 // dbVol is the volume db of the project alpha, which the test jails attach at /srv/db.
@@ -211,10 +353,6 @@ func (w *world) state() string {
 		if ok, _ := w.Z.Exists(bg, "tank/jailops/projects/alpha/jails/"+jail); !ok {
 			continue
 		}
-		// the files of a root.new belong to a dataset that is destroyed when its plan is undone: the fake keeps them
-		if strings.Contains(p, "/root.new/") {
-			continue
-		}
 		b, _ := w.Files.ReadFile(bg, p)
 		fs = append(fs, p+"="+string(b))
 	}
@@ -283,4 +421,34 @@ func crash(t *testing.T, w *world, id string, p *plan.Plan, k int) {
 		}
 	}
 	w.J.Put(bg, plan.Record{ID: id, Plan: p.Name, Steps: p.Names(), Begun: k, Done: k - 1, State: plan.StateRunning})
+}
+
+// jc and jroot are the container dataset and its mountpoint of the jail web of project alpha.
+const (
+	jc    = "tank/jailops/projects/alpha/jails/web"
+	jroot = "/jailops/projects/alpha/jails/web"
+)
+
+func runningSetup(t *testing.T) *world { w := newWorld(t); w.running("web"); return w }
+
+func upgrade(w *world, req api.JailUpgrade) (UpgradeResult, error) {
+	return w.S.UpgradeJail(bg, "alpha_web", UpgradeRequest{JailUpgrade: req, Stamp: "100"})
+}
+
+// thickCreated makes a stopped jail named web whose base pkg installed (it has a package database).
+func (w *world) thickCreated() {
+	w.t.Helper()
+	w.created("web")
+	w.Files.Dirs[jroot+"/root/var/db/pkg"] = true
+}
+
+// thickRunning is a running jail named web with a file below /home.
+func thickRunning(t *testing.T) *world {
+	w := newWorld(t)
+	w.thickCreated()
+	if err := w.S.StartJail(bg, "alpha_web"); err != nil {
+		t.Fatal(err)
+	}
+	w.Files.Trees[jroot+"/root/home"] = []string{"user/notes"}
+	return w
 }

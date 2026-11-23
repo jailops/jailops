@@ -22,6 +22,9 @@ type FirewallPolicyStatus struct {
 type FirewallPolicySpec struct {
 	// Comment says what the policy is for: what a reviewer of the firewall reads first (one line, at most 200 characters, no double quotes or backslashes).
 	Comment string `json:"comment,omitempty"`
+	// Notes is a long text about the object: what it does, how it was set up, who to ask. Multi-line, at most
+	// MaxNotes bytes (ValidNotes).
+	Notes string `json:"notes,omitempty"`
 	// DefaultIn and DefaultOut apply when no rule matches: "deny" closes the direction for every jail that uses the policy;
 	// "allow" or empty leaves it to the other policies of the jail (allow when none denies).
 	DefaultIn  string         `json:"default_in,omitempty"`
@@ -79,7 +82,10 @@ type AddressEntry struct {
 // set; cycles are rejected.
 type AddressSetSpec struct {
 	// Comment says what the set is (one line, at most 200 characters, no double quotes or backslashes).
-	Comment   string         `json:"comment,omitempty"`
+	Comment string `json:"comment,omitempty"`
+	// Notes is a long text about the object: what it does, how it was set up, who to ask. Multi-line, at most
+	// MaxNotes bytes (ValidNotes).
+	Notes     string         `json:"notes,omitempty"`
 	Addresses []AddressEntry `json:"addresses"`
 }
 

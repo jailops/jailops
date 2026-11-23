@@ -7,9 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"jailops.net/jailops/internal/dnsprobe"
-	"jailops.net/jailops/internal/priv"
-	"jailops.net/jailops/internal/supervise"
 	"log/slog"
 	"net"
 	"net/http"
@@ -20,9 +17,12 @@ import (
 	"sync"
 	"time"
 
+	"jailops.net/jailops/internal/dnsprobe"
+	"jailops.net/jailops/internal/priv"
+	"jailops.net/jailops/internal/supervise"
+
 	"jailops.net/jailops/internal/auth"
 	"jailops.net/jailops/internal/hostbackup"
-	"jailops.net/jailops/internal/lifecycle"
 	"jailops.net/jailops/internal/logfwd"
 	"jailops.net/jailops/internal/ndproxy"
 	"jailops.net/jailops/internal/reconcile"
@@ -277,9 +277,6 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		deps.Execer = any(clients.Host).(service.JailExecer)
 	case opts.Dev:
 		deps.Execer = service.LocalExecer{Prefix: []string{"jexec", "-l"}}
-	}
-	for _, p := range cfg.Lifecycle.Persistent {
-		deps.Persistent = append(deps.Persistent, lifecycle.PersistentPath{Dataset: p.Dataset, Path: p.Path, Class: lifecycle.Class(p.Class), Merge: p.Merge, NoSeed: p.NoSeed})
 	}
 	deps.UpdateTick, deps.ProjectFilesDir = cfg.Updates.Tick.Std(), cfg.Updates.ProjectFilesDir
 	deps.JailShell, deps.JailPrompt = cfg.Jails.Shell, cfg.Jails.Prompt

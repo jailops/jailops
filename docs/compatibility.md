@@ -59,18 +59,21 @@ are one service and are upgraded together.
   kept as `.previous`. A database whose schema is newer than the binary is refused with `version_skew`, and a document
   of a newer `apiVersion` is refused the same way: there is no silent downgrade. Before a database migration the daemon
   writes `jailops.db.before-schema-N`.
-- **An interrupted upgrade of a jail is rolled back at the next start.** Every step of a jail upgrade (snapshot, new root,
-  merge, swap) is journalled. When the daemon starts it marks the operations that were running as failed (`interrupted`)
-  and runs the undo steps of every unfinished plan from the journal, so the pool is consistent and the jail can start on
-  its old generation. The outcome of each run (`rolled_back`, `completed`, `dropped`, `needs_attention`) is in the log and in
+- **An interrupted operation is handled at the next start.** Every step of a plan is journalled. When the daemon starts
+  it marks the operations that were running as failed (`interrupted`) and runs the undo steps of every unfinished plan
+  from the journal, so the pool is consistent. An in-place upgrade of a jail is left as it is (the jail runs on,
+  `jailops doctor` names it under `jail.upgrade_state`, and running the upgrade again completes it). The outcome of each run (`rolled_back`, `completed`, `dropped`, `needs_attention`) is in the log and in
   `jailops doctor`. A run that needs attention keeps its journal record: it is not dropped.
-- **A rollback is not an undo of the data.** `jail rollback --scope root` restores the previous root; `--scope data` and `--scope all` also
-  restore the persistent datasets and destroy what was written since. See [upgrade.md](upgrade.md#what-an-upgrade-of-a-jail-does).
+- **A rollback is not an undo of the data.** `jail rollback --scope root` restores the root to the snapshot of the last upgrade;
+  `--scope all` restores the root and a delegated dataset to a snapshot, `--scope data` the delegated dataset alone. Each
+  destroys what was written since. See [upgrade.md](upgrade.md#what-an-upgrade-of-a-jail-does).
 - **The states of removed firewall rules.** When a firewall anchor is loaded, the labels of the rules that are gone are
   written to `pending-pf-kills.json` in the state directory before the new rules are loaded, and removed when pf has ended
   their connections. A daemon that stops in between ends them after the restart. A file that is missing is normal; a file
   this release cannot read is ignored with a log line and never blocks the start. Until the connections are ended,
-  `FirewallApplied` of the jail is `False` with the reason `StatesPending`.
+  `FirewallApplied` of the jail is `False` with the reason `StatesPending`. A change of the host's own tables (`<host>`,
+  `<foreign>`, `<uplink_nets>`) changes no label: those tables close or narrow a pass, and a connection a pass admitted
+  before a member was added keeps its state until it ends.
 - **When pf cannot be asked.** If pfctl gives no answer or no status, the condition `FirewallApplied` is `Unknown` with the
   reason `Unverified`: the anchor holds the rendered rules, but nothing says that pf evaluates it. It is never `True` then.
 

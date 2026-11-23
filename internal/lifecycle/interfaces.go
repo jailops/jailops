@@ -4,9 +4,7 @@
 //
 // Every operation is a plan (internal/plan): an ordered list of steps with
 // undo, so that a failure at any step leaves the pool consistent and the jail
-// startable on its old generation. The thin jail design (design section 4) is
-// a proposal pending prototype 2, so the persistent path list and the merge
-// strategy are configuration (Config), not code.
+// startable as it was.
 //
 // Everything this package assumes about FreeBSD sits behind the interfaces in
 // this file and is marked UNVERIFIED where it is used.
@@ -108,6 +106,9 @@ type Files interface {
 	// poststop hook removes (rctl rules, the pf anchor, its links).
 	StaleMounts(ctx context.Context) ([]mounts.Stale, error)
 	HealJail(ctx context.Context, jail string) (mounts.Healed, error)
+	// CheckRoot looks at the root of a jail before the host's pkg upgrades its base: paths are the files its base
+	// packages own. A finding is an error that starts with "suspected_compromised: " (priv.CheckRoot).
+	CheckRoot(ctx context.Context, root string, paths []string) error
 	// HealNetwork destroys the interfaces of the earlier network layout that no jail that runs uses.
 	HealNetwork(ctx context.Context) (mounts.NetHealed, error)
 	// DNSUnbound writes the names of the running jails for the host's unbound and has it read them again (apply), or

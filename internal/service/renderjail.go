@@ -45,7 +45,6 @@ type shapeDev struct {
 
 // Where JailOps writes the guest configuration. rc.conf.local is read by the
 // stock rc after rc.conf, so the administrator's rc.conf stays untouched.
-// UNVERIFIED: on FreeBSD 15 inside a thin jail whose /etc is its own dataset.
 const (
 	guestRcConf  = "/etc/rc.conf.local"
 	guestResolv  = "/etc/resolv.conf"
@@ -525,9 +524,14 @@ func (h *hooks) PreStart(ctx context.Context, name string) error {
 			return err
 		}
 	}
-	if hp := path.Join(s.rootMount(name), guestHosts); j.Spec.OS != api.OSLinux {
-		cur, _ := f.ReadFile(ctx, hp)
-		if next := render.HostsMerge(string(cur), b.hostsBlock); next != string(cur) {
+	// a jail with an unsupported root layout gets no new file of JailOps in its /etc (refuseUnsupported)
+	if hp := path.Join(s.rootMount(name), guestHosts); j.Spec.OS != api.OSLinux && !s.hasUnsupportedLayout(name) {
+		cur, err := f.ReadFile(ctx, hp)
+		if err != nil && !notExist(err) {
+			// a file that cannot be read (larger than the helper reads, a link out of the root) is the jail's own and is
+			// left as it is: merging into nothing would leave only the JailOps block, without localhost
+			s.log.Warn("the names of the jails are not written into /etc/hosts of the jail: it cannot be read", "jail", name, "err", err)
+		} else if next := render.HostsMerge(string(cur), b.hostsBlock); next != string(cur) {
 			if err := f.WriteAtomic(ctx, hp, []byte(next)); err != nil {
 				return err
 			}
