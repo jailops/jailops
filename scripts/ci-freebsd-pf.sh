@@ -992,7 +992,10 @@ say "phase 11c: a forward of a privileged host port comes back when the jail res
 $J create rp --project pfa --image "$img" --network pfa-up --storage default --autostart </dev/null >/dev/null || die "create rp"
 $J expose rp 8080 --host-port 81 --comment "privileged host port" --project pfa </dev/null >/dev/null || die "expose rp on host port 81"
 rp_listens() { jx pfa rp sockstat -4 -l -P tcp 2>/dev/null | grep -q ':8080 '; }
-rp_listen() { jx pfa rp daemon -f nc -k -l "$(addr4 pfa rp)" 8080 && waitfor_ "rp listens on 8080" 30 rp_listens; }
+# A listener that was started before the jail had its address (a jail the boot pass has just started shows as running a moment
+# before its network is up) exits at once and never comes back: start it again until the jail listens.
+rp_try_listen() { rp_listens && return 0; jx pfa rp daemon -f nc -k -l "$(addr4 pfa rp)" 8080 >/dev/null 2>&1; sleep 1; rp_listens; } # sleep-ok: the bind of the listener
+rp_listen() { waitfor_ "rp listens on 8080" 60 rp_try_listen; }
 rp_up() { $J start rp --project pfa </dev/null >/dev/null && waitfor_ "rp runs" 60 jx pfa rp true && rp_listen; }
 rp_up || die "start rp"
 settle 10

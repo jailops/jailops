@@ -31,7 +31,7 @@ func (s *Service) doctorBlockCloning(ctx context.Context, c *checkSet) {
 		pool := poolOf(si.Root)
 		if m, err := s.d.ZClient.Get(ctx, si.Root, "encryption"); err == nil {
 			if p, ok := m["encryption"]; ok && p.Value != "" && p.Value != "off" && p.Value != "-" {
-				c.add(name, api.DoctorInfo, "storage "+si.Name+" is encrypted: jails on it are full copies of their image (ZFS does not share blocks between datasets that do not share a key), about 75 MB each", "")
+				c.add(name, api.DoctorInfo, "storage "+si.Name+" is encrypted: jails on it are full copies of their image (ZFS does not share blocks between datasets that do not share a key), about 50 MB each", "")
 				continue
 			}
 		}
@@ -40,7 +40,7 @@ func (s *Service) doctorBlockCloning(ctx context.Context, c *checkSet) {
 		case err != nil || st == "":
 			continue // unreadable, or a ZFS that does not know the feature: nothing is said on a guess
 		case st == zfs.FeatureDisabled:
-			c.add(name, api.DoctorWarn, "pool "+pool+" has not enabled block cloning: every new jail is a full copy of its image (about 75 MB each). 'zpool upgrade "+pool+"' enables it; after that, systems older than OpenZFS 2.2 cannot import the pool.",
+			c.add(name, api.DoctorWarn, "pool "+pool+" has not enabled block cloning: every new jail is a full copy of its image (about 50 MB each). 'zpool upgrade "+pool+"' enables it; after that, systems older than OpenZFS 2.2 cannot import the pool.",
 				"zpool upgrade "+pool+" (JailOps never changes pool features)")
 		case sysctlOff:
 			c.add(name, api.DoctorWarn, "block cloning is turned off on this host ("+bcloneSysctl+"=0): new jails are full copies", "sysctl "+bcloneSysctl+"=1 and add it to /etc/sysctl.conf")

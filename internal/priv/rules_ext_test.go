@@ -2,6 +2,7 @@ package priv
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,9 @@ func newRuleEnv(t *testing.T) *ruleEnv {
 	e.conf(t, "shop_web")
 	e.conf(t, "default_plain")
 	r.trustDirs(t)
+	// the rules are checked without executing anything and without mounting anything: the host's real mount table (read by
+	// a syscall on FreeBSD) holds none of the paths made here, so it must not be asked
+	withMountStubs(t, func() ([]mountEntry, error) { return nil, errors.New("no mount table in this test") })
 	// the jail ends of their epairs, in their vnets, with the marker they were created with
 	e.net.AddToJail("shop_web", ifconfig.Iface{Name: "jo0123456789ab", Groups: []string{"epair"}, Description: "jailops jail=shop/web net=lan (jail side)"})
 	e.net.AddToJail("default_plain", ifconfig.Iface{Name: "jo0123456789cb", Groups: []string{"epair"}, Description: ifconfig.Marker})

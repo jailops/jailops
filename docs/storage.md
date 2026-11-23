@@ -330,7 +330,7 @@ quota counts it) although the pool stores about 3 MB more; `zpool list` shows wh
 is only for the copy: every file that an upgrade changes is stored again for that jail (about 41 MB per jail over the life of
 a release, about 72 MB for a move to the next one). On a pool that has not enabled `block_cloning`, with
 `vfs.zfs.bclone_enabled=0`, and on an **encrypted storage** (ZFS shares no blocks between datasets that do not share a key)
-a new jail is a full copy, about 75 MB; the copy works the same, only the space and the time are larger, and `jailops
+a new jail is a full copy, about 50 MB; the copy works the same, only the space and the time are larger, and `jailops
 doctor` says so (`zfs.block_cloning`).
 
 ## Copying a jail

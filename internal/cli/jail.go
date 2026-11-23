@@ -1437,9 +1437,10 @@ func (a *app) jailShellSetup(d *kindDesc[api.Jail]) *cobra.Command {
 		Short: "Give a jail its shell and the JailOps prompt, as new jails get them",
 		Long: `Give a running FreeBSD jail the shell and prompt a new jail gets: the shell and
 prompt keys the jail leaves empty are set from the host's defaults (jails.shell
-and jails.prompt of jailopsd.yaml: sh and the default prompt), bash is
-installed into the jail from the host when it is the shell and missing, and the
-prompt is written. Running it again repairs the files and changes nothing else.
+and jails.prompt of jailopsd.yaml: sh and the default prompt) and the prompt is
+written. It installs nothing: when the shell is bash and the jail has none, the
+answer says so and names 'jailops pkg install NAME -- bash'. Running it again
+repairs the files and changes nothing else.
 
 Two files in /usr/local/etc/profile.d are sourced from a marked block at the top of
 /usr/local/etc/profile (login shells) and /usr/local/etc/bash.bashrc (other
