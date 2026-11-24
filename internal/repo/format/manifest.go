@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/chacha20poly1305"
@@ -211,12 +212,27 @@ func NewSnapshotID(t time.Time, r io.Reader) (string, error) {
 			return "", err
 		}
 		v := uint32(t.Nanosecond()/1000)<<12 | (uint32(rb[0])<<8|uint32(rb[1]))&0xfff
+		// two ids made one after the other differ: a frozen clock gives the same microsecond, and 12 random bits repeat
+		// in one case of 4096 (a snapshot that exists already is refused)
+		id := t.Format("20060102150405")
+		snapshotIDMu.Lock()
+		defer snapshotIDMu.Unlock()
+		for snapshotIDLast == id+"-"+hex.EncodeToString([]byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)}) {
+			v++
+		}
 		b = [4]byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)}
+		snapshotIDLast = id + "-" + hex.EncodeToString(b[:])
+		return snapshotIDLast, nil
 	} else if _, err := io.ReadFull(r, b[:]); err != nil {
 		return "", err
 	}
 	return t.Format("20060102150405") + "-" + hex.EncodeToString(b[:]), nil
 }
+
+var (
+	snapshotIDMu   sync.Mutex
+	snapshotIDLast string
+)
 
 // SnapshotIDTime returns the (UTC, whole-second) time a snapshot id was created at.
 func SnapshotIDTime(s string) (time.Time, error) {
