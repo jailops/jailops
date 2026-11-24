@@ -3,36 +3,35 @@ package server_test
 import (
 	"context"
 	"encoding/json"
-	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/daemon/dtest"
 	"jailops.net/jailops/internal/jailaudit"
 	"jailops.net/jailops/internal/sys/jailos"
 	"jailops.net/jailops/internal/sys/run"
+	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
 
-// The audit of a running jail: operator in the project, never readonly; the helper's facts become the checks, the
-// listening sockets are read with sockstat in the jail; a critical finding sends jail-audit-critical and the doctor
-// names the jail; the jail keeps running.
+// The audit of a running jail: operator in the project, never readonly; the helper's facts become the checks, nothing
+// runs in the jail, the jail parameters come from the rendered jail.conf; a host without a vulnerability database is
+// not checked, not a failure; the suggestions come only with suggest=true and never count; a critical finding sends
+// jail-audit-critical and the doctor names the jail; the jail keeps running.
 func TestJailAudit(t *testing.T) {
 	e := seeded(t)
 	ctx := ctxT(t)
 	startJailIn(t, e.Admin, dtest.WebJail("shop"))
 	e.Files.Audit = jailaudit.Facts{
-		Accounts: jailaudit.Accounts{Read: true, Root: jailaudit.PassLocked, Toor: jailaudit.PassLocked, RootShell: "/bin/sh", UID0: []string{"backdoor"}},
-		Texts:    map[string]string{"/etc/rc.conf": "cron_flags=\"-J 60\"\n"},
+		Accounts:   jailaudit.Accounts{Read: true, Root: jailaudit.PassLocked, Toor: jailaudit.PassLocked, RootShell: "/bin/sh", UID0: []string{"backdoor"}},
+		OwnersRead: true,
+		Texts:      map[string]string{"/etc/rc.conf": "cron_flags=\"-J 60\"\n"},
+		Mounts:     []jailaudit.Mount{{Path: "/srv/data"}},
 	}
 	var inJail [][]string
 	e.Jails.SetExecFn(func(jail string, o jailos.ExecOpts) (run.Result, error) {
 		inJail = append(inJail, o.Argv)
-		if slices.Equal(o.Argv, apps.SockstatArgv()) {
-			return run.Result{Stdout: []byte("postgres postgres 900 6 tcp4 *:5432 *:*\nroot syslogd 7 3 udp4 127.0.0.1:514 *:*\n")}, nil
-		}
 		return run.Result{}, nil
 	})
 	if _, err := e.Scoped(api.PermReadonly, dtest.SeedProject).Jails().Audit(ctx, "shop"); !api.IsCode(err, api.CodeForbidden) {
@@ -48,18 +47,41 @@ func TestJailAudit(t *testing.T) {
 	got := map[string]api.JailAuditCheck{}
 	for _, c := range a.Checks {
 		got[c.ID] = c
+		if c.Suggestion {
+			t.Errorf("a suggestion without suggest: %+v", c)
+		}
 	}
-	if a.Jail != "shop" || !a.Running || a.Critical != 1 || got["accounts.uid0"].Result != api.AuditCritical || !strings.Contains(got["accounts.uid0"].Detail, "backdoor") {
+	if a.Jail != "shop" || !a.Running || a.Critical != 1 || a.Warnings != 0 || got["accounts.uid0"].Result != api.AuditCritical || !strings.Contains(got["accounts.uid0"].Detail, "backdoor") {
 		t.Fatalf("%+v", a)
 	}
-	if c := got["ports.listening"]; c.Result != api.AuditInfo || !strings.Contains(c.Detail, "tcp/5432 (postgres)") || strings.Contains(c.Detail, "514") {
-		t.Fatalf("listening: %+v", c)
+	if _, ok := got["ports.listening"]; ok {
+		t.Fatalf("ports.listening: %+v", got["ports.listening"])
 	}
-	if got["cron.jitter"].Result != api.AuditPass {
-		t.Fatalf("cron: %+v", got["cron.jitter"])
+	if c := got["jail.enforce_statfs"]; c.Result != api.AuditPass {
+		t.Fatalf("enforce_statfs: %+v", c)
 	}
-	if len(inJail) != 1 {
+	for _, id := range []string{"pkg.vulnerabilities", "base.updates"} {
+		if c := got[id]; c.Result != api.AuditInfo || !strings.HasPrefix(c.Detail, "not checked: ") {
+			t.Fatalf("%s: %+v", id, c)
+		}
+	}
+	if len(inJail) != 0 {
 		t.Fatalf("ran in the jail: %v", inJail)
+	}
+	s, err := e.Scoped(api.PermOperator, dtest.SeedProject).Jails().AuditWith(ctx, "shop", sdk.AuditOptions{Suggest: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sg := map[string]api.JailAuditCheck{}
+	for _, c := range s.Checks {
+		sg[c.ID] = c
+	}
+	if c := sg["cron.jitter"]; !c.Suggestion || c.Result != api.AuditPass {
+		t.Fatalf("cron: %+v", c)
+	}
+	// a mount without nosuid is a note among the suggestions, not a warning
+	if c := sg["volumes.nosuid"]; !c.Suggestion || c.Result != api.AuditInfo || s.Critical != 1 || s.Warnings != 0 {
+		t.Fatalf("volumes: %+v %d %d", c, s.Critical, s.Warnings)
 	}
 	for ev := range events {
 		var le api.LifecycleEvent

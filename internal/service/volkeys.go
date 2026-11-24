@@ -213,10 +213,6 @@ func (s *Service) UnlockVolume(ctx context.Context, name string, req api.VolumeU
 					return nil, fmt.Errorf("unlocked, but the start of %s failed: %w", jail, err)
 				}
 				s.shellAtStart(ctx, k)
-				if err := s.provisionPending(ctx, k); err != nil {
-					s.kick()
-					return nil, err
-				}
 				s.emitIn(ctx, proj, "jail-started", "/api/v1/jails/"+jail)
 			}
 			s.kick()

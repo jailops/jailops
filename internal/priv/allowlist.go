@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"jailops.net/jailops/internal/jailaudit"
 	"jailops.net/jailops/internal/render"
 )
 
@@ -382,7 +383,7 @@ var CommandRules = []Rule{
 	},
 	{
 		Name: "devfs", Binary: "/sbin/devfs", MaxTimeoutSeconds: 30, Custom: customDevfs,
-		Reason: "define the private devfs ruleset of a Linux jail (a small rule grammar, rulesets 100 and up)",
+		Reason: "define the private devfs ruleset of a jail (a small rule grammar, rulesets 100 and up), and read the stock rulesets 1 to 4 (showsets, show)",
 	},
 	{
 		Name: "jexec", Binary: "/usr/sbin/jexec", MaxTimeoutSeconds: 1800, Custom: customJexec, Verify: verifyJexec,
@@ -418,7 +419,10 @@ var CommandRules = []Rule{
 		// the packages installed on purpose, for an app draft (internal/apps.PkgLeavesArgv)
 		RestExact: [][]string{{"query", "-e", "%a = 0", "%n %v %R %w"},
 			// the catalogue of the private repository, read into a scratch root: what a jail's upgrade compares with
-			{"rquery", "-r", "jailops", "%n %v %sb"}},
+			{"rquery", "-r", "jailops", "%n %v %sb"},
+			// the audit of a jail: the packages of a copy of its database against the host's vulnerability database,
+			// which pkg reads and never fetches here (no -F)
+			{"audit", "-f", jailaudit.HostVulnXML}},
 		Subcommands: []string{"install", "upgrade", "update", "delete", "remove", "autoremove", "info", "audit", "lock", "unlock", "fetch", "clean", "check", "version", "bootstrap", "query"},
 		Rest:        rePkgName, RestCheck: pkgNameOK, MaxRest: 64, RestFlags: []string{"-y", "-q", "-n", "-f", "-a", "-U", "-F", "-x", "-r", "-d", "-s"},
 		MaxTimeoutSeconds: 3600,

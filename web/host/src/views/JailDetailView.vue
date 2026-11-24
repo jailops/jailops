@@ -44,7 +44,6 @@ import JailAccessTab from '@/components/JailAccessTab.vue'
 import JailReachTab from '@/components/JailReachTab.vue'
 import NotesPanel from '@/components/NotesPanel.vue'
 import { isInstalledApp } from '@/lib/access'
-import ProvisionPanel from '@/components/ProvisionPanel.vue'
 import AddrCopy from '@jailops/shared/components/AddrCopy.vue'
 import { shortAddr } from '@jailops/shared/lib/format'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
@@ -419,7 +418,6 @@ const attentionItems = computed(() => {
           </section>
         </div>
 
-        <ProvisionPanel v-if="hasExt('provisioning')" :jail="jail" @done="l.reload" />
         </template>
         </div>
         <RollbackDialog :open="rollbackOpen" :jail="jail.metadata.name" :snapshots="snaps" :initial="rollbackSnap" @close="rollbackOpen = false" @done="l.reload" />

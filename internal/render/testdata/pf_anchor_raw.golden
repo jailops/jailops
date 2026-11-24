@@ -12,10 +12,9 @@ block in quick on jo0123456789a0a from ! <jail_addrs> to any
 block in quick on jo0123456789a0a inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv
 pass in quick on jo0123456789a0a inet6 proto icmp6 from { 2001:db8:1::100, fe80::/10 } to { fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv } label "jo-e54b0a5c6528" keep state (if-bound)
 pass in quick on jo0123456789a0a inet6 proto icmp6 from { 2001:db8:1::100, fe80::/10 } to ff02::/16 icmp6-type { listenrep, listendone, 143 } label "jo-b2635c308fc9" keep state (if-bound)
-pass in quick on jo0123456789a0a inet6 proto icmp6 from { 2001:db8:1::100, fe80::/10 } to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-ad2d50a61574" keep state (if-bound)
 block out quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { redir, routeradv }
-pass out quick on jo0123456789a0a inet6 proto icmp6 from any to { 2001:db8:1::100, fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv } label "jo-660ccbd1cee0" keep state (if-bound)
-pass out quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-0d149ebd8bb9" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto icmp6 from any to { 2001:db8:1::100, fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv } label "jo-3725505d2ef4" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-7604a8d7c239" keep state (if-bound)
 block drop out quick on jo0123456789a0a from any to ! <jail_addrs>
 block drop out quick on jo0123456789a0a inet proto icmp from any to any icmp-type redir
 block drop in quick on jo0123456789a0a inet from any to 255.255.255.255
@@ -25,27 +24,27 @@ block drop in quick on jo0123456789a0a inet from any to 255.255.255.255
 block drop in quick on jo0123456789a0a inet proto tcp from 10.20.0.10 to any port 25
 block drop in quick on jo0123456789a0a inet6 proto tcp from 2001:db8:1::100 to any port 25
 # the host: closed to the jail whatever its policies allow; ping, the errors a path needs and the network's resolver stay open
-pass in quick on jo0123456789a0a inet proto icmp from any to <host> icmp-type { echoreq, unreach, timex, paramprob } label "jo-c02345d1162e" keep state (if-bound)
-pass in quick on jo0123456789a0a inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob } label "jo-501f6d22c511" keep state (if-bound)
+pass in quick on jo0123456789a0a inet proto icmp from any to <host> icmp-type { echoreq, unreach, timex, paramprob } label "jo-252a1771709a" keep state (if-bound)
+pass in quick on jo0123456789a0a inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob } label "jo-a00e2c5ef55f" keep state (if-bound)
 block drop in quick on jo0123456789a0a from any to <host>
 # allow rules of the policies, in the order of the policies
 # policy web
 # rule 1: ssh from office
-pass out log quick on jo0123456789a0a inet proto tcp from { <s_office>, <t_admin> } to 10.20.0.10 port 22 label "jo-7409021cf239" keep state (if-bound)
-pass out log quick on jo0123456789a0a inet6 proto tcp from { <s_office>, <t_admin> } to 2001:db8:1::100 port 22 label "jo-d98dff9609a0" keep state (if-bound)
+pass out log quick on jo0123456789a0a inet proto tcp from { <s_office>, <t_admin> } to 10.20.0.10 port 22 label "jo-59780ea20a00" keep state (if-bound)
+pass out log quick on jo0123456789a0a inet6 proto tcp from { <s_office>, <t_admin> } to 2001:db8:1::100 port 22 label "jo-7adf952a5661" keep state (if-bound)
 # rule 2: web
-pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port { 80, 8000:8100 } label "jo-3c6212689b07" keep state (if-bound)
-pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port { 80, 8000:8100 } label "jo-69e3ab1e37e0" keep state (if-bound)
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port { 80, 8000:8100 } label "jo-f3791db9d950" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port { 80, 8000:8100 } label "jo-6f8fb863ad00" keep state (if-bound)
 # rule 3: ping
-pass out quick on jo0123456789a0a inet proto icmp from any to 10.20.0.10 label "jo-ba8d6087b4c9" keep state (if-bound)
+pass out quick on jo0123456789a0a inet proto icmp from any to 10.20.0.10 label "jo-e96e56f4d188" keep state (if-bound)
 # rule 4: ping6
-pass out quick on jo0123456789a0a inet6 proto icmp6 from any to 2001:db8:1::100 label "jo-b58e1107dd55" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto icmp6 from any to 2001:db8:1::100 label "jo-9c3d2b9e5bd5" keep state (if-bound)
 # rule 6: dns
-pass in quick on jo0123456789a0a inet proto udp from 10.20.0.10 to 9.9.9.9 port 53 label "jo-a4ff14ac7ff0" keep state (if-bound)
-pass in quick on jo0123456789a0a inet6 proto udp from 2001:db8:1::100 to 2620:fe::fe port 53 label "jo-ffe92a680214" keep state (if-bound)
+pass in quick on jo0123456789a0a inet proto udp from 10.20.0.10 to 9.9.9.9 port 53 label "jo-27d30585fb3c" keep state (if-bound)
+pass in quick on jo0123456789a0a inet6 proto udp from 2001:db8:1::100 to 2620:fe::fe port 53 label "jo-2441603d8cf0" keep state (if-bound)
 # raw fragment (admin)
 pass quick on lo0 all
 # end of raw fragment (admin)
 # defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
 block drop out quick on jo0123456789a0a all
-pass in quick on jo0123456789a0a all label "jo-aebe6f4da759" keep state (if-bound)
+pass in quick on jo0123456789a0a all label "jo-179c0a3b7ed3" keep state (if-bound)

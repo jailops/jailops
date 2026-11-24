@@ -11,7 +11,8 @@ nginx in front of an app in front of PostgreSQL, on one host, with **encrypted b
 - `DB_PASSWORD` and `POSTGRES_PASSWORD` are `secret:db.password`, a value of `shared/secrets.sops.yaml` (SOPS + age). Sync
   decrypts it in memory when it applies, seals it to the host's own age key and sends it sealed; the repository holds only
   ciphertext and the API never returns it.
-- `provision:` installs nginx and PostgreSQL inside the new jails the first time they start.
+- [`../recipes/nginx.yaml`](../recipes/nginx.yaml) and [`../recipes/postgres.yaml`](../recipes/postgres.yaml) install and start nginx and PostgreSQL inside the running jails:
+  `jailops jail apply nginx -f recipes/nginx.yaml`, `jailops jail apply postgres -f recipes/postgres.yaml` (see [provisioning.md](../../docs/provisioning.md)).
 
 ## The backup schedule
 

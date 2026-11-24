@@ -3,8 +3,6 @@ package daemon_test
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -353,114 +351,6 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("condition not met in time")
-}
-
-func TestProvisioningRunsOnceAndAgainOnRequest(t *testing.T) {
-	e := dtest.New(t, dtest.Options{})
-	e.Seed()
-	sj := &scriptedJails{env: e}
-	e.Jails.SetExecFn(sj.fn)
-	ctx := context.Background()
-	// The project's files directory holds the template.
-	dir := filepath.Join(e.Cfg.StateDir, "project-files", "alpha", "templates")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "nginx.conf"), []byte("worker_processes 1;\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(e.Dir, "secret.txt"), []byte("host secret"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(e.Dir, "secret.txt"), filepath.Join(e.Cfg.StateDir, "project-files", "alpha", "leak")); err != nil {
-		t.Fatal(err)
-	}
-	j := dtest.WebJail("web")
-	j.Spec.Provision = &api.Provision{Packages: []string{"bash", "nginx"},
-		Files:    []api.ProvisionFile{{Source: "templates/nginx.conf", Destination: "/usr/local/etc/nginx/nginx.conf", Owner: "root", Group: "wheel", Mode: "0644"}},
-		Services: api.ProvisionSvc{Enable: []string{"nginx"}, Start: []string{"nginx"}}, Commands: [][]string{{"/usr/bin/touch", "/var/db/done"}}}
-	j.Spec.Shell = "/usr/local/bin/bash"
-	op, err := e.Admin.Jails().Create(ctx, j)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := op.Wait(ctx); err != nil {
-		t.Fatal(err)
-	}
-	got, _ := e.Admin.Jails().Get(ctx, "web")
-	if !got.Status.ProvisionedAt.IsZero() || got.Spec.Shell != "/usr/local/bin/bash" {
-		t.Fatalf("%+v", got)
-	}
-	// The first start provisions.
-	so, _ := e.Admin.Jails().Start(ctx, "web")
-	if _, err := so.Wait(ctx); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"pkg install -y bash nginx", "chown root:wheel /usr/local/etc/nginx/nginx.conf", "chmod 0644 /usr/local/etc/nginx/nginx.conf",
-		"jailops-start nginx", "/usr/bin/touch /var/db/done"}
-	for _, w := range want {
-		if !sj.ran(w) {
-			t.Errorf("provisioning did not run %q: %v", w, sj.cmds)
-		}
-	}
-	ord := func(s string) int {
-		for i, c := range sj.cmds {
-			if strings.Contains(c, s) {
-				return i
-			}
-		}
-		return -1
-	}
-	if !(ord("pkg install") < ord("chown") && ord("chown") < ord("jailops-start nginx") && ord("jailops-start nginx") < ord("/usr/bin/touch")) {
-		t.Errorf("steps out of order: %v", sj.cmds)
-	}
-	// the service is enabled in the jail's rc.conf by the host (the minimal base set has no sysrc)
-	if rc := string(e.Files.Data["/jailops/projects/alpha/jails/web/root/etc/rc.conf"]); !strings.Contains(rc, `nginx_enable="YES"`) {
-		t.Errorf("nginx is not enabled in rc.conf: %q", rc)
-	}
-	if data, ok := e.Files.Data["/jailops/projects/alpha/jails/web/root/usr/local/etc/nginx/nginx.conf"]; !ok || string(data) != "worker_processes 1;\n" {
-		t.Errorf("the template was not copied: %v", e.Files.Paths())
-	}
-	got, _ = e.Admin.Jails().Get(ctx, "web")
-	if got.Status.ProvisionedAt.IsZero() {
-		t.Fatal("provisioning was not marked complete")
-	}
-	// Once: a plain request is refused, again runs it.
-	if _, err := e.Admin.Jails().Provision(ctx, "web", false); !api.IsCode(err, api.CodeAlreadyExists) {
-		t.Fatalf("%v", err)
-	}
-	n := len(sj.cmds)
-	pop, err := e.Admin.Jails().Provision(ctx, "web", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res, err := pop.Wait(ctx); err != nil || len(res.Steps) != 5 {
-		t.Fatalf("%+v %v", res, err)
-	}
-	if len(sj.cmds) <= n {
-		t.Fatal("--again ran nothing")
-	}
-	// A symlink out of the project's files is refused.
-	j2 := dtest.WebJail("web2")
-	j2.Spec.Network = []api.NetworkAttach{{Network: "lan", IPv4: "auto"}}
-	j2.Spec.Provision = &api.Provision{Files: []api.ProvisionFile{{Source: "leak", Destination: "/etc/leak"}}}
-	op, _ = e.Admin.Jails().Create(ctx, j2)
-	if _, err := op.Wait(ctx); err != nil {
-		t.Fatal(err)
-	}
-	so, _ = e.Admin.Jails().Start(ctx, "web2")
-	if _, err := so.Wait(ctx); !api.IsCode(err, api.CodeForbidden) {
-		t.Fatalf("a symlink out of the files directory: %v", err)
-	}
-	if _, ok := e.Files.Data["/jailops/projects/alpha/jails/web2/root/etc/leak"]; ok {
-		t.Fatal("the host file was copied into the jail")
-	}
-	// A declaration that can inject is refused at creation.
-	j3 := dtest.WebJail("web3")
-	j3.Spec.Provision = &api.Provision{Files: []api.ProvisionFile{{Source: "/etc/passwd", Destination: "/etc/x"}}}
-	if _, err := e.Admin.Jails().Create(ctx, j3); !api.IsCode(err, api.CodeInvalid) {
-		t.Fatalf("%v", err)
-	}
 }
 
 // assertRealCommand checks that the command quoted in backticks in note is

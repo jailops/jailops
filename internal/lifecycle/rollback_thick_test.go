@@ -120,6 +120,7 @@ func TestThickRollbackRefusals(t *testing.T) {
 		}, true, api.CodeUnsupported, "Linux"},
 		{"data loss not confirmed", thickUpgraded, false, api.CodeDataLoss, "discards"},
 		{"newer snapshot not confirmed", newer, false, api.CodeDataLoss, "discards"},
+		{"newer snapshot without destroy_newer", newer, true, api.CodePreconditionFailed, `snapshots taken after "jo-pre-upgrade-100" exist: ` + jc + "/root@later"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,6 +139,8 @@ func TestThickRollbackRefusals(t *testing.T) {
 	}
 }
 
+// A snapshot of the root taken after the pre-upgrade one (a backup, a replication, one by hand) goes only when the
+// request names it with destroy_newer, and then as the whole jail snapshot.
 func TestThickRollbackDestroysLaterSnapshotsWhenConfirmed(t *testing.T) {
 	w := thickUpgraded(t)
 	if _, err := w.S.SnapshotJail(bg, "alpha_web", "later", ""); err != nil {
@@ -147,7 +150,8 @@ func TestThickRollbackDestroysLaterSnapshotsWhenConfirmed(t *testing.T) {
 	if err != nil || len(res.Destroyed) != 1 || res.Destroyed[0] != jc+"/root@later" || !strings.Contains(strings.Join(res.Plan, "\n"), "later") {
 		t.Fatalf("dry run: %+v %v", res, err)
 	}
-	if _, err := rollbackThick(w, true); err != nil {
+	opts := RollbackOptions{JailRollback: api.JailRollback{ConfirmDataLoss: true, DestroyNewer: true}, Stamp: "300"}
+	if _, err := w.S.RollbackJail(bg, "alpha_web", opts, false); err != nil {
 		t.Fatal(err)
 	}
 	for _, d := range []string{jc, jc + "/root"} {
@@ -350,5 +354,23 @@ func TestThickBasePackagesListsRunningAndStopped(t *testing.T) {
 	got, err = w.S.BasePackages(bg, "alpha_web")
 	if err != nil || len(got) != 2 || w.state() != before {
 		t.Fatal(got, err)
+	}
+}
+
+// A snapshot taken after the pre-upgrade one on a dataset the rollback does not touch (the jail's container, as a backup
+// of the data leaves it) does not hold the rollback up and is kept.
+func TestThickRollbackKeepsLaterSnapshotsOfOtherDatasets(t *testing.T) {
+	w := thickUpgraded(t)
+	if err := w.Z.Snapshot(bg, nil, jc+"@backup-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rollbackThick(w, true); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := w.Z.Exists(bg, jc+"@backup-1"); !ok {
+		t.Fatal("the rollback destroyed a snapshot it was not asked to")
+	}
+	if ok, _ := w.Z.Exists(bg, jc+"/root@jo-pre-upgrade-100"); ok {
+		t.Fatal("the used-up pre-upgrade snapshot is left")
 	}
 }

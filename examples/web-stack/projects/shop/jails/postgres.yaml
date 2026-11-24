@@ -19,9 +19,3 @@ spec:
     - {volume: postgres-data, mount: /var/db/postgres}
   env:
     POSTGRES_PASSWORD: secret:db.password
-  provision:
-    packages: [postgresql17-server]
-    services: {enable: [postgresql]}
-    commands:
-      - [service, postgresql, initdb]
-      - [service, postgresql, start]

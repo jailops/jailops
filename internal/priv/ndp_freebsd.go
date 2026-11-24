@@ -21,7 +21,9 @@ const (
 	ndpBufLen   = 65536
 	ndpReadWait = 500 * time.Millisecond
 	dltEN10MB   = 1
-	bpfDirIn    = 0 // BPF_D_IN
+	// BPF_D_INOUT (sys/net/bpf.h): the capture sees the host's own neighbor advertisements too, so the proxy can tell
+	// where the host sent its answer to a router (ndproxy/replypath.go). The filter keeps it to NS and NA.
+	bpfDirInOut = 1
 )
 
 // systemNDP is the BPF implementation of NDPDevice.
@@ -90,7 +92,7 @@ func (systemNDP) Capture(iface string, promisc bool) (*os.File, error) {
 	if err := bpfIoctlU32(fd, unix.BIOCIMMEDIATE, 1); err != nil {
 		return fail(fmt.Errorf("BIOCIMMEDIATE: %w", err))
 	}
-	if err := bpfIoctlU32(fd, unix.BIOCSDIRECTION, bpfDirIn); err != nil {
+	if err := bpfIoctlU32(fd, unix.BIOCSDIRECTION, bpfDirInOut); err != nil {
 		return fail(fmt.Errorf("BIOCSDIRECTION: %w", err))
 	}
 	tv := unix.Timeval{Sec: int64(ndpReadWait / time.Second), Usec: int64(ndpReadWait % time.Second / time.Microsecond)}

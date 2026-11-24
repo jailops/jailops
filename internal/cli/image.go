@@ -122,7 +122,7 @@ jailops image create -f freebsd-15-1.yaml`,
 			enumFlag(cmd, "arch", "amd64", "arm64")
 			enumFlag(cmd, "source-type", "pkgbase", "minirootfs", "debootstrap")
 			f.StringVar(&repo, "repo", "", "package repository or rootfs mirror")
-			f.StringVar(&keys, "keys", "", "keyring or key directory that checks the base's signature (required for debootstrap)")
+			f.StringVar(&keys, "keys", "", "keyring or key directory that checks the base's signature (required for debootstrap; pkgbase defaults to the key directory of the host's FreeBSD-base repository)")
 			f.StringArrayVar(&sets, "package-set", nil, "package set to install (repeatable)")
 			f.IntVar(&keepLast, "keep-last", 0, "always keep this many generations")
 			f.IntVar(&keepDays, "keep-days", 0, "keep unused generations this many days")

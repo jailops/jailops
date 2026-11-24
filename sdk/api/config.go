@@ -390,6 +390,23 @@ func buildRegistry() []ckey {
 			return err
 		},
 		unset: func(s *JailSpec, _ string) { s.SysVIPC = false }})
+	add(ckey{ConfigKey: ConfigKey{Name: "securelevel", Type: "int", Example: "1", RestartRequired: true, Profile: true, Path: "securelevel",
+		Description: "The jail's kern.securelevel, -1 to 3 (securelevel(7)). A FreeBSD jail that sets none runs at 2: root in the jail cannot turn off the system immutable and append-only flags, open a disk for writing, load kernel modules or step the clock. -1 is the host's level (a jail never runs below it); a Linux jail that sets none has the host's level."},
+		get: func(s *JailSpec, _ string) (string, bool) {
+			if s.SecureLevel == nil {
+				return "", false
+			}
+			return strconv.Itoa(*s.SecureLevel), true
+		},
+		set: func(s *JailSpec, _, v string) error {
+			n, err := atoiRange("securelevel", v, MinSecureLevel, MaxSecureLevel)
+			if err != nil {
+				return err
+			}
+			s.SecureLevel = &n
+			return nil
+		},
+		unset: func(s *JailSpec, _ string) { s.SecureLevel = nil }})
 	add(ckey{ConfigKey: ConfigKey{Name: "zfs_delegation", Type: "bool", Example: "true", RestartRequired: true, Path: "zfs_delegation",
 		Description: "Global administrators only. Hands the jail a ZFS dataset of its own, <container>/delegated: root in the jail can create datasets, snapshots and mounts below it, outside the rules JailOps applies to the jail's data. The host's priv.conf must allow it (admin-zfs-delegation)."},
 		get: func(s *JailSpec, _ string) (string, bool) { return "true", s.Delegate },
@@ -417,7 +434,7 @@ func buildRegistry() []ckey {
 		func(s *JailSpec) *[]string { return &s.Firewall.Policies }, nameCheck)
 	list("firewall.tags", "firewall.tags", "Tags that firewall rules refer to.", "web,public", false, true,
 		func(s *JailSpec) *[]string { return &s.Firewall.Tags }, nameCheck)
-	list("packages", "packages", "Cannot be set when a jail is created yet: a create that sets it is refused. Install packages with the provisioning packages step.", "nginx,curl", true, true, func(s *JailSpec) *[]string { return &s.Packages }, nil)
+	list("packages", "packages", "Cannot be set when a jail is created yet: a create that sets it is refused. Install packages with `jailops jail apply` (a recipe with a package step).", "nginx,curl", true, true, func(s *JailSpec) *[]string { return &s.Packages }, nil)
 	add(ckey{ConfigKey: ConfigKey{Name: "env.<var>", Type: "string", Description: "Environment variable of the jail's services.", Example: "env.TZ=UTC", RestartRequired: true, Profile: true, Path: "env.<var>"},
 		get: func(s *JailSpec, d string) (string, bool) { v, ok := s.Env[d]; return v, ok },
 		set: func(s *JailSpec, d, v string) error {

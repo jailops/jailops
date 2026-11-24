@@ -201,11 +201,19 @@ func TestJailRollbackConfirmation(t *testing.T) {
 	if rb.Scope != api.RollbackData || rb.Snapshot != "newer" || !rb.ConfirmDataLoss {
 		t.Fatalf("request: %+v", rb)
 	}
-	// The flag proceeds without a prompt.
+	// A snapshot taken after the target is a refusal that names it, before any question, without --destroy-newer.
 	h.srv.SetSnapshotWritten("main", "web", "good", 2048)
-	out, _, code = tr.do("", "jail", "rollback", "web", "--scope", "all", "--snapshot", "good", "--confirm-data-loss")
+	_, errs, code = tr.do("", "jail", "rollback", "web", "--scope", "all", "--snapshot", "good", "--confirm-data-loss")
+	if code == 0 || !strings.Contains(errs, `snapshots taken after "good" exist: newer`) || !strings.Contains(errs, "--destroy-newer") {
+		t.Fatalf("newer without --destroy-newer: %d %s", code, errs)
+	}
+	// The flags proceed without a prompt, and the request carries destroy_newer.
+	out, _, code = tr.do("", "jail", "rollback", "web", "--scope", "all", "--snapshot", "good", "--confirm-data-loss", "--destroy-newer")
 	if code != 0 || !strings.Contains(out, "2.0 KiB written") {
 		t.Fatalf("flag: %d %s", code, out)
+	}
+	if err := json.Unmarshal(h.lastBody("POST", "/api/v1/jails/web/rollback"), &rb); err != nil || !rb.DestroyNewer || !rb.ConfirmDataLoss {
+		t.Fatalf("request: %+v %v", rb, err)
 	}
 	// Root rollback needs the snapshot of an upgrade: the fake has none.
 	_, _, code = tr.do("", "jail", "rollback", "web")
@@ -520,7 +528,7 @@ func TestJailUpgradeInPlaceAndBulk(t *testing.T) {
 	tr := h.transcript()
 	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	tr.ok("jail", "create", "db", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
-	if out := tr.ok("jail", "upgrade", "web"); !strings.Contains(out, "nothing to upgrade") {
+	if out := tr.ok("jail", "upgrade", "web"); !strings.Contains(out, "up to date") {
 		t.Fatalf("single: %s", out)
 	}
 	var up api.JailUpgrade
@@ -533,7 +541,7 @@ func TestJailUpgradeInPlaceAndBulk(t *testing.T) {
 		Spec: api.ImageSpec{OS: api.OSLinux, Release: "3.22", Arch: "amd64", Source: api.ImageSource{Type: "minirootfs"}}})
 	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "alp", Project: "main"}, Spec: api.JailSpec{Image: "alpine-3", OS: api.OSLinux}})
 	out := tr.ok("jail", "upgrade", "--all", "--no-packages")
-	for _, want := range []string{"JAIL", "web", "db", "nothing to upgrade"} {
+	for _, want := range []string{"JAIL", "web", "db", "up to date"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("summary lacks %q:\n%s", want, out)
 		}

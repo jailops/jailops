@@ -384,8 +384,8 @@ func TestBindVolumesIntoAStoppedJail(t *testing.T) {
 	}
 	cmds := strings.Join(w.Exec.Commands(), "\n")
 	for _, want := range []string{
-		"mount -t nullfs -o nosuid /jailops/projects/alpha/volumes/www /jailops/projects/alpha/jails/web/root/usr/local/www",
-		"mount -t nullfs -o nosuid /jailops/projects/alpha/volumes/data /jailops/projects/alpha/jails/web/root/var/db/web",
+		"mount -t nullfs -o nosuid,nocover /jailops/projects/alpha/volumes/www /jailops/projects/alpha/jails/web/root/usr/local/www",
+		"mount -t nullfs -o nosuid,nocover /jailops/projects/alpha/volumes/data /jailops/projects/alpha/jails/web/root/var/db/web",
 	} {
 		if !strings.Contains(cmds, want) {
 			t.Errorf("no %q in\n%s", want, cmds)
@@ -476,8 +476,8 @@ func TestRemountOfAHostDirectoryOfALinuxJailDoesBothMounts(t *testing.T) {
 	want := []string{
 		"umount -f " + root + "/compat/linux/srv/box",
 		"umount -f " + root + "/srv/box",
-		"mount -t nullfs -o ro,nosuid /mnt/box/backups " + root + "/srv/box",
-		"mount -t nullfs -o ro,nosuid /mnt/box/backups " + root + "/compat/linux/srv/box",
+		"mount -t nullfs -o ro,nosuid,nocover /mnt/box/backups " + root + "/srv/box",
+		"mount -t nullfs -o ro,nosuid,nocover /mnt/box/backups " + root + "/compat/linux/srv/box",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -513,8 +513,8 @@ func TestVolumesOfARunningJail(t *testing.T) {
 	}
 	cmds := strings.Join(w.Exec.Commands(), "\n")
 	for _, want := range []string{
-		"mount -t nullfs -o ro,nosuid /jailops/projects/alpha/volumes/www " + root + "/usr/local/www",
-		"mount -t nullfs -o nosuid /jailops/projects/alpha/volumes/data " + root + "/var/db/web",
+		"mount -t nullfs -o ro,nosuid,nocover /jailops/projects/alpha/volumes/www " + root + "/usr/local/www",
+		"mount -t nullfs -o nosuid,nocover /jailops/projects/alpha/volumes/data " + root + "/var/db/web",
 	} {
 		if !strings.Contains(cmds, want) {
 			t.Errorf("no %q in\n%s", want, cmds)
@@ -535,7 +535,7 @@ func TestVolumesOfARunningJail(t *testing.T) {
 	}
 	after := strings.Join(w.Exec.Commands()[before:], "\n")
 	// the first goes, the second is in use, and the first is mounted again (read-only as it was)
-	if !strings.Contains(after, "umount "+root+"/usr/local/www") || !strings.Contains(after, "mount -t nullfs -o ro,nosuid /jailops/projects/alpha/volumes/www "+root+"/usr/local/www") {
+	if !strings.Contains(after, "umount "+root+"/usr/local/www") || !strings.Contains(after, "mount -t nullfs -o ro,nosuid,nocover /jailops/projects/alpha/volumes/www "+root+"/usr/local/www") {
 		t.Fatalf("the volume taken off before the refusal was not mounted again:\n%s", after)
 	}
 	// a mount that is not there is fine
@@ -570,8 +570,8 @@ func TestVolumesOfARunningLinuxJail(t *testing.T) {
 		}
 	}
 	want := []string{
-		"mount -t nullfs -o ro,nosuid /jailops/projects/alpha/volumes/mail " + root + "/srv/mail",
-		"mount -t nullfs -o ro,nosuid /jailops/projects/alpha/volumes/mail " + root + "/compat/linux/srv/mail",
+		"mount -t nullfs -o ro,nosuid,nocover /jailops/projects/alpha/volumes/mail " + root + "/srv/mail",
+		"mount -t nullfs -o ro,nosuid,nocover /jailops/projects/alpha/volumes/mail " + root + "/compat/linux/srv/mail",
 	}
 	if strings.Join(mounts, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("mounts:\n%s\nwant:\n%s", strings.Join(mounts, "\n"), strings.Join(want, "\n"))
@@ -605,7 +605,7 @@ func TestVolumesOfARunningLinuxJail(t *testing.T) {
 		t.Fatalf("a mount in use is not busy: %v", err)
 	}
 	after := strings.Join(w.Exec.Commands()[before:], "\n")
-	if !strings.Contains(after, "mount -t nullfs -o ro,nosuid /jailops/projects/alpha/volumes/mail "+root+"/compat/linux/srv/mail") {
+	if !strings.Contains(after, "mount -t nullfs -o ro,nosuid,nocover /jailops/projects/alpha/volumes/mail "+root+"/compat/linux/srv/mail") {
 		t.Fatalf("the mount below the mirror was not made again:\n%s", after)
 	}
 

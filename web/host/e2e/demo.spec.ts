@@ -327,14 +327,6 @@ test('fleet updates: batch apply per project needs the project name', async ({ p
   await expect(page.getByTestId('batch-go')).toBeEnabled()
 })
 
-test('provisioning panel shows the declaration and whether it completed', async ({ page }) => {
-  await open(page, '/jails/mail')
-  await expect(page.getByTestId('provision-state')).toContainText('has not completed')
-  await open(page, '/jails/web')
-  await expect(page.getByTestId('provision-state')).toContainText('completed')
-  await expect(page.getByTestId('provision-panel')).toContainText('templates/nginx.conf')
-})
-
 test('backup key: status, create shows the recovery key once, the dialog cannot close without confirming', async ({ page }) => {
   await open(page, '/backups')
   await page.getByRole('tab', { name: 'Backup key' }).click()

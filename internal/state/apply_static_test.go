@@ -281,11 +281,12 @@ var writeCalls = map[string]bool{
 // local projection of the state, a contract with the helper). A new place is added here after deciding that it only
 // reads; changing what is stored is done with state.Apply, never with a write into the directory.
 var objectsReaders = map[string]string{
-	"internal/priv/hook.go loadNetwork":             "the hook of a jail start reads the network of the jail",
-	"internal/priv/netops.go storedNetworks":        "the helper lists the stored networks",
-	"internal/priv/pfifaces.go networkUplinks":      "the uplinks of the stored networks, for the pf interface check",
-	"internal/priv/dnsunbound.go addStoredNetworks": "the names for the resolver: the networks and the projects that own them",
-	"internal/priv/netops.go checkRejectRoute":      "a reject route is accepted only inside a stored network",
+	"internal/priv/hook.go loadNetwork":                  "the hook of a jail start reads the network of the jail",
+	"internal/priv/netops.go storedNetworks":             "the helper lists the stored networks",
+	"internal/priv/pfifaces.go networkUplinks":           "the uplinks of the stored networks, for the pf interface check",
+	"internal/priv/dnsunbound.go addStoredNetworks":      "the names for the resolver: the networks and the projects that own them",
+	"internal/priv/netops.go checkRejectRoute":           "a reject route is accepted only inside a stored network",
+	"internal/priv/dnsunbound.go DropStaleResolverAddrs": "reads the stored networks to learn which resolver addresses are still wanted",
 }
 
 func isObjectsLit(e ast.Expr) bool {

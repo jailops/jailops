@@ -1,4 +1,4 @@
-// Demo data for projects, storage, trust, profiles, updates and provisioning.
+// Demo data for projects, storage, trust, profiles, updates.
 import { readyCond } from './data'
 import type { Project, Storage, Session, Identity, Profile, Certificate, Jail, UpdateReport, UpdateRecord } from '@jailops/shared/api/types'
 
@@ -104,10 +104,3 @@ export function updateHistory(name: string): UpdateRecord[] {
   ]
 }
 
-/** The declaration and state of provisioning, put on the jails of the demo. */
-export function provisionSpec(name: string): Jail['spec']['provision'] {
-  if (name === 'mail') return { packages: ['postfix', 'dovecot'], services: { enable: ['postfix'], start: ['postfix'] } }
-  if (name === 'web') return { packages: ['bash', 'nginx'], files: [{ source: 'templates/nginx.conf', destination: '/usr/local/etc/nginx/nginx.conf', owner: 'root', group: 'wheel', mode: '0644' }], services: { enable: ['nginx'], start: ['nginx'] }, commands: [['/usr/local/bin/nginx', '-t']] }
-  return undefined
-}
-export const provisionedAt = (name: string) => (name === 'mail' ? undefined : ago(86400 * 30))

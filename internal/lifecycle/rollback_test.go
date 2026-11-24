@@ -62,7 +62,7 @@ func TestRollbackErrors(t *testing.T) {
 	wantCode(t, err, api.CodeNotFound)
 }
 
-// Scope all returns the root to a snapshot: it needs the loss confirmed, refuses newer snapshots without force, and
+// Scope all returns the root to a snapshot: it needs the loss confirmed, refuses newer snapshots without destroy_newer, and
 // never touches a volume.
 func TestRollbackAllReturnsTheRootToASnapshot(t *testing.T) {
 	w := snapWorld(t)
@@ -80,12 +80,12 @@ func TestRollbackAllReturnsTheRootToASnapshot(t *testing.T) {
 	opts.ConfirmDataLoss = true
 	before = w.state()
 	if _, err := rollback(w, opts); !errors.As(err, &ae) || ae.Code != api.CodePreconditionFailed || !strings.Contains(ae.Detail["later_snapshots"], jc+"/root@s2") {
-		t.Fatalf("newer snapshots must refuse without force: %v", err)
+		t.Fatalf("newer snapshots must refuse without destroy_newer: %v", err)
 	}
 	if w.state() != before {
 		t.Fatal("refusal changed state")
 	}
-	opts.Force = true
+	opts.DestroyNewer = true
 	if _, err := rollback(w, opts); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestRollbackAllReturnsTheRootToASnapshot(t *testing.T) {
 		t.Fatalf("a rollback of the jail must not touch its volume, got %q", v)
 	}
 	if ok, _ := w.Z.Exists(bg, jc+"/root@s2"); ok {
-		t.Fatal("later snapshot should be destroyed by force")
+		t.Fatal("later snapshot should be destroyed with destroy_newer")
 	}
 	if w.Jails.IsUp("alpha_web") {
 		t.Fatal("the rollback started the jail")

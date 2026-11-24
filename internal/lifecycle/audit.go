@@ -11,13 +11,17 @@ import (
 )
 
 // RootAudit is what the audit of a jail read from its root: the helper's Facts, and from a copy of its package database
-// the number of packages and the files they own.
+// the number of packages, the files they own and what pkg audit says of them.
 type RootAudit struct {
 	Facts jailaudit.Facts
 	// HasPkgDB is false for a root without /var/db/pkg; Owned, Packages and BasePackages are then empty.
 	HasPkgDB               bool
 	Owned                  map[string]bool
 	Packages, BasePackages int
+	// VulnRan says pkg audit ran; Vulns are the vulnerable packages it named, VulnErr why it did not run.
+	VulnRan bool
+	Vulns   []jailaudit.VulnPackage
+	VulnErr string
 }
 
 // rootAuditor is the part of Files that reads a jail's root for its audit (the helper's jail.audit_root).
@@ -27,9 +31,10 @@ type rootAuditor interface {
 
 // AuditRoot reads the root of a FreeBSD jail, running or stopped, for `jailops jail audit`. It changes nothing in the
 // jail: a stopped jail's root is mounted for the read and unmounted after it (as BasePackages does), pkg reads a copy of
-// the package database in a scratch directory of the container, and the helper reads the root. running says whether
-// the jail runs.
-func (s *Service) AuditRoot(ctx context.Context, name string) (RootAudit, bool, error) {
+// the package database in a scratch directory of the container, and the helper reads the root. With vulns pkg audit
+// reads the copy with the host's vulnerability database (jailaudit.HostVulnXML), which it never fetches. running says
+// whether the jail runs.
+func (s *Service) AuditRoot(ctx context.Context, name string, vulns bool) (RootAudit, bool, error) {
 	ra, ok := s.Files.(rootAuditor)
 	if !ok {
 		return RootAudit{}, false, api.Errorf(api.CodeUnsupported, "this daemon cannot read the root of a jail (no root helper)")
@@ -100,6 +105,20 @@ func (s *Service) AuditRoot(ctx context.Context, name string) (RootAudit, bool, 
 		if n, err := s.Exec.Run(ctx, []string{"pkg", "-r", work + "/scratch", "query", "%n %v %sb"}); err == nil {
 			for n := range parsePackages(string(n)) {
 				pkgs[n] = true
+			}
+		}
+		if vulns {
+			// the packages of the copy against the host's database; pkg audit exits 1 when it names one
+			v, err := s.Exec.Run(ctx, []string{"pkg", "-r", work + "/scratch", "audit", "-f", jailaudit.HostVulnXML})
+			out.Vulns = jailaudit.ParsePkgAudit(string(v))
+			if err != nil && len(out.Vulns) == 0 {
+				msg := tailLine(string(v))
+				if msg == "" {
+					msg = err.Error()
+				}
+				out.VulnErr = "pkg audit: " + msg
+			} else {
+				out.VulnRan = true
 			}
 		}
 		out.HasPkgDB = true

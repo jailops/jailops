@@ -2,7 +2,11 @@
 
 package priv
 
-import "golang.org/x/sys/unix"
+import (
+	"fmt"
+
+	"golang.org/x/sys/unix"
+)
 
 // systemMountTable reads the host's mount table with getfsstat(2). MNT_NOWAIT returns the cached table and never blocks
 // on a server that is slow or gone.
@@ -26,6 +30,7 @@ func systemMountTable() ([]mountEntry, error) {
 			mp:     cStr(buf[i].Mntonname[:]),
 			typ:    cStr(buf[i].Fstypename[:]),
 			nosuid: buf[i].Flags&unix.MNT_NOSUID != 0,
+			fsid:   fmt.Sprintf("FSID:%d:%d", buf[i].Fsid.Val[0], buf[i].Fsid.Val[1]),
 		})
 	}
 	return out, nil
@@ -34,4 +39,13 @@ func systemMountTable() ([]mountEntry, error) {
 // systemForceUnmount undoes the mount on path with unmount(2).
 func systemForceUnmount(path string) error {
 	return unix.Unmount(path, unix.MNT_FORCE)
+}
+
+// systemForceUnmountEntry undoes the mount of e by its file system ID (unmount(2) with MNT_BYFSID), which names the
+// file system itself and resolves no path; a row without an ID falls back to its path.
+func systemForceUnmountEntry(e mountEntry) error {
+	if e.fsid == "" {
+		return systemForceUnmount(e.mp)
+	}
+	return unix.Unmount(e.fsid, unix.MNT_FORCE|unix.MNT_BYFSID)
 }

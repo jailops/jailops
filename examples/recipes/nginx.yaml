@@ -1,0 +1,4 @@
+# jailops jail apply nginx -f examples/recipes/nginx.yaml
+steps:
+  - package: [nginx]
+  - service: {name: nginx, enabled: true, running: true}

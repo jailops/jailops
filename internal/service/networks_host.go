@@ -63,6 +63,11 @@ func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) er
 			if have.Addr().IsLinkLocalUnicast() {
 				continue
 			}
+			// the resolver address of this subnet on the loopback: what the network holds there itself, left by a
+			// deleted network with the same subnet until the helper takes it off (networks never overlap each other)
+			if v6.IsValid() && have.Bits() == 128 && have.Addr() == ipam.Resolver6(v6) && slices.Contains(i.Groups, "lo") {
+				continue
+			}
 			for _, sub := range subnets {
 				if sub.Overlaps(have.Masked()) {
 					return api.Errorf(api.CodePreconditionFailed, "subnet %s overlaps %s on the host interface %s", sub, have, i.Name).

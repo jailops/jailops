@@ -226,6 +226,7 @@ jailops create
     --pids int
     --profile stringArray
     --prompt string
+    --securelevel int =2
     --shell string
     --start bool
     --stop-timeout int
@@ -492,7 +493,10 @@ jailops image show  (aliases: get)
 jailops image upgrade
 jailops info
 jailops jail  (aliases: jails)
+jailops jail apply
+    --file/-f string
 jailops jail audit
+    --suggest bool
 jailops jail base
 jailops jail base add
 jailops jail base list
@@ -530,6 +534,7 @@ jailops jail create
     --pids int
     --profile stringArray
     --prompt string
+    --securelevel int =2
     --shell string
     --start bool
     --stop-timeout int
@@ -589,8 +594,6 @@ jailops jail pkg
     --all bool
     --parallel int =4
     --selector/-l stringArray
-jailops jail provision
-    --again bool
 jailops jail rename
 jailops jail restart
     --all bool
@@ -599,6 +602,7 @@ jailops jail restart
     --timeout string
 jailops jail rollback
     --confirm-data-loss bool
+    --destroy-newer bool
     --scope string =root
     --snapshot string
 jailops jail set
@@ -619,6 +623,7 @@ jailops jail set
     --pids int
     --profile stringArray
     --prompt string
+    --securelevel int =2
     --shell string
     --stop-timeout int
     --storage string
@@ -830,8 +835,6 @@ jailops project set
     --shell string
 jailops project show  (aliases: get)
 jailops project switch
-jailops provision
-    --again bool
 jailops remote  (aliases: remotes)
 jailops remote add
     --ca string

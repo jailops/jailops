@@ -129,6 +129,12 @@ name that points at it, because the host is closed to jails: it connects to the 
 
 **A rule that names a host address matches the source the host sends from.** The host has the gateway address of a network and may hold more addresses on the same prefix. A connection that the host starts to a jail leaves from the address the kernel chooses among them, and FreeBSD 15 and 16 choose differently. To let the host in with a rule `from: <address>`, send from that address (`ping -S ADDRESS`, `nc -s ADDRESS`), or name the gateway address as well.
 
+**A new address of the host is closed a moment after it appears.** The anchor of a jail closes its own network's gateway
+and resolver from the start; the other addresses of the host (the gateway of another network whose first jail starts,
+an address added by hand, a tunnel that comes up) enter its `<host>` table at the next pass of the reconcile loop, at the
+latest within its 60-second interval. Until then a jail of another network can reach, through that address, a
+service of the host that listens on every address. Bind the host's services to the addresses they serve.
+
 **Ping and DNS to the host stay open under every policy**, a deny-all one included, because a jail needs its gateway and its
 resolver. To close them, add deny rules, which win over every allow rule: `jailops firewall rule add POLICY out --action deny
 --proto udp --port 53 --to host` (and `--proto tcp`, and `--proto icmp` for ping).
@@ -203,6 +209,12 @@ loaded and nothing would evaluate it. `jailops doctor` fails `pf.enabled` in tha
 in `priv.conf` only on a host where that is what you want. `service pf start` and `service pf restart` empty every anchor;
 the daemon looks every few seconds and loads the anchors of the running jails again at once, with one warning in its
 log for the empty anchor it found ([troubleshooting.md](troubleshooting.md#common-failures) says how to read it).
+
+Until it has, up to five seconds after the flush, the anchors of the jails are empty and the host's own `pf.conf` alone
+decides their traffic: with a default `block in all` (`jailops doctor` checks for it, `pf.host_default_deny`) nothing new
+reaches a jail from outside in that time, but a `pf.conf` that passes what it does not name lets every jail send and receive
+anything until the anchors are back. Reload the rules with `pfctl -f /etc/pf.conf` instead, which keeps the anchors: it
+replaces only the main ruleset.
 
 ## Letting the Internet in: `jailops expose`
 

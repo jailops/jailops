@@ -584,8 +584,9 @@ func (l *Local) confFileFor(name string) (string, bool) {
 // ReadOnlyFiles are host files fs.read_file may read besides the allowed
 // roots: the configuration an image build copies or checks, and /etc/rc.conf, which doctor's persistence check reads
 // for `gateway_enable` and `ipv6_gateway_enable` (without it the check could never see them and always warned, even
-// on a host where they were set: found live on the amd64 host, October 2026).
-var ReadOnlyFiles = []string{"/etc/sysctl.conf", "/etc/resolv.conf", "/etc/rc.conf"}
+// on a host where they were set: found live on the amd64 host, October 2026). The pkg repository files of the host
+// name the key directory of its FreeBSD-base repository, which an image build follows (internal/imagegen).
+var ReadOnlyFiles = []string{"/etc/sysctl.conf", "/etc/resolv.conf", "/etc/rc.conf", "/etc/pkg/FreeBSD.conf", "/usr/local/etc/pkg/repos/FreeBSD.conf"}
 
 // resolveRead is resolve for reading: the allowed roots, the fixed files of
 // ReadOnlyFiles and the configured image mirrors.

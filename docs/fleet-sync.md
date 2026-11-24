@@ -43,7 +43,7 @@ Every declarative object a user can create with the CLI has a file kind. Nothing
 | `jailops wireguard create --mode server`, `peer add` | `hosts/<host>/wireguard/*.yaml` (WireGuard) | servers only, public parts only; see "WireGuard" below |
 | `jailops storage create` | `hosts/<host>/storage/*.yaml` (Storage) | a dataset on any pool, a big HDD pool included; `compression`. Datasets may not be equal or nested |
 | `jailops image create`, `image build` | `shared/images/*.yaml` (Image) | `build: true` builds the **first** generation when the host has none (a fresh host has none and a jail cannot be created from an image without one). Later generations are an operation, not a declaration: `jailops image build` or `jailops image upgrade` |
-| `jailops create` | `projects/<p>/jails/*.yaml` (Jail) | the whole spec: network and storage (explicit), `volumes`, `expose`, `devfs`, `resources`, `boot`, `update` schedule, `firewall` (`policies`, a list, and `tags`), `env` with `secret:` references, `provision`, `labels`. `start: true` and `after:` hooks (start, restart, snapshot, exec) run once, after creation |
+| `jailops create` | `projects/<p>/jails/*.yaml` (Jail) | the whole spec: network and storage (explicit), `volumes`, `expose`, `devfs`, `resources`, `boot`, `update` schedule, `firewall` (`policies`, a list, and `tags`), `env` with `secret:` references, `labels`. `start: true` and `after:` hooks (start, restart, snapshot, exec) run once, after creation |
 | `jailops firewall policy/address-set create` | `projects/<p>/firewall-policies/`, `address-sets/` | the project's mandatory policies are set in a second write once the policies exist |
 | `jailops backup target create` | `shared/backup-targets/*.yaml` (BackupTarget) | `kind: node` needs `address` and a pinned `fingerprint` |
 | `jailops backup policy create` | `projects/<p>/backup-policies/*.yaml` (BackupPolicy) | selector, targets, `schedule`, retention, `include_state`, `exclude_volumes`, `verify_schedule`, `verify_mode` |
@@ -122,8 +122,7 @@ strict decoding refuses one:
 - `priv.conf` (`admin-host-mount`, ...) and `jailopsd.yaml`: they are the host operator's boundary, on purpose out of
   reach of the API. `examples/provisioning/bootstrap.sh` writes them when it installs a host.
 - Runtime actions and data: snapshots (use the `snapshot` hook), backups and restores, exec, updates, generations after the first.
-- Provisioning **files**: `provision.files` copies from `<state_dir>/project-files/<project>/` on the host. Sync does not upload
-  them (see `examples/pkgops-packaged-service`); commands, packages and services are declarable.
+- What runs inside a jail: recipes (`jailops jail apply`, see `examples/recipes`).
 - Profile objects of the daemon (below).
 
 ### Apps and who may reach them

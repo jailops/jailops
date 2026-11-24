@@ -1079,3 +1079,16 @@ func TestStoredAliasReferencesSurviveTheLoad(t *testing.T) {
 		t.Fatalf("the file keeps the alias: %s %v", b, err)
 	}
 }
+
+// A jail stored by a release that had spec.provision still loads: the field is not read any more.
+func TestStoredJailWithProvisionLoads(t *testing.T) {
+	raw := []byte(`{"apiVersion":"jailops/v1","kind":"Jail","metadata":{"uuid":"u1","name":"web"},"spec":{"image":"fb","provision":{"packages":["nginx"]}}}`)
+	o, _, err := decodeObject(raw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec api.JailSpec
+	if err := json.Unmarshal(o.Spec, &spec); err != nil || spec.Image != "fb" {
+		t.Fatalf("%+v %v", spec, err)
+	}
+}

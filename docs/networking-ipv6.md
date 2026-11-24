@@ -246,6 +246,40 @@ On a host that is not in appliance mode, set a static default route (`ipv6_defau
 with the router's link-local address): a default route learned from router advertisements does not last on a host that
 forwards, which JailOps needs, because FreeBSD ignores advertisements on a forwarding host.
 
+#### Answers to the provider's routers
+
+**The symptom:** IPv6 to and from the host and its jails stalls for three or four seconds after a quiet minute, then runs
+normally until the next quiet period. IPv4 is not affected. It happens on a switched segment where the provider runs two
+routers as a VRRP pair: the default gateway is a virtual address, and each router also has a global address of its own in
+a prefix of the provider's infrastructure.
+
+**The cause:** the host holds its address as a `/128` and its default route goes to the gateway; it has no on-link route
+for the routers' prefix. When a router checks the host (neighbor unreachability detection), it sends a unicast Neighbor
+Solicitation from its own global address. FreeBSD sends the Neighbor Advertisement that answers it through the routing
+table: the destination (the router's global address) is not on-link, so the frame goes to the default gateway's MAC, the
+virtual MAC of VRRP, which belongs to the master. When the router that asked is the backup, the answer never reaches it. It
+asks again three times a second apart, then falls back to a multicast solicitation from its link-local address, which the
+host answers correctly; the traffic that goes through that router waits meanwhile. Linux answers a solicitation on the
+interface it came in on, to the link-layer address of the neighbor that asked (from its source link-layer address option),
+whatever the routing table says, so a Linux host on the same segment does not show it.
+
+**The fix:** an on-link route for the routers' prefix. The advertisement then goes straight to the MAC of the router that
+asked. In `/etc/rc.conf`, with the `/64` of the routers' addresses and the uplink:
+
+    ipv6_static_routes="infra"
+    ipv6_route_infra="-net 2001:db8:40::/64 -interface vtnet0"
+
+When `ipv6_static_routes` already lists routes, add `infra` to the list. To apply it now without a reboot:
+
+    route -6 add -net 2001:db8:40::/64 -interface vtnet0
+
+**How it shows:** the capture of the NDP proxy sees the uplink in both directions. For every router that asks for an address
+of the host itself three or more times within five seconds, it records the MAC of the router (from the solicitation) and
+the Ethernet destination of the host's answer. `jailops network ndp-proxy status NETWORK` prints a `Host address` line for
+each such router, and `jailops doctor` warns (`network.nd_reply_path`) when the answers went to another MAC than the
+router's, naming the router and the lines above for its prefix. It observes only; JailOps changes nothing on the host for
+it. The addresses of the jails are never part of it: the proxy answers for them itself, to the MAC of the router that asked.
+
 **Verified** on FreeBSD 15.1 **amd64** with a shared switched `/64`, the jails in a `/80`: the upstream routers were answered
 at once; a jail pinged the internet for 50 minutes (3,000 packets, none lost) and another machine pinged the jail for 50
 minutes (3,000 sent, 2,992 received, all eight lost in the first minute, while the router resolved a new address); a new
@@ -317,9 +351,11 @@ stops when its rule goes.
   host stay as they were, a jail that takes another jail's MAC address takes none of its traffic, an extra address is
   reached by nobody and cannot be used as a source, and a jail that routes another jail's address onto its own link
   reaches nothing, because nothing on the link answers for it. A capture inside a jail sees its own traffic only.
-- **ICMPv6 errors are never blocked.** Destination unreachable, packet too big, time exceeded and parameter problem pass in
-  both directions, whatever the policy says (path MTU discovery depends on
-  them; a jail with `default_in: deny` still learns its path MTU). Echo is policy. Router solicitations and advertisements
+- **ICMPv6 errors into a jail are never blocked.** Destination unreachable, packet too big, time exceeded and parameter
+  problem pass into a jail whatever the policy says (path MTU discovery depends on them; a jail with `default_in: deny`
+  still learns its path MTU). An error a jail sends passes with the state of the connection it is about (pf matches
+  errors to states); any other is decided by its policies, so a jail whose policy denies everything sends no error to an
+  address of its choosing. Echo is policy. Router solicitations and advertisements
   are not passed: jails use no SLAAC and `accept_rtadv` is off (a Linux guest is configured by the host).
   That the error reaches the jail was verified with a forged packet-too-big from the host (the rule's counter shows it
   passing); **not automated**, because the host's pf refragments what it forwards instead of answering with the error,

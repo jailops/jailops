@@ -74,7 +74,7 @@ projects:
 # Managed updates: how often update schedules are evaluated. Updates stay off for a jail until its update mode is set.
 updates:
   # tick: 1m
-  # project_files_dir: /var/db/jailops/state/project-files   # provisioning files, one directory per project
+  # project_files_dir: /var/db/jailops/state/project-files   # not used
 
 # What a new FreeBSD jail gets when its request and its profiles do not say (docs/shell.md): the shell started by
 # `jailops shell` and the console, and a coloured prompt: every user's bash, and root's sh, where it applies through a

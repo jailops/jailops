@@ -9,15 +9,14 @@ block in quick on joe1a from ! <jail_addrs> to any
 block in quick on joe1a inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv
 pass in quick on joe1a inet6 proto icmp6 from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to { fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv } label "jo-e1ad27c2bfdb" keep state (if-bound)
 pass in quick on joe1a inet6 proto icmp6 from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to ff02::/16 icmp6-type { listenrep, listendone, 143 } label "jo-b8380e9b0d97" keep state (if-bound)
-pass in quick on joe1a inet6 proto icmp6 from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-9b66044bd3f4" keep state (if-bound)
 block out quick on joe1a inet6 proto icmp6 from any to any icmp6-type { redir, routeradv }
-pass out quick on joe1a inet6 proto icmp6 from any to { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2, ff02::1:ff00:100, ff02::1:ff88:fcd2 } icmp6-type { neighbrsol, neighbradv } label "jo-88b2244cd7f8" keep state (if-bound)
-pass out quick on joe1a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-55220eb3c96b" keep state (if-bound)
+pass out quick on joe1a inet6 proto icmp6 from any to { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2, ff02::1:ff00:100, ff02::1:ff88:fcd2 } icmp6-type { neighbrsol, neighbradv } label "jo-f17e80aa6f32" keep state (if-bound)
+pass out quick on joe1a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-0ea8c321510f" keep state (if-bound)
 block drop out quick on joe1a from any to ! <jail_addrs>
 # the host: closed to the jail whatever its policies allow; ping, the errors a path needs and the network's resolver stay open
-pass in quick on joe1a inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob } label "jo-ecb6ee58c71e" keep state (if-bound)
+pass in quick on joe1a inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob } label "jo-ef57d9a22a6d" keep state (if-bound)
 block drop in quick on joe1a from any to <host>
 # policy web
 # defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
-pass out quick on joe1a all label "jo-5b4cd594b526" keep state (if-bound)
-pass in quick on joe1a all label "jo-550c738844b3" keep state (if-bound)
+pass out quick on joe1a all label "jo-8f56ad399371" keep state (if-bound)
+pass in quick on joe1a all label "jo-6abd11e9a480" keep state (if-bound)

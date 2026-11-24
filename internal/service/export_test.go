@@ -104,3 +104,8 @@ func ThickPorts(s *Service, ctx context.Context, key string, dryRun bool) (pendi
 	}
 	return p.Pending, p.None, w
 }
+
+// HostDirAdmission runs the admission of host-directory attachments.
+func HostDirAdmission(s *Service, ctx context.Context, project string, now, was []api.VolumeAttach) error {
+	return s.hostDirAdmission(ctx, project, now, was)
+}

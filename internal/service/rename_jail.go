@@ -15,7 +15,7 @@ import (
 )
 
 // RenameJail renames a stopped jail of the request's project: its datasets (the whole tree, volumes and snapshots
-// with it) and their mountpoints, its records, its update history and the marks of its provisioning and shell
+// with it) and their mountpoints, its records, its update history and the mark of its shell
 // setup, and the boot order of the jails that depend on it. A running jail is refused: the kernel knows a jail by
 // its name, and its mounts, interfaces and anchor are set up under it.
 func (s *Service) RenameJail(ctx context.Context, name string, o RenameOptions) (api.Operation, *api.RenameResult, error) {
@@ -233,7 +233,7 @@ func (s *Service) namePropSteps(ctx context.Context, fromDS, toDS string, names 
 }
 
 // jailStateFileSteps move the files of the state directory a jail key names: the update history (whose records
-// name the jail), the mark of its provisioning and of its shell setup.
+// name the jail), the mark of its shell setup.
 func (s *Service) jailStateFileSteps(key, newKey, project, name, to string) []renameStep {
 	var out []renameStep
 	editHistory := func(b []byte) []byte {
@@ -257,7 +257,6 @@ func (s *Service) jailStateFileSteps(key, newKey, project, name, to string) []re
 		edit           func([]byte) []byte
 	}{
 		{s.historyPath(key), s.historyPath(newKey), "update history", editHistory},
-		{s.provPath(key), s.provPath(newKey), "provisioning mark", nil},
 		{s.shellPath(key), s.shellPath(newKey), "shell setup mark", nil},
 	} {
 		if st, ok := s.stateFileStep(f.from, f.to, f.edit, api.RenameChange{Kind: api.RenameState, Object: f.what + " of jail " + name,
@@ -270,12 +269,6 @@ func (s *Service) jailStateFileSteps(key, newKey, project, name, to string) []re
 
 // moveKeyCaches moves what the service keeps in memory under a jail key to the new key.
 func (s *Service) moveKeyCaches(key, newKey string) {
-	s.prov.mu.Lock()
-	if v, ok := s.prov.m[key]; ok {
-		s.prov.m[newKey] = v
-		delete(s.prov.m, key)
-	}
-	s.prov.mu.Unlock()
 	s.shellM.mu.Lock()
 	if v, ok := s.shellM.m[key]; ok {
 		s.shellM.m[newKey] = v

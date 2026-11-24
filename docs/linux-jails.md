@@ -23,8 +23,7 @@ Linux jail (the Linuxulator has no `ICMP6_FILTER`; use tcp), and the network nee
 resolver (the network's `dns` list is written to `resolv.conf`; `network create` has no flag for it, use a file or
 `network edit`); `jailops doctor` warns (`network.dns`) about a network in use without one.
 
-Not covered: other glibc distributions, behaviour under load, **package provisioning for Debian** (it runs `apk` only;
-an upgrade of a debootstrap generation is refused, build a new one).
+Not covered: other glibc distributions, behaviour under load; an upgrade of a debootstrap generation is refused, build a new one.
 
 ## Host prerequisites
 

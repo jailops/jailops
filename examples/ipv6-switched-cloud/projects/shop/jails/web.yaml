@@ -21,6 +21,3 @@ spec:
   expose:
     # HTTP and HTTPS from the Internet, over IPv6 straight to the jail and over IPv4 (NAT) as forwards of the host's ports.
     - {ports: ["80", "443"], comment: web}
-  provision:
-    packages: [nginx]
-    services: {enable: [nginx], start: [nginx]}

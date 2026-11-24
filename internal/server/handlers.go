@@ -104,7 +104,7 @@ func (s *Server) jailRoutes() []route {
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/jails/{name}/audit", h: func(c *rc) error {
-			v, err := svc.JailAudit(c.r.Context(), c.pathArg("name"))
+			v, err := svc.JailAudit(c.r.Context(), c.pathArg("name"), c.r.URL.Query().Get("suggest") == "true")
 			if err != nil {
 				return err
 			}

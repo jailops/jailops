@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -77,7 +78,14 @@ func (l *Local) AuditRoot(ctx context.Context, q RootAuditReq) (jailaudit.Facts,
 	for _, f := range q.Files {
 		base[path.Clean("/"+f.Path)] = true
 	}
-	if err := walkSetID(ctx, jr, base, &out); err != nil {
+	var owners *jailOwners
+	if uids, ok := readIDs(jr, "etc/master.passwd"); ok {
+		if gids, ok := readIDs(jr, "etc/group"); ok {
+			owners = &jailOwners{uids: uids, gids: gids}
+			out.OwnersRead = true
+		}
+	}
+	if err := walkRoot(ctx, jr, base, owners, &out); err != nil {
 		return jailaudit.Facts{}, err
 	}
 	budget := int64(jailaudit.MaxHashTotal)
@@ -267,14 +275,83 @@ func readAccounts(jr *os.Root) jailaudit.Accounts {
 	return a
 }
 
-// walkSetID walks the jail's root, on its own file system only, for regular files with the set-user-ID or
-// set-group-ID bit that are not among base.
-func walkSetID(ctx context.Context, jr *os.Root, base map[string]bool, out *jailaudit.Facts) error {
+// readIDs reads the ids (the third field) of /etc/master.passwd or /etc/group of the jail; ok is false when the file
+// cannot be read.
+func readIDs(jr *os.Root, rel string) (map[uint32]bool, bool) {
+	f, _, err := openPlain(jr, rel)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	ids := map[uint32]bool{}
+	sc := bufio.NewScanner(io.LimitReader(f, 16<<20))
+	sc.Buffer(make([]byte, 64<<10), 64<<10)
+	for sc.Scan() {
+		l := sc.Text()
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue
+		}
+		fl := strings.SplitN(l, ":", 4)
+		if len(fl) < 3 {
+			continue
+		}
+		if n, err := strconv.ParseUint(fl[2], 10, 32); err == nil {
+			ids[uint32(n)] = true
+		}
+	}
+	return ids, sc.Err() == nil
+}
+
+// jailOwners are the uids of the jail's accounts and the gids of its groups.
+type jailOwners struct{ uids, gids map[uint32]bool }
+
+// unowned says what of fi's owner and group the jail does not have ("" when it has both).
+func (o *jailOwners) unowned(fi fs.FileInfo) string {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return ""
+	}
+	var miss []string
+	if !o.uids[st.Uid] {
+		miss = append(miss, "uid "+strconv.FormatUint(uint64(st.Uid), 10))
+	}
+	if !o.gids[st.Gid] {
+		miss = append(miss, "gid "+strconv.FormatUint(uint64(st.Gid), 10))
+	}
+	return strings.Join(miss, ", ")
+}
+
+// maxTmpDirs bounds the directories with the sticky bit that anyone may write to, below which a file anyone may
+// write to is not listed: a jail that makes more has the files below the others listed.
+const maxTmpDirs = 64
+
+// walkRoot walks the jail's root, on its own file system only, once for every list of the Facts that comes from a
+// walk: the regular files with the set-user-ID or set-group-ID bit that are not among base, the directories anyone may
+// write to without the sticky bit, the regular files anyone may write to outside a directory with the sticky bit that
+// anyone may write to (/tmp, /var/tmp), and with owners the files and directories whose owner or group the jail does
+// not have. A mount point below the root (a volume, devfs) is not looked at, nor anything under it.
+func walkRoot(ctx context.Context, jr *os.Root, base map[string]bool, owners *jailOwners, out *jailaudit.Facts) error {
 	top, err := jr.Lstat(".")
 	if err != nil {
 		return mapFSErr(err)
 	}
 	dev, _ := devOf(top)
+	var tmpDirs []string
+	underTmp := func(p string) bool {
+		for _, d := range tmpDirs {
+			if strings.HasPrefix(p, d) {
+				return true
+			}
+		}
+		return false
+	}
+	add := func(list *[]string, more *int, limit int, s string) {
+		if len(*list) < limit {
+			*list = append(*list, s)
+		} else {
+			*more++
+		}
+	}
 	n := 0
 	err = fs.WalkDir(jr.FS(), ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -287,31 +364,46 @@ func walkSetID(ctx context.Context, jr *os.Root, base map[string]bool, out *jail
 		if n%4096 == 0 && ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if d.IsDir() {
-			if p != "." {
-				if fi, err := d.Info(); err != nil {
-					return fs.SkipDir
-				} else if dd, _ := devOf(fi); dd != dev {
-					return fs.SkipDir // another file system mounted here: a volume, devfs
-				}
-			}
-			return nil
-		}
-		if !d.Type().IsRegular() {
+		regular := d.Type().IsRegular()
+		if !d.IsDir() && !regular && owners == nil {
 			return nil
 		}
 		fi, err := d.Info()
-		if err != nil || fi.Mode()&(fs.ModeSetuid|fs.ModeSetgid) == 0 {
+		if err != nil {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
 			return nil
 		}
-		abs := "/" + p
-		if base[abs] {
+		abs := path.Clean("/" + p)
+		mode := fi.Mode()
+		if d.IsDir() {
+			if p != "." {
+				if dd, _ := devOf(fi); dd != dev {
+					return fs.SkipDir // another file system mounted here: a volume, devfs
+				}
+			}
+			if mode.Perm()&0o002 != 0 {
+				if mode&fs.ModeSticky == 0 {
+					add(&out.WorldDirs, &out.WorldDirsMore, jailaudit.MaxListed, abs)
+				} else if len(tmpDirs) < maxTmpDirs {
+					tmpDirs = append(tmpDirs, strings.TrimSuffix(abs, "/")+"/")
+				}
+			}
+		}
+		if owners != nil {
+			if miss := owners.unowned(fi); miss != "" {
+				add(&out.Unowned, &out.UnownedMore, jailaudit.MaxListed, abs+" ("+miss+")")
+			}
+		}
+		if !regular {
 			return nil
 		}
-		if len(out.SetID) < jailaudit.MaxSetID {
-			out.SetID = append(out.SetID, abs)
-		} else {
-			out.SetIDMore++
+		if mode.Perm()&0o002 != 0 && !underTmp(abs) {
+			add(&out.WorldFiles, &out.WorldFilesMore, jailaudit.MaxListed, abs)
+		}
+		if mode&(fs.ModeSetuid|fs.ModeSetgid) != 0 && !base[abs] {
+			add(&out.SetID, &out.SetIDMore, jailaudit.MaxSetID, abs)
 		}
 		return nil
 	})

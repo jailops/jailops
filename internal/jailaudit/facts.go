@@ -1,6 +1,6 @@
 // Package jailaudit is the audit of a FreeBSD jail (`jailops jail audit`): what the root helper reads from the jail's
 // root on the host (Facts) and the checks made of it (Evaluate). The helper reads; nothing here writes, and nothing runs
-// in the jail but the daemon's sockstat of a running one.
+// in the jail.
 package jailaudit
 
 // File is a file of a base package as pkg recorded it: the path in the jail and its checksum ("1$" and the SHA-256 of
@@ -19,10 +19,25 @@ type Facts struct {
 	Accounts  Accounts `json:"accounts"`
 	// SetID are the files with the set-user-ID or set-group-ID bit that are not files of a base package (the request's
 	// Files), at most MaxSetID; SetIDMore counts the others. SetIDCut says the walk stopped at its bound (MaxWalk
-	// entries). The walk stays on the root's file system: a volume is not walked.
+	// entries); the lists below come from the same walk. The walk stays on the root's file system: a volume is not
+	// walked.
 	SetID     []string `json:"setid,omitempty"`
 	SetIDMore int      `json:"setid_more,omitempty"`
 	SetIDCut  bool     `json:"setid_cut,omitempty"`
+	// WorldDirs are the directories anyone may write to that lack the sticky bit, at most MaxListed; WorldDirsMore
+	// counts the others.
+	WorldDirs     []string `json:"world_dirs,omitempty"`
+	WorldDirsMore int      `json:"world_dirs_more,omitempty"`
+	// WorldFiles are the regular files anyone may write to, outside a directory with the sticky bit that anyone may
+	// write to (/tmp, /var/tmp), at most MaxListed; WorldFilesMore counts the others.
+	WorldFiles     []string `json:"world_files,omitempty"`
+	WorldFilesMore int      `json:"world_files_more,omitempty"`
+	// OwnersRead says /etc/master.passwd and /etc/group were read, so the walk looked for Unowned: the files and
+	// directories whose owner is no account of the jail or whose group is no group of it ("/path (uid 1234)"), at
+	// most MaxListed; UnownedMore counts the others.
+	OwnersRead  bool     `json:"owners_read,omitempty"`
+	Unowned     []string `json:"unowned,omitempty"`
+	UnownedMore int      `json:"unowned_more,omitempty"`
 	// Modified are the programs and libraries of the base whose content differs from what pkg recorded, at most
 	// MaxListed; ModifiedMore counts the others, Verified the files compared. A file larger than MaxHashFile is
 	// listed as modified without being read (no base program is that large). NotCompared counts the files
@@ -86,6 +101,10 @@ const (
 	// MaxHashTotal is what one audit reads to compare checksums; the files after it are counted in NotCompared.
 	MaxHashTotal = 4 << 30
 )
+
+// HostVulnXML is the vulnerability database of the host's pkg (pkg audit -F writes it; the daily periodic run of the
+// host refreshes it). The audit reads it and never fetches it.
+const HostVulnXML = "/var/db/pkg/vuln.xml"
 
 // ShrcBlock starts the block of /root/.shrc that reads the JailOps prompt.
 const ShrcBlock = "# BEGIN jailops shell"

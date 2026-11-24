@@ -37,3 +37,5 @@ func systemForceUnmount(path string) error {
 	defer cancel()
 	return exec.CommandContext(ctx, "umount", "-f", path).Run()
 }
+
+func systemForceUnmountEntry(e mountEntry) error { return systemForceUnmount(e.mp) }

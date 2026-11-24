@@ -227,8 +227,10 @@ is audited.
 ## Devices
 
 A FreeBSD jail that is given no device mounts `/dev` with the stock jail ruleset (4): the basic and login nodes, and also
-`fuse` and `zfs` (so it has `/dev/zfs` and `/dev/fuse`: see `/etc/defaults/devfs.rules`). JailOps does not verify ruleset 4: an
-edit of `/etc/devfs.rules` changes every such jail. A jail that is given devices (`devfs.NAME.device`), and every Linux jail, mounts it with a private ruleset. The
+`fuse` and `zfs` (so it has `/dev/zfs` and `/dev/fuse`: see `/etc/defaults/devfs.rules`). An edit of `/etc/devfs.rules`
+that adds to ruleset 4 (or to 1 to 3, which every jail builds on) changes every such jail: `jailops doctor` compares the
+loaded sets with FreeBSD's and warns (`jail.devfs_ruleset`) with the extra rules, such as `bpf`, `pf` or `dri`, and the
+jails that get them, and fails when ruleset 4 is not loaded (it would hide nothing). A jail that is given devices (`devfs.NAME.device`), and every Linux jail, mounts it with a private ruleset. The
 ruleset is made of the stock sets that hide everything and unhide the basic and login nodes, then the paths of the
 allow-listed devices (`bpf`, `dri`, `fuse`, `pf`, `tap`, `tun`) or, for a Linux jail, the nodes of a Linux userland.
 Nothing else can be named: the device list is an allow-list, and the helper's `devfs` grammar refuses a bare `unhide`, a
@@ -236,12 +238,42 @@ path outside the list and a ruleset number below 100.
 
 A jail cannot send to the limited broadcast address (255.255.255.255): the anchor drops it, so a jail cannot reach a host
 service that listens on every address that way. Its neighbour discovery (NS and NA) goes only to link-local and
-solicited-node destinations, which are never forwarded off its link; ICMPv6 errors are passed.
+solicited-node destinations, which are never forwarded off its link. ICMPv6 errors into a jail are passed (path MTU
+discovery needs them); an error a jail sends goes with the state of the connection it is about, and any other is decided by
+its policies, so a jail whose policy denies everything sends no error to an address of its choosing.
 
 The kernel treats a ruleset number nobody loaded as an empty ruleset, and an empty ruleset hides nothing, so a jail
 started on it would see every device of the host, raw disks included. The helper therefore loads the ruleset in the
 prestart hook, before the jail is created, and **a jail whose ruleset is not in the kernel does not start**: the hook
 fails, with the stock ruleset missing or a rule refused as the reason. A jail's `/dev` holds no disk node.
+
+## The securelevel of a jail
+
+A FreeBSD jail runs at `kern.securelevel` 2, highly secure mode in `securelevel(7)`, unless it sets another level: JailOps
+writes `securelevel = 2;` into its `jail.conf` at every start, so a jail made by an earlier release gets it at its next
+start. No process in the jail can lower it, and a jail never runs below the host's level. At 2, root in the jail cannot:
+
+- turn off the system immutable and append-only flags (`schg`, `sappnd`);
+- open a disk for writing, mounted or not, nor `/dev/mem` and `/dev/kmem`, nor open `/dev/io`;
+- load or unload kernel modules;
+- move the clock by more than one second.
+
+A jail is refused most of this already: it has no `allow.chflags`, its devfs ruleset hides the disks and the memory
+devices, and root in a jail loads no module and sets no clock. The level keeps these refusals in place when one of the
+others is widened, a device grant or a raw `jail.conf` parameter, and it is inherited by any jail the jail makes.
+
+What JailOps does to a jail works the same at 2: the in-place upgrade and `jail base add` run `pkg -r` on the host, at
+the host's level; `jailops pkg install` and pkg inside the jail install ports packages, which carry no system flags;
+services start and stop; a jail with `zfs_delegation` manages its dataset. The base packages carry `schg` files and are
+not installed from inside a jail, at any level.
+
+`jailops jail show NAME` prints the level a jail runs at. A jail that needs a lower one sets it, and it applies at the
+next start:
+
+    jailops config set NAME securelevel 1        # 0 or 1; -1 is the host's level, 3 also freezes pf inside the jail
+    jailops create NAME --securelevel 1 ...
+
+A Linux jail sets none and has the host's level: its userland carries no system file flags for the level to protect.
 
 ## Roles and scopes of API users
 
@@ -251,9 +283,12 @@ Every identity (a user of the web console, an API token, a client certificate) h
   are also narrow roles for restores and for backup transport.
 - Scope: a non-empty list of projects, or `global`. **An empty list never means everything.** An identity with neither can
   call nothing except its own session routes. Only a global admin may grant `global`.
+- `jailops jail apply` runs a recipe in a running jail at the `operator` role: it does as root in the jail what an operator
+  may already do with `exec`, `cp` and `jailops pkg`, through the same helper operations, and the operation is audited. The
+  refusal of files under `/etc` and the other base directories is a rule against overwriting pkgbase files, not a boundary.
 - A request for an object of a project the caller may not use answers `not_found`, never `forbidden`, so that existence
   does not leak. A role that is too low is checked first and answers `forbidden`.
-- Dangerous parameters (raw jail parameters, host directories, device nodes, ZFS delegation, provisioning commands)
+- Dangerous parameters (raw jail parameters, host directories, device nodes, ZFS delegation)
   need `admin` or a global admin, are allow-listed by `priv.conf`, and are audited. Raw PF needs a global administrator
   (and `admin-raw-pf` for a rule that does not stand on a jail's link): pf text is the host administrator's.
 - The firewall of JailOps governs the jails and never opens the host: the anchor of a jail closes the host to it before the
@@ -442,12 +477,25 @@ edited with a profile, that newly attaches such a policy is refused for anyone e
 `fuse`).
 
 Every volume mount is `nosuid`, the one in `fstab` at the start and the live one made while the jail runs alike: a
-setuid file a jail user put on a volume does not run with its owner's rights. A live volume mount is checked after it
-lands. The check reads the mount table with `getfsstat(2)` and removes a stray mount
-with `unmount(2)`, so it executes nothing from a path a tenant could have covered, and it **fails closed**: if the table cannot be
-read, the mount that was asked for is undone and the request is refused. What is not closed yet is the race itself, between the
-path check and the mount (a tenant swapping a directory for a symbolic link): the mount is made by path, so the way to close it
-is to mount onto an opened directory, a change in the lifecycle code that is on the list for 1.0.
+setuid file a jail user put on a volume does not run with its owner's rights. A live volume mount is also `nocover`, and
+the helper refuses one without both options.
+
+FreeBSD has no mount through a file descriptor: `nmount(2)` takes the mount point as a path and follows every symbolic
+link in it. So a live volume mount keeps a short race that cannot be closed: between the helper's check of the path and
+the mount, root in the running jail can swap a directory of its own tree for a symbolic link. JailOps bounds it three
+ways:
+
+- `nocover` keeps the mount off the root of any other file system (the host's `/dev`, another volume, a dataset).
+- The kernel records where a mount really landed and from which directory. Right after the mount the helper reads the
+  mount table with `getfsstat(2)`. A mount on any other path, or on the right path from another source, is removed at
+  once by its file system ID (`unmount(2)` with `MNT_BYFSID`), which resolves no path, so no second swap can redirect the
+  undo. The check executes nothing a tenant could have covered.
+- The check **fails closed**: if the table cannot be read, the mount that was asked for is undone and the request is
+  refused.
+
+What remains is the window of one `mount(8)` call, in which a writable volume can sit on a plain host directory
+before it is removed. The race needs root in the jail and a live attach at the right moment; a volume attached while
+the jail is stopped is mounted by `jail(8)` at the start and is not exposed to it.
 
 ## The in-place upgrade of a jail
 

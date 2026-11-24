@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"jailops.net/jailops/internal/service"
+	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -556,12 +557,14 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, "")
 			return nil
 		}},
-		route{method: "POST", pattern: "/api/v1/jails/{name}/provision", h: func(c *rc) error {
-			var in api.ProvisionRequest
-			if err := c.decodeOptional(&in); err != nil {
+		route{method: "POST", pattern: "/api/v1/jails/{name}/apply", bulk: true, h: func(c *rc) error {
+			// a recipe carries its files: up to validate.RecipeTotalMax of text, a little more as JSON
+			c.r.Body = http.MaxBytesReader(c.w, c.r.Body, 2*validate.RecipeTotalMax+1<<20)
+			var in api.ApplyRequest
+			if err := c.decode(&in); err != nil {
 				return err
 			}
-			op, err := svc.ProvisionJail(c.r.Context(), c.pathArg("name"), in)
+			op, err := svc.ApplyJail(c.r.Context(), c.pathArg("name"), in)
 			if err != nil {
 				return err
 			}

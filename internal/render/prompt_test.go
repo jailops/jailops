@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -93,14 +94,33 @@ func TestEnvScript(t *testing.T) {
 	}
 }
 
+// The block sources every file of profile.d, in the order of the glob, and sources none of them when /etc/profile of
+// FreeBSD (which sets _loaded and reads the directory itself) is the reader.
+func TestPromptHookSourcesProfileD(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"10-alias.sh": "echo alias\n", "jailops-env.sh": "echo env\n", "notes.txt": "echo no\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	block := strings.ReplaceAll(promptBlock(), path.Dir(api.EnvFile), dir)
+	for _, tc := range []struct{ loaded, want string }{{"", "alias\nenv\n"}, {"/etc/profile", ""}} {
+		cmd := exec.Command("sh", "-c", `[ -z "$LOADED" ] || _loaded=$LOADED; `+block)
+		cmd.Env = []string{"PATH=/usr/bin:/bin", "LOADED=" + tc.loaded}
+		if out, err := cmd.CombinedOutput(); err != nil || string(out) != tc.want {
+			t.Errorf("_loaded=%q: %q %v, want %q", tc.loaded, out, err, tc.want)
+		}
+	}
+}
+
 func TestPromptHook(t *testing.T) {
-	got, err := PromptHookSet("", true)
+	got, err := PromptHookSet("")
 	if err != nil {
 		t.Fatal(err)
 	}
 	golden(t, "prompt_hook_empty", got)
 	existing := "# the administrator's own profile\nexport EDITOR=vi\nPS1='admin> '\n"
-	got, err = PromptHookSet(existing, true)
+	got, err = PromptHookSet(existing)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,26 +129,21 @@ func TestPromptHook(t *testing.T) {
 		t.Fatalf("the file's own lines must follow the block unchanged:\n%s", got)
 	}
 	// idempotent, one block only
-	again, err := PromptHookSet(got, true)
+	again, err := PromptHookSet(got)
 	if err != nil || again != got || strings.Count(again, "BEGIN jailops shell") != 1 {
 		t.Fatalf("%q %v", again, err)
 	}
 	// a block somewhere else moves to the top, the rest stays
-	moved, err := PromptHookSet(existing+promptBlock(true), true)
+	moved, err := PromptHookSet(existing + promptBlock())
 	if err != nil || moved != got {
 		t.Fatalf("%q %v", moved, err)
 	}
-	// without a prompt the block sources the variables only, and the file's own lines are untouched
-	none, err := PromptHookSet(got, false)
-	if err != nil || !strings.HasSuffix(none, existing) || !strings.Contains(none, api.EnvFile) || strings.Contains(none, api.PromptFile) {
-		t.Fatalf("%q %v", none, err)
-	}
 	// a block cut in half by a hand edit is left alone
 	broken := promptBegin + "\nwhatever\n"
-	if _, err := PromptHookSet(broken, true); err == nil {
+	if _, err := PromptHookSet(broken); err == nil {
 		t.Fatal("an unterminated block was accepted")
 	}
-	if _, err := PromptHookSet(promptBlock(true)+"x\n"+promptBlock(true), true); err == nil {
+	if _, err := PromptHookSet(promptBlock() + "x\n" + promptBlock()); err == nil {
 		t.Fatal("two blocks were accepted")
 	}
 }

@@ -56,7 +56,7 @@ func (s *Service) validateCreate(j *api.Jail) error {
 	}
 	if len(sp.Packages) > 0 {
 		return api.Errorf(api.CodeUnsupported, "installing packages at creation (spec.packages) is not implemented").
-			WithHint("declare them as provisioning steps: provision.packages, applied once at the first start ('jailops provision --help')")
+			WithHint("install them in the running jail with a recipe: 'jailops jail apply --help'")
 	}
 	if sp.Resources.Disk != "" && !sizeRe.MatchString(sp.Resources.Disk) {
 		return api.Errorf(api.CodeInvalid, "bad disk quota %q", sp.Resources.Disk)

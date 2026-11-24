@@ -6,11 +6,10 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-func TestUpdatesAndProvisionAgainstFake(t *testing.T) {
+func TestUpdatesAndApplyAgainstFake(t *testing.T) {
 	srv, c := newEnv(t)
 	seedBasics(srv)
 	spec := webSpec()
-	spec.Provision = &api.Provision{Packages: []string{"nginx"}, Services: api.ProvisionSvc{Enable: []string{"nginx"}}}
 	mustJail(t, c, "web", spec)
 	ctx := ctxT(t)
 
@@ -62,25 +61,20 @@ func TestUpdatesAndProvisionAgainstFake(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Provisioning runs once, again on request.
-	pop, err := c.Jails().Provision(ctx, "web", false)
+	// A recipe runs in a running jail; a dry run reports what would change.
+	recipe := api.Recipe{Steps: []api.RecipeStep{{Package: []string{"nginx"}}, {Run: []string{"/usr/bin/true"}}}}
+	pop, err := c.Jails().Apply(ctx, "web", api.ApplyRequest{Recipe: recipe, DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	pr, err := pop.Wait(ctx)
-	if err != nil || pr.ProvisionedAt.IsZero() || len(pr.Steps) != 2 {
+	if err != nil || !pr.DryRun || len(pr.Steps) != 2 || pr.Steps[0].Status != api.StepWouldChange || pr.Steps[1].Status != api.StepWouldExecute {
 		t.Fatalf("%+v %v", pr, err)
 	}
-	if j, _ := c.Jails().Get(ctx, "web"); j.Status.ProvisionedAt.IsZero() {
-		t.Fatal("not marked")
-	}
-	if _, err := c.Jails().Provision(ctx, "web", false); !api.IsCode(err, api.CodeAlreadyExists) {
-		t.Fatalf("%v", err)
-	}
-	if pop, err = c.Jails().Provision(ctx, "web", true); err != nil {
+	if pop, err = c.Jails().Apply(ctx, "web", api.ApplyRequest{Recipe: recipe}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pop.Wait(ctx); err != nil {
-		t.Fatal(err)
+	if pr, err = pop.Wait(ctx); err != nil || pr.Steps[0].Status != api.StepChanged || pr.Steps[1].Status != api.StepExecuted {
+		t.Fatalf("%+v %v", pr, err)
 	}
 }

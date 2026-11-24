@@ -11,6 +11,3 @@ spec:
   firewall: {policies: [web]}
   resources: {memory: 512M}
   expose: [{ports: ["80"]}]
-  provision:
-    packages: [nginx]
-    services: {enable: [nginx], start: [nginx]}

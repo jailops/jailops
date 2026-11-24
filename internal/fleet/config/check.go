@@ -549,7 +549,7 @@ func (f *Fleet) checkJail(o *Object, s api.JailSpec, add func(*Object, string, .
 		add(o, "spec.encrypted is reserved: native ZFS encryption of jails is not implemented and the daemon refuses it")
 	}
 	if len(s.Packages) > 0 {
-		add(o, "spec.packages is reserved and the daemon refuses it: install packages with spec.provision.packages")
+		add(o, "spec.packages is reserved and the daemon refuses it: install packages with `jailops jail apply` (a recipe with a package step)")
 	}
 	if s.Delegate {
 		warn(o, "zfs_delegation needs a global admin, and the host's priv.conf must allow it (admin-zfs-delegation): root in the jail then manages the dataset <container>/delegated outside JailOps' rules")

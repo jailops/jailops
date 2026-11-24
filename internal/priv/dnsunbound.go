@@ -76,10 +76,18 @@ func (l *Local) DNSUnbound(ctx context.Context, apply bool) (UnboundRes, error) 
 			dnsMu.Lock()
 			defer dnsMu.Unlock()
 			res.Control = l.removeOwnDefaultConf(ctx)
+			l.DropStaleResolverAddrs(ctx, false) // no sync of the names runs: the addresses of deleted networks come off here
 		}
 		return res, nil
 	}
 	res.Path, res.Base, res.Suffix = path, path == DefaultUnboundConf, l.cfg.DNSSuffix
+	defer func() {
+		// the names cannot be written: the pass below that keeps the addresses in step does not run, so at least the
+		// addresses of networks that are gone come off
+		if apply && !res.Enabled && isAdmin(ctx) {
+			l.DropStaleResolverAddrs(ctx, false)
+		}
+	}()
 	if _, err := os.Stat(filepath.Dir(path)); err != nil {
 		res.Reason = filepath.Dir(path) + " does not exist (the host resolver is not set up: local-unbound-setup)"
 		return res, nil
@@ -771,7 +779,14 @@ func (l *Local) syncResolverAddrs(ctx context.Context, nets []render.DNSNet) {
 			keep = append(keep, h) // try again at the next pass
 		}
 	}
+	l.writeResolverAddrs(keep)
+}
+
+func (l *Local) writeResolverAddrs(keep []string) {
 	slices.Sort(keep)
+	if keep == nil {
+		keep = []string{}
+	}
 	b, _ := json.Marshal(keep)
 	if cur, err := os.ReadFile(l.resolverAddrsFile()); err == nil && bytes.Equal(bytes.TrimSpace(cur), b) {
 		return
@@ -780,4 +795,77 @@ func (l *Local) syncResolverAddrs(ctx context.Context, nets []render.DNSNet) {
 		return
 	}
 	_ = os.WriteFile(l.resolverAddrsFile(), append(b, '\n'), 0o600)
+}
+
+// DropStaleResolverAddrs takes off the loopback the resolver addresses the helper put there (its record) that no stored
+// network accounts for any more, or every one of them with all set (the names of the jails are off: nothing listens
+// there). The helper calls it when it starts and when the names are off or cannot be written: the pass that takes
+// off the address of a deleted network otherwise runs only at the next sync of the names, and an address left on lo0
+// keeps a later network with the same subnet from being created.
+func (l *Local) DropStaleResolverAddrs(ctx context.Context, all bool) {
+	var had []string
+	if b, err := os.ReadFile(l.resolverAddrsFile()); err != nil || json.Unmarshal(b, &had) != nil || len(had) == 0 {
+		return
+	}
+	known := map[netip.Addr]bool{}
+	if !all {
+		ndir := filepath.Join(l.cfg.StateDir, "objects", string(api.KindNetwork))
+		names, err := l.listState(ndir)
+		if err != nil {
+			if _, serr := os.Stat(ndir); !errors.Is(serr, os.ErrNotExist) {
+				return // the networks cannot be read: take nothing off
+			}
+		}
+		for _, n := range names {
+			if !strings.HasSuffix(n, ".json") {
+				continue
+			}
+			b, err := l.readState(filepath.Join(ndir, n))
+			if err != nil {
+				return
+			}
+			var nw networkDoc
+			if json.Unmarshal(b, &nw) != nil {
+				return
+			}
+			if v6 := nw.Spec.IPv6; v6 != nil {
+				if p, err := netip.ParsePrefix(v6.Subnet); err == nil {
+					known[ipam.Resolver6(p)] = true
+				}
+			}
+		}
+	}
+	onLo := map[netip.Addr]bool{}
+	if list, err := l.Net().List(ctx); err == nil {
+		for _, i := range list {
+			if i.Name == "lo0" {
+				for _, p := range i.Inet6 {
+					onLo[p.Addr()] = true
+				}
+			}
+		}
+	} else {
+		return
+	}
+	var keep []string
+	for _, h := range had {
+		a, err := netip.ParseAddr(h)
+		if err != nil {
+			continue
+		}
+		if known[a] {
+			keep = append(keep, h)
+			continue
+		}
+		if !onLo[a] {
+			continue
+		}
+		if _, err := l.d.Runner.Run(ctx, run.Cmd{Name: "/sbin/ifconfig", Args: append([]string{"lo0"}, ifconfig.AddrWords(netip.PrefixFrom(a, 128), "-alias")...), Timeout: 10 * time.Second}); err != nil {
+			l.note("the resolver address of a removed network could not be taken off the loopback", "address", h, "err", err.Error())
+			keep = append(keep, h)
+			continue
+		}
+		l.note("the resolver address of a removed network was taken off the loopback", "address", h)
+	}
+	l.writeResolverAddrs(keep)
 }

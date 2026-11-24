@@ -55,10 +55,6 @@ type JailSpec struct {
 	// EnvFile). JailOps writes it into PromptFile in the jail's /usr/local; empty leaves the jail's files alone. A new jail whose shell is bash gets jails.prompt of
 	// jailopsd.yaml.
 	Prompt string `json:"prompt,omitempty"`
-	// Provision is a short, repeatable creation step: packages, files,
-	// services and commands, run once and then marked complete in the status
-	// (design 8.5). There is no agent in the jail and no convergence.
-	Provision *Provision `json:"provision,omitempty"`
 	// Profiles name reusable sets of keys and devices, merged in order; the
 	// jail's own keys and devices override them device by device and name by
 	// name.
@@ -79,6 +75,33 @@ type JailSpec struct {
 	// and sysvshm = new in jail.conf): separate from the host's and from every other jail's. Some servers
 	// (PostgreSQL) need it. Changing it takes effect at the next start.
 	SysVIPC bool `json:"sysvipc,omitempty"`
+	// SecureLevel is the jail's kern.securelevel (securelevel in jail.conf), MinSecureLevel to MaxSecureLevel. Nil is
+	// the default: DefaultSecureLevel for a FreeBSD jail, the host's level for a Linux jail (EffectiveSecureLevel). -1
+	// keeps the host's level: a jail never runs below it. Changing it takes effect at the next start.
+	SecureLevel *int `json:"securelevel,omitempty"`
+}
+
+// The securelevel of a jail (JailSpec.SecureLevel).
+const (
+	// DefaultSecureLevel is the securelevel of a FreeBSD jail that sets none: highly secure mode (securelevel(7)). Root
+	// in the jail cannot turn off the system immutable and append-only flags, open a disk for writing, load kernel
+	// modules or step the clock.
+	DefaultSecureLevel = 2
+	MinSecureLevel     = -1
+	MaxSecureLevel     = 3
+)
+
+// EffectiveSecureLevel is the securelevel JailOps writes into the configuration of a jail of family os whose spec
+// says set, and whether it writes one: without one the jail has the host's level. An explicit level wins, and -1 is
+// the host's; a FreeBSD jail that sets none gets DefaultSecureLevel and a Linux jail the host's.
+func EffectiveSecureLevel(os OS, set *int) (int, bool) {
+	switch {
+	case set != nil:
+		return *set, *set > MinSecureLevel
+	case os == OSLinux:
+		return MinSecureLevel, false
+	}
+	return DefaultSecureLevel, true
 }
 
 // UpdatePolicy controls updates (design 8.4). The zero value is manual:
@@ -271,9 +294,6 @@ type JailStatus struct {
 	Conditions []Condition `json:"conditions,omitempty"`
 	// ShellSetup says that the latest writing of the jail's prompt failed; nil when it did not.
 	ShellSetup *ShellSetupStatus `json:"shell_setup,omitempty"`
-	// ProvisionedAt is when the jail's provisioning last completed; zero when
-	// it has not run (or the jail has none).
-	ProvisionedAt time.Time `json:"provisioned_at,omitzero"`
 	// Warnings say what the spec asks for and the host does not do (rate
 	// limits are stored and not enforced yet).
 	Warnings []string `json:"warnings,omitempty"`
@@ -333,6 +353,10 @@ type JailRollback struct {
 	Snapshot string        `json:"snapshot,omitempty"`
 	// ConfirmDataLoss must be true for RollbackData and RollbackAll.
 	ConfirmDataLoss bool `json:"confirm_data_loss,omitempty"`
+	// DestroyNewer destroys the snapshots of the rolled-back datasets that were taken after the target (by a backup,
+	// a replication or by hand). Without it a rollback refuses while such snapshots exist and names them. It needs
+	// ConfirmDataLoss.
+	DestroyNewer bool `json:"destroy_newer,omitempty"`
 }
 
 // JailCopy is the body of POST /api/v1/jails/{name}: a copy of the jail, with its data, under a new name in the same
@@ -444,10 +468,11 @@ type JailDiskUsage struct {
 	DataBytes int64 `json:"data_bytes"`
 }
 
-// JailAudit is the body of GET /api/v1/jails/{name}/audit: a read-only look at a FreeBSD jail, running or stopped, in
-// two groups. The security checks look at what crosses the boundary of the jail or opens it (a link out of the root, a
-// second account with uid 0, an unknown package repository); the practice checks at what a jail on JailOps does better
-// (cron jitter, periodic reports to files). Nothing is changed and the jail is not stopped.
+// JailAudit is the body of GET /api/v1/jails/{name}/audit: a read-only look at a FreeBSD jail, running or stopped.
+// The checks it makes by default say what the jail shows (a link out of the root, a second account with uid 0, a
+// package with a known vulnerability) and what FreeBSD's documentation names as practice. With ?suggest=true the
+// suggestions follow (Suggestion set): what a jail on JailOps runs better with (cron jitter, periodic reports to
+// files), never counted in Critical or Warnings. Nothing is changed and the jail is not stopped.
 type JailAudit struct {
 	Jail    string `json:"jail"`
 	Running bool   `json:"running"`
@@ -459,13 +484,15 @@ type JailAudit struct {
 
 // JailAuditCheck is one check of an audit: its result, one line of what was found and, unless it passed, the fix.
 type JailAuditCheck struct {
-	// ID names the check (accounts.uid0, pkg.repositories, cron.jitter, ...).
+	// ID names the check (accounts.uid0, pkg.vulnerabilities, cron.jitter, ...).
 	ID string `json:"id"`
 	// Group is "security" or "practice".
 	Group  string          `json:"group"`
 	Result JailAuditResult `json:"result"`
 	Detail string          `json:"detail"`
 	Fix    string          `json:"fix,omitempty"`
+	// Suggestion marks a check that only ?suggest=true adds: a note, PASS or INFO.
+	Suggestion bool `json:"suggestion,omitempty"`
 }
 
 // JailAuditResult is the result of one audit check. Only a security check is ever critical.

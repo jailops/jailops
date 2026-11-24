@@ -570,6 +570,9 @@ func serve(o *options, cfg priv.Config, stderr io.Writer) int {
 	if _, err := l.ResumePending(context.Background()); err != nil {
 		aud.Note("priv.pending_resume_failed", "error", err.Error())
 	}
+	// The resolver address of a network deleted while the helper was not running (or before the next sync of the
+	// names) comes off the loopback, so a new network with the same subnet is not refused.
+	l.DropStaleResolverAddrs(context.Background(), false)
 	srv := priv.NewServer(l, priv.ServerOptions{Peers: peers, Audit: aud, Version: version})
 	ln, err := listen(o.socket, o.group, os.FileMode(mode), o.dev)
 	if err != nil {

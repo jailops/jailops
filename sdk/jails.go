@@ -99,13 +99,28 @@ func (j *JailClient) Base(ctx context.Context, name string) (api.JailBase, error
 	return b, err
 }
 
-// Audit runs the read-only audit of a FreeBSD jail, running or stopped: security checks and practice checks, each with
-// its result, what was found and the fix (extension jail_audit). Nothing in the jail is changed.
+// Audit runs the read-only audit of a FreeBSD jail, running or stopped: the default checks, each with its result, what
+// was found and the fix (extension jail_audit). Nothing in the jail is changed.
 func (j *JailClient) Audit(ctx context.Context, name string) (api.JailAudit, error) {
+	return j.AuditWith(ctx, name, AuditOptions{})
+}
+
+// AuditOptions are the options of AuditWith.
+type AuditOptions struct {
+	// Suggest adds the suggestions (suggest=true): notes on how the jail runs better, marked Suggestion.
+	Suggest bool
+}
+
+// AuditWith is Audit with options.
+func (j *JailClient) AuditWith(ctx context.Context, name string, o AuditOptions) (api.JailAudit, error) {
 	if err := j.c.need("jail_audit"); err != nil {
 		return api.JailAudit{}, err
 	}
-	a, _, err := get[api.JailAudit](ctx, j.c, j.r.item(name)+"/audit", nil)
+	var q url.Values
+	if o.Suggest {
+		q = url.Values{"suggest": {"true"}}
+	}
+	a, _, err := get[api.JailAudit](ctx, j.c, j.r.item(name)+"/audit", q)
 	return a, err
 }
 

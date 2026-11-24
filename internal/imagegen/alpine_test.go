@@ -225,7 +225,11 @@ func TestPkgBaseRepoConfText(t *testing.T) {
 		{"15.2-PRERELEASE", "pkg+https://pkg.FreeBSD.org/${ABI}/base_latest", latestKeys},
 		{"16.0-CURRENT", "pkg+https://pkg.FreeBSD.org/${ABI}/base_latest", latestKeys},
 	} {
-		b := &Build{M: w.M, Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: c.rel, Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}, Work: "/w"}
+		b := &Build{M: w.M, Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: c.rel, Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}, Work: "/w", Root: "/r"}
+		w.Files.HostKeys = []string{"pkg", "pkgbase-15", "pkgbase-16"}
+		if err := w.Files.SeedKeys(bg, b.Root); err != nil {
+			t.Fatal(err)
+		}
 		st := PkgBase{}.repoConf(b)
 		if err := st.Do(bg); err != nil {
 			t.Fatal(err)

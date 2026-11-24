@@ -163,7 +163,7 @@ export type OperationAction =
   | "jail.snapshot"
   | "jail.snapshot_delete"
   | "jail.import"
-  | "jail.provision"
+  | "jail.apply"
   | "jail.shell_setup"
   | "jail.restore"
   | "app.install"
@@ -190,7 +190,7 @@ export type OperationAction =
   | "update.apply"
   | "update.scheduled"
 
-export const OperationActionValues: readonly OperationAction[] = ['jail.create', 'jail.delete', 'jail.start', 'jail.stop', 'jail.restart', 'jail.configure', 'jail.copy', 'jail.upgrade', 'jail.rollback', 'jail.snapshot', 'jail.snapshot_delete', 'jail.import', 'jail.provision', 'jail.shell_setup', 'jail.restore', 'app.install', 'rename', 'volume.create', 'volume.delete', 'volume.snapshot', 'volume.snapshot_delete', 'volume.rollback', 'volume.attach', 'volume.detach', 'volume.lock', 'volume.unlock', 'volume.passphrase', 'volume.restore', 'image.build', 'image.upgrade', 'image.generation_delete', 'image.auto_upgrade', 'backup.run', 'backup.verify', 'backup.delete', 'update.check', 'update.apply', 'update.scheduled']
+export const OperationActionValues: readonly OperationAction[] = ['jail.create', 'jail.delete', 'jail.start', 'jail.stop', 'jail.restart', 'jail.configure', 'jail.copy', 'jail.upgrade', 'jail.rollback', 'jail.snapshot', 'jail.snapshot_delete', 'jail.import', 'jail.apply', 'jail.shell_setup', 'jail.restore', 'app.install', 'rename', 'volume.create', 'volume.delete', 'volume.snapshot', 'volume.snapshot_delete', 'volume.rollback', 'volume.attach', 'volume.detach', 'volume.lock', 'volume.unlock', 'volume.passphrase', 'volume.restore', 'image.build', 'image.upgrade', 'image.generation_delete', 'image.auto_upgrade', 'backup.run', 'backup.verify', 'backup.delete', 'update.check', 'update.apply', 'update.scheduled']
 
 export type OperationStatus =
   | "pending"
@@ -546,6 +546,24 @@ export interface AppSummary {
   error?: string
   source: AppSource
   overrides?: AppSource
+}
+
+export interface ApplyRequest {
+  recipe: Recipe
+  dry_run?: boolean
+}
+
+export interface ApplyResult {
+  jail: string
+  dry_run?: boolean
+  steps: ApplyStep[]
+}
+
+export interface ApplyStep {
+  kind: string
+  name: string
+  status: string
+  detail?: string
 }
 
 export interface AuditEntry {
@@ -1357,6 +1375,7 @@ export interface JailAuditCheck {
   result: JailAuditResult
   detail: string
   fix?: string
+  suggestion?: boolean
 }
 
 export interface JailBase {
@@ -1466,6 +1485,7 @@ export interface JailRollback {
   scope?: RollbackScope
   snapshot?: string
   confirm_data_loss?: boolean
+  destroy_newer?: boolean
 }
 
 export interface JailSnapshot {
@@ -1500,13 +1520,13 @@ export interface JailSpec {
   env?: Record<string, string>
   shell?: string
   prompt?: string
-  provision?: Provision
   profiles?: string[]
   devfs?: DevfsDevice[]
   expose?: ExposeEntry[]
   encrypted?: boolean
   zfs_delegation?: boolean
   sysvipc?: boolean
+  securelevel?: number
 }
 
 export interface JailStatus {
@@ -1519,7 +1539,6 @@ export interface JailStatus {
   drift?: string[]
   conditions?: Condition[]
   shell_setup?: ShellSetupStatus
-  provisioned_at?: string
   warnings?: string[]
   locked?: string[]
   disk_used_bytes?: number
@@ -1678,9 +1697,21 @@ export interface NDPNetwork {
   beyond?: boolean
 }
 
+export interface NDPReplyPath {
+  uplink: string
+  router: string
+  host_address: string
+  repeats: number
+  last_seen: string
+  router_mac: string
+  na_dst_mac?: string
+  misdirected?: boolean
+}
+
 export interface NDPStatus {
   uplinks: NDPUplink[]
   networks: NDPNetwork[]
+  reply_path?: NDPReplyPath[]
 }
 
 export interface NDPUplink {
@@ -1695,6 +1726,7 @@ export interface NDPUplink {
   floods: number
   inject_errors: number
   addrs?: NDPAddress[]
+  host_solicits?: number
 }
 
 export interface Network {
@@ -1879,36 +1911,6 @@ export interface ProjectStorage {
   quota?: string
 }
 
-export interface Provision {
-  packages?: string[]
-  files?: ProvisionFile[]
-  services?: ProvisionSvc
-  commands?: string[][]
-}
-
-export interface ProvisionFile {
-  source: string
-  destination: string
-  owner?: string
-  group?: string
-  mode?: string
-}
-
-export interface ProvisionRequest {
-  again?: boolean
-}
-
-export interface ProvisionResult {
-  jail: string
-  provisioned_at: string
-  steps: string[]
-}
-
-export interface ProvisionSvc {
-  enable?: string[]
-  start?: string[]
-}
-
 export interface ReachOut {
   internet: string
   host: string
@@ -1955,6 +1957,36 @@ export interface ReachRule {
   stage: string
   by: string
   pf?: string
+}
+
+export interface Recipe {
+  steps: RecipeStep[]
+}
+
+export interface RecipeFile {
+  path: string
+  source?: string
+  content?: string
+  mode?: string
+  owner?: string
+  group?: string
+}
+
+export interface RecipeService {
+  name: string
+  enabled?: boolean
+  running?: boolean
+}
+
+export interface RecipeStep {
+  package?: string[]
+  file?: RecipeFile
+  sysrc?: Record<string, string>
+  in?: string
+  service?: RecipeService
+  run?: string[]
+  creates?: string
+  unless?: string[]
 }
 
 export interface Remote {
@@ -2674,7 +2706,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "packages",
     "type": "list",
-    "description": "Cannot be set when a jail is created yet: a create that sets it is refused. Install packages with the provisioning packages step.",
+    "description": "Cannot be set when a jail is created yet: a create that sets it is refused. Install packages with `jailops jail apply` (a recipe with a package step).",
     "example": "nginx,curl",
     "restart_required": true,
     "profile": true,
@@ -2760,6 +2792,15 @@ export const configKeys: readonly ConfigKey[] = [
     "restart_required": false,
     "profile": true,
     "path": "resources.states"
+  },
+  {
+    "name": "securelevel",
+    "type": "int",
+    "description": "The jail's kern.securelevel, -1 to 3 (securelevel(7)). A FreeBSD jail that sets none runs at 2: root in the jail cannot turn off the system immutable and append-only flags, open a disk for writing, load kernel modules or step the clock. -1 is the host's level (a jail never runs below it); a Linux jail that sets none has the host's level.",
+    "example": "1",
+    "restart_required": true,
+    "profile": true,
+    "path": "securelevel"
   },
   {
     "name": "shell",
@@ -2891,4 +2932,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'firewall_applied', 'jail_export', 'jail_files', 'volume_from_dir', 'top', 'jail_audit', 'jail_base']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'jail_apply', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'firewall_applied', 'jail_export', 'jail_files', 'volume_from_dir', 'top', 'jail_audit', 'jail_base']

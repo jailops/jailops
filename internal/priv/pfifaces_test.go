@@ -148,3 +148,45 @@ func TestAnchorRulesMayStandOnATunnelOfJailOps(t *testing.T) {
 		}
 	}
 }
+
+// The shapes on the uplink are matched whole: a rule that starts like one the renderer writes and carries options of its
+// own (a route-to, a dup-to, a tag, an rdr-to, a label with text) is refused, and a translation names the subnet of a
+// stored network on its own uplink. (audit-network MEDIUM-6)
+func TestAnchorRulesOnTheUplinkAreMatchedWhole(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	nw, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: "lan", UUID: "aaaa-1111-2222"},
+		"spec": api.NetworkSpec{Uplink: "em0", IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.20", NAT: true}}})
+	mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "aaaa-1111-2222.json"), string(nw))
+	p := e.local.PF()
+	for _, rs := range []string{
+		"match out on em0 inet from 10.20.0.0/24 to ! 10.20.0.0/24 nat-to (em0:0)\n",
+		"match in on em0 inet proto udp from { <s_office>, 192.0.2.0/24 } to 198.51.100.7 port 5353 rdr-to 10.20.0.10 port 53\n",
+		"pass in quick on em0 inet proto tcp from any to 10.20.0.10 port 80 label \"jo-6018c33a9496\" keep state (if-bound)\n",
+	} {
+		if err := p.Load(ctx, "jailops/web/db", rs); err != nil {
+			t.Errorf("%q: %v", rs, err)
+		}
+	}
+	for _, rs := range []string{
+		"match out on em0 inet from 10.20.0.0/24 to ! 10.20.0.0/24 nat-to (em0:0) tag x\n",
+		"match out on em0 inet from 10.20.0.0/24 to ! 10.20.0.0/24 nat-to 192.0.2.66\n",
+		"match out on em0 inet from 10.99.0.0/24 to ! 10.99.0.0/24 nat-to (em0:0)\n", // no stored network
+		"match out on em0 inet from 10.20.0.0/24 to ! 10.20.0.0/24 nat-to (em1:0)\n", // another interface's address
+		"match out on em0 inet from any to any nat-to (em0:0)\n",
+		"match in on em0 inet proto tcp from any to (em0) port 8080 rdr-to 10.20.0.10 port 80 route-to (em0 192.0.2.1)\n",
+		"match in on em0 inet proto tcp from any to (em1) port 8080 rdr-to 10.20.0.10 port 80\n",
+		"match in on em0 inet proto tcp from any tag x to (em0) port 8080 rdr-to 10.20.0.10 port 80\n",
+		"pass in quick on em0 inet proto tcp from any to 10.20.0.10 port 80 dup-to (em0 192.0.2.66)\n",
+		"pass in quick on em0 inet proto tcp from any to 10.20.0.10 port 80 route-to (em0 192.0.2.66) keep state (if-bound)\n",
+		"pass in quick on em0 inet proto tcp from any to 10.20.0.10 port 80 rdr-to 10.20.0.11\n",
+		"pass in quick on em0 inet proto tcp from any to 10.20.0.10 port 80 tag x\n",
+		"pass in quick on em0 inet proto tcp from any to 10.20.0.10 port 80 label \"x on jo0123456789a0a\"\n",
+		"block drop in quick on em0 inet from urpf-failed to 10.20.0.10 set prio 7\n",
+	} {
+		err := p.Load(ctx, "jailops/web/db", rs)
+		if !api.IsCode(err, api.CodeForbidden) {
+			t.Errorf("%q was not refused: %v", rs, err)
+		}
+	}
+}

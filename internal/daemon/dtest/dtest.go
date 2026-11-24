@@ -512,6 +512,13 @@ func (e *Env) script() {
 				e.sysmu.Unlock()
 				var sb strings.Builder
 				sb.WriteString("FreeBSD-runtime\nFreeBSD-utilities\n")
+				e.sysmu.Lock()
+				for _, in := range e.Installed { // what the fake pkg installed into this root
+					if r, name, _ := strings.Cut(in, " "); r == root {
+						sb.WriteString(name + "\n")
+					}
+				}
+				e.sysmu.Unlock()
 				for _, l := range strings.Split(dry, "\n") {
 					if t := strings.TrimSpace(l); strings.Contains(t, " -> ") {
 						if name, _, ok := strings.Cut(t, ":"); ok {

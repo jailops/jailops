@@ -49,19 +49,26 @@ Linux jails are left alone: they keep the shell and prompt of their distribution
 | `/usr/local/etc/profile.d/jailops-env.sh` | JailOps, the same text in every jail | exports `JAILOPS_JAIL`, `JAILOPS_PROJECT` and `JAILOPS_HOST` from the jail's `env` parameters |
 | `/usr/local/etc/profile.d/jailops-prompt.sh` | JailOps, rewritten from the `prompt` key | sets `PS1` in an interactive sh or bash, nothing else |
 | `/root/.shrc` | you; JailOps keeps a marked block at its end | read by root's interactive sh; the block sources the prompt file |
-| `/usr/local/etc/bash.bashrc` | you; JailOps keeps a marked block at its top | read by every interactive bash that is not a login shell |
-| `/usr/local/etc/profile` | you; JailOps keeps a marked block at its top | read by every login bash (and by `sh -l` through `/etc/profile`) |
+| `/usr/local/etc/bash.bashrc` | you; JailOps keeps a marked block at its top | read by every interactive bash that is not a login shell; the block sources `profile.d/*.sh` |
+| `/usr/local/etc/profile` | you; JailOps keeps a marked block at its top | read by every login bash (and by `sh -l` through `/etc/profile`); the block sources `profile.d/*.sh` where `/etc/profile` does not |
 
 The FreeBSD `bash` package installs neither start-up file; it is built with its `SYSBASHRC` option, so bash reads
-`/usr/local/etc/bash.bashrc` and `/usr/local/etc/profile` (not `/etc/profile`). The marked block sources the variables
-first and then the prompt:
+`/usr/local/etc/bash.bashrc` and `/usr/local/etc/profile` (not `/etc/profile`). The marked block sources every file of
+`/usr/local/etc/profile.d` that ends in `.sh`, in the order of the glob: `jailops-env.sh` and `jailops-prompt.sh`, and what
+you or a recipe put there:
 
-    # BEGIN jailops shell: managed by JailOps (jailops config set JAIL prompt none keeps the variables and drops the prompt)
-    if [ -r /usr/local/etc/profile.d/jailops-env.sh ]; then . /usr/local/etc/profile.d/jailops-env.sh; fi
-    if [ -r /usr/local/etc/profile.d/jailops-prompt.sh ]; then . /usr/local/etc/profile.d/jailops-prompt.sh; fi
+    # BEGIN jailops shell: managed by JailOps (jailops jail shell-setup writes it)
+    if [ -z "${_loaded:-}" ]; then
+    	for _jailops_f in /usr/local/etc/profile.d/*.sh; do
+    		if [ -r "$_jailops_f" ]; then . "$_jailops_f"; fi
+    	done
+    	unset _jailops_f
+    fi
     # END jailops shell
 
-With `prompt: none` the prompt file and its line are gone and the variables script stays: the variables are useful without a prompt.
+FreeBSD's `/etc/profile` reads `/usr/local/etc/profile` and then `/usr/local/etc/profile.d/*.sh` for a login sh and sets
+`_loaded` while it does; the `if` makes the block read the directory only where nobody else does, so no file is sourced twice.
+With `prompt: none` the prompt file is gone and the variables script stays: the variables are useful without a prompt.
 
 Everything else in those two files is yours and stays as it is. The block is at the top, so your own lines come after it
 and win. A block you cut in half by hand is refused (the operation names the file), never guessed at.
@@ -71,6 +78,25 @@ are not affected. In sh the prompt applies through root's `/root/.shrc`: a login
 `~/.shrc` (through `ENV`), and FreeBSD's `/root/.shrc` sets `PS1` itself, so JailOps keeps its marked block at the
 **end** of that file, where it sources the prompt file last. A `PS1` of your own goes below that block. The other users of
 sh keep FreeBSD's prompt.
+
+## Files in profile.d
+
+Any file `/usr/local/etc/profile.d/NAME.sh` is read by the shells below. A recipe writes one with a `file` step
+([provisioning.md](provisioning.md#2-applying-a-recipe-to-a-jail)), for example an alias for every user:
+
+    - file: {path: /usr/local/etc/profile.d/50-alias.sh, content: "alias ll='ls -lAh'\n"}
+
+| Shell | Reads `profile.d/*.sh` |
+|---|---|
+| login `sh` (`sh -l`, a console login, `su -`) | yes, through FreeBSD's `/etc/profile` |
+| login `bash` | yes, through the block in `/usr/local/etc/profile` |
+| interactive `bash` that is not a login shell (a terminal inside a session, `su` without `-`, ssh without a login shell) | yes, through the block in `/usr/local/etc/bash.bashrc` |
+| interactive `sh` that is not a login shell | no: it reads only the file `ENV` names (`~/.shrc`), where JailOps sources the prompt file and nothing else |
+| scripts, `sh -c`, `bash -c` | no |
+
+The files are read in the order of the glob, so `jailops-prompt.sh` comes after `10-...` and before `z-...`; name a file that
+must change `PS1` after the prompt with a name that sorts later. Aliases and functions only matter in an interactive shell.
+A jail made before this release has the old block: `jailops jail shell-setup NAME` writes the new one.
 
 ## Where the jail is
 
@@ -180,7 +206,7 @@ choose per jail at creation; a profile may set both keys too.
 ## Existing jails
 
 A jail whose `shell` and `prompt` keys are empty is left alone: nothing changes on its own, not at a start and not at an
-upgrade. Ask for it:
+upgrade. Ask for it (it also gives a jail made before the hook of `profile.d` the new block):
 
     jailops jail shell-setup web
 

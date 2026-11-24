@@ -15,6 +15,3 @@ spec:
   boot: {autostart: true, priority: 30, depends: [app]}
   expose:
     - {ports: ["80", "443"], comment: web}
-  provision:
-    packages: [nginx]
-    services: {enable: [nginx], start: [nginx]}

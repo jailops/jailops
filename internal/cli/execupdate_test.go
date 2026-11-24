@@ -236,23 +236,30 @@ func containsApply(ms []string) bool {
 	return false
 }
 
-func TestProvision(t *testing.T) {
+func TestJailApply(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	spec := writeFile(t, h.dir, "p.yaml", "kind: Jail\nmetadata: {name: web}\nspec:\n  image: freebsd-15\n  storage: default\n  network: [{network: lan}]\n  provision:\n    packages: [nginx]\n    services: {enable: [nginx], start: [nginx]}\n    commands: [[echo, done]]\n", 0o644)
-	tr.ok("create", "-f", spec)
-	tr.ok("jail", "show", "web")
-	tr.do("", "provision", "web") // not running
+	tr.ok("create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
+	// the source of a file step is a file beside the recipe, read by the client
+	writeFile(t, h.dir, "nginx.conf", "worker_processes 1;\n", 0o644)
+	recipe := writeFile(t, h.dir, "recipe.yaml", "steps:\n  - package: [nginx]\n  - file: {path: /usr/local/etc/nginx/nginx.conf, source: nginx.conf, mode: \"0644\"}\n"+
+		"  - sysrc: {nginx_enable: \"YES\"}\n  - service: {name: nginx, enabled: true, running: true}\n  - run: [/usr/local/sbin/nginx, -t]\n"+
+		"  - run: [pw, useradd, deploy]\n    unless: [pw, usershow, deploy]\n", 0o644)
+	tr.do("", "jail", "apply", "web", "-f", recipe) // not running
 	tr.ok("start", "web")
-	tr.ok("provision", "web")
-	tr.ok("jail", "show", "web")
+	tr.ok("jail", "apply", "web", "-f", recipe)
+	tr.ok("jail", "apply", "web", "-f", h.dir) // a directory means DIR/recipe.yaml
+	tr.ok("--dry-run", "jail", "apply", "web", "-f", recipe)
+	tr.ok("jail", "apply", "web", "-f", recipe, "-o", "json")
+	tr.do("", "jail", "apply", "web")
+	tr.do("", "jail", "apply", "ghost", "-f", recipe)
+	// what the client refuses before it sends anything
+	tr.do("", "jail", "apply", "web", "-f", writeFile(t, h.dir, "far.yaml", "steps:\n  - file: {path: /usr/local/etc/x, source: ../x}\n", 0o644))
+	tr.do("", "jail", "apply", "web", "-f", writeFile(t, h.dir, "etc.yaml", "steps:\n  - file: {path: /etc/passwd, content: x}\n", 0o644))
+	tr.do("", "jail", "apply", "web", "-f", writeFile(t, h.dir, "typo.yaml", "steps:\n  - pakage: [nginx]\n", 0o644))
 	tr.do("", "provision", "web")
-	tr.do("", "provision", "web", "--again")
-	tr.ok("provision", "web", "--again", "-y")
-	tr.ok("--dry-run", "provision", "web")
-	tr.do("", "provision", "ghost")
-	tr.golden("provision")
+	tr.golden("jail_apply")
 }
 
 func TestShellSetupAndShellFlags(t *testing.T) {

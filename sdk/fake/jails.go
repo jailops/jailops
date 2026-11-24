@@ -164,9 +164,9 @@ func (s *Server) jailBase(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// jailAudit answers the audit of a FreeBSD jail: the fake has no root to read, so every check passes except the ones
-// a fresh jail answers with a note. A jail labelled audit=critical has a second account with uid 0, for tests of
-// the exit status.
+// jailAudit answers the audit of a FreeBSD jail: the fake has no root to read, so every check passes; suggest=true adds
+// two suggestions, one a note. A jail labelled audit=critical has a second account with uid 0, for tests of the exit
+// status.
 func (s *Server) jailAudit(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	_, j := s.jails.find(r, r.PathValue("name"))
@@ -183,12 +183,17 @@ func (s *Server) jailAudit(w http.ResponseWriter, r *http.Request) {
 		{ID: "root.links", Group: "security", Result: api.AuditPass, Detail: "no link out of the root on a path the base's packages own"},
 		{ID: "accounts.uid0", Group: "security", Result: api.AuditPass, Detail: "root and toor are the only accounts with uid 0"},
 		{ID: "pkg.base_repository", Group: "security", Result: api.AuditPass, Detail: "FreeBSD-base is disabled inside the jail; the host upgrades the base"},
-		{ID: "cron.jitter", Group: "practice", Result: api.AuditPass, Detail: `cron starts the jobs of root (periodic among them) at a random second: cron_flags="-J 60"`},
-		{ID: "disk.limit", Group: "practice", Result: api.AuditInfo, Detail: "the jail has no disk limit: it can fill its storage", Fix: "jailops config set " + j.Metadata.Name + " resources.disk=10G (a size that fits the jail)"},
+		{ID: "pkg.kmods_repository", Group: "security", Result: api.AuditPass, Detail: "FreeBSD-ports-kmods is disabled inside the jail"},
+		{ID: "pkg.vulnerabilities", Group: "security", Result: api.AuditPass, Detail: "pkg audit names no vulnerable package"},
 	}}
+	if r.URL.Query().Get("suggest") == "true" {
+		a.Checks = append(a.Checks,
+			api.JailAuditCheck{ID: "cron.jitter", Group: "practice", Result: api.AuditPass, Suggestion: true, Detail: `cron starts the jobs of root (periodic among them) at a random second: cron_flags="-J 60"`},
+			api.JailAuditCheck{ID: "disk.limit", Group: "practice", Result: api.AuditInfo, Suggestion: true, Detail: "the jail has no disk limit: it can fill its storage", Fix: "jailops config set " + j.Metadata.Name + " resources.disk=10G (a size that fits the jail)"})
+	}
 	if j.Metadata.Labels["audit"] == "critical" {
 		a.Checks[1] = api.JailAuditCheck{ID: "accounts.uid0", Group: "security", Result: api.AuditCritical, Detail: "accounts with uid 0 besides root and toor: backdoor",
-			Fix: "remove each account (pw userdel NAME in the jail) unless you made it on purpose, and find out how it got there"}
+			Fix: "remove each account (jailops exec " + j.Metadata.Name + " -- pw userdel NAME) unless you made it on purpose, and find out how it got there"}
 		a.Critical = 1
 	}
 	writeSync(w, 200, a)
@@ -428,6 +433,21 @@ func (s *Server) jailRollback(w http.ResponseWriter, r *http.Request) {
 				target = l[len(l)-1]
 			} else if target = s.findSnap(jk, rb.Snapshot); target == nil {
 				return reply{err: notFound("snapshot", rb.Snapshot)}
+			}
+			if !rb.DestroyNewer {
+				var later []string
+				seen := false
+				for _, sn := range l {
+					if seen {
+						later = append(later, sn.Metadata.Name)
+					}
+					seen = seen || sn == target
+				}
+				if len(later) > 0 {
+					return reply{err: api.Errorf(api.CodePreconditionFailed, "snapshots taken after %q exist: %s; a rollback to %q destroys them", target.Metadata.Name, strings.Join(later, ", "), target.Metadata.Name).
+						WithDetail("later_snapshots", strings.Join(later, ",")).
+						WithHint("pass --destroy-newer with --confirm-data-loss (destroy_newer and confirm_data_loss in the API)")}
+				}
 			}
 		default:
 			return reply{err: api.Errorf(api.CodeInvalid, "unknown rollback scope %q", rb.Scope)}

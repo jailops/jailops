@@ -832,7 +832,7 @@ updates:
   the natural batch.
 - `jailops-sync` can declare the policy. A policy is part of the jail spec and shows as drift when changed by hand.
 
-### 8.5 Shell and provisioning
+### 8.5 Shell and recipes
 
 - **Shell.** `jailops shell <jail>` runs `jexec` with a shell chosen in this order: `--shell`, the jail's `shell`
   setting (a path inside the jail, or the names `bash` and `sh`; a management setting that does not touch `/etc/passwd`), then `/bin/sh`. If the
@@ -846,32 +846,22 @@ updates:
   never installs a shell (bash is the administrator's `jailops pkg install NAME -- bash`). At the first start it
   writes the prompt (for sh through a marked block at the end of `/root/.shrc`):
   one file it owns, `/usr/local/etc/profile.d/jailops-prompt.sh` (a single-quoted `PS1` assignment of a text checked by
-  an allow-list, set only in an interactive bash), sourced from a marked block at the top of `/usr/local/etc/profile` and
-  `/usr/local/etc/bash.bashrc`, the two system start-up files of the FreeBSD bash package. All of it is in the jail's own
+  an allow-list, set only in an interactive bash), sourced, with every other `.sh` file of `/usr/local/etc/profile.d`, from a marked block at the top of `/usr/local/etc/profile` and
+  `/usr/local/etc/bash.bashrc`, the two system start-up files of the FreeBSD bash package (a login sh reads the directory through `/etc/profile`). All of it is in the jail's own
   root; a user's own `~/.bashrc` is read later and wins. A failure does not fail the
   start: it is the jail's `ShellSetup` condition. Existing jails change only when asked (`jailops jail shell-setup`, `POST
   /api/v1/jails/{name}/shell-setup`, operator, extension `jail_shell_setup`); a changed `prompt` is written at once into a
   running jail and at the next start of a stopped one, and `none` removes the file and the blocks. Linux jails are left
   alone. The host's prompt is not managed (a paste, [appliance.md](appliance.md#the-shell-prompt-of-the-host-not-a-module)).
-- **Provisioning** is a short, repeatable creation step, not a configuration-management system:
-
-```
-provision:
-  packages: [bash, nginx]
-  files:
-    - source: templates/nginx.conf
-      destination: /usr/local/etc/nginx/nginx.conf
-  services:
-    enable: [nginx]
-    start: [nginx]
-  commands: []          # run once, as argv, no shell
-```
-
-  JailOps knows how to do each step on FreeBSD (`pkg`, files with owner and mode, `sysrc`, `service`) so the
-  user does not write those commands. Alpine uses an OS provider that understands `apk` and the init of that
-  jail. Steps run in order, once per jail, and provisioning is then marked complete in the status; there is no
-  agent in the jail and no continuous convergence. Changing the declaration later does nothing until the user asks
-  for `jailops provision <jail> --again`. Files come from the project, never from arbitrary host paths.
+- **Recipes** ([provisioning.md](provisioning.md)) put something on top of a running FreeBSD jail: `jailops jail apply NAME -f
+  RECIPE` (`POST /api/v1/jails/{name}/apply`, operator, extension `jail_apply`) runs a list of steps in order: `package`, `file`,
+  `sysrc`, `service` and `run`. It is explicit and repeatable, not a configuration-management system: nothing runs at a
+  creation or a start, there is no agent in the jail and no convergence. Every step reads the state (the host's `pkg -j`, the jail
+  root through the helper's file operations, the rc.conf of the jail edited from the host, `service NAME status`) and changes only
+  what differs, and reports `changed`, `unchanged`, `skipped`, `executed` (a `run` without `creates` or `unless`) or `failed`. A
+  failed step stops the run and nothing is undone. `--dry-run` reads the state and runs none of the recipe's commands. The jail is
+  never stopped or restarted and its specification is not changed. The files of a recipe are sent with the request, read by the
+  client from the directory of the recipe.
 
 ### 8.6 High availability, deliberately last
 
@@ -1310,7 +1300,7 @@ Open:
 | Item | What is missing |
 |---|---|
 | Native ZFS encryption | **Encrypted volumes are built** ([storage.md](storage.md#encrypted-volumes)): a volume made `encrypted` is its own encryption root (aes-256-gcm, `keyformat=passphrase`, `keylocation=prompt`), with a passphrase a person types at creation and after every boot (`jailops volume unlock`, `lock`, `passphrase`; extension `volumes`; state `locked`, error codes `locked` and `bad_passphrase`; the boot skips a locked jail and starts it after its unlock; five wrong passphrases lock unlocks out for 30 seconds). The helper's five operations (`zfs.create_encrypted`, `zfs.load_key`, `zfs.unload_key`, `zfs.change_key` take the passphrase on the request stream, never in arguments; `zfs.feature_state` reads `feature@encryption` for doctor) and the raw copy (`zfs.replicate` with `raw`) are tested against the real allow-list with stand-ins for `zfs`; the service, the lifecycle (an in-memory model of keys), the CLI and the console against fakes. UNVERIFIED on FreeBSD: that `zfs create`, `load-key` and `change-key` read one line from a stdin that is not a terminal, `zfs load-key -n` with the key loaded, the mapped error texts, a raw receive of an encryption root with `-o keylocation=prompt`, snapshots and rollbacks of a locked volume (the `encrypted-volume` block of `scripts/ci-freebsd-e2e.sh`). Not implemented: whole encrypted jails and storages (`spec.encrypted` / `storage.spec.encrypted` answer `unsupported` with the manual alternative in the hint), key files and unattended unlocks, encrypting an existing volume |
-| Packages at creation (`--package`, `spec.packages`) | Not implemented: the flag was removed; the field answers `unsupported` ("installing packages at creation (spec.packages) is not implemented"). Use the provisioning `packages` step (8.5), which runs once at the first start |
+| Packages at creation (`--package`, `spec.packages`) | Not implemented: the flag was removed; the field answers `unsupported` ("installing packages at creation (spec.packages) is not implemented"). Install them in the running jail with a recipe (`jailops jail apply`, 8.5) |
 | Jail freeze | Removed. FreeBSD has no jail freeze; the `freeze` action no longer exists in the SDK, the fake or the service (an unknown action answers `invalid`) |
 | Volumes of an existing jail | Built: `volume attach` and `volume detach`, `jailops config` on `volumes.<name>` keys, `jailops edit` and a file attach and detach volumes of an existing jail, also while it runs (a nullfs mount made or taken off at once; a detach of a mount in use is `busy`, nothing changes) ([storage.md](storage.md)) |
 | A new FreeBSD release in place | `jailops jail upgrade NAME --release` is built; the order of operations and the kernel compatibility of 15.1 to 15.2 with a real 15.2 image, and of 15.x to 16.0, are still to run on FreeBSD ([lifecycle.md](lifecycle.md#35-a-freebsd-jail)) |
@@ -1346,7 +1336,7 @@ Open:
 | IPv6 into a jail from the internet over a routed prefix | The test host has no IPv6 route to it |
 | Providers that filter by MAC address or limit neighbor discovery; hundreds of proxied addresses | Not tried |
 | Fleet examples on a real host | `examples/` are applied to in-memory hosts and checked with the daemon's validators; no example has been applied to a real host. `build: true` (first image build through `jailops-sync`) and an IPv6 network created by sync are fake-tested only |
-| `examples/provisioning/bootstrap.sh`, `nuageinit` user-data | Syntax-checked; not run on a fresh VM or a cloud provider. Provisioning `pkg install` inside a pkgbase jail is unverified, and the fixed order packages, files, services, commands means a private pkg repository must be installed with commands |
+| `examples/provisioning/bootstrap.sh`, `nuageinit` user-data | Syntax-checked; not run on a fresh VM or a cloud provider. `jailops jail apply` on a real jail is checked by hand, not by CI |
 | Unix socket identity (root = global admin, other peers anonymous) | Tested in process with fabricated peer credentials and a real socket as a non-root user. Not yet run on FreeBSD: the uid that `LOCAL_PEERCRED` reports for `sudo jailops ...`, for a non-root user, and for an ssh-forwarded socket; `temp/verify-identity.sh` is the prepared check |
 | Appliance mode, module 1 (identity) | Built and tested against real files in temporary directories, the helper's rules over its socket and fake commands; never run on FreeBSD. Open: `sysrc -f /etc/rc.conf` on a stock file, `service ntpd onestop` when ntpd is not running, the `ntpq -pn` output on 15.1, `hostname(1)`, and a restore putting back `resolv.conf` byte for byte, the block of `ntp.conf` and the module's three `rc.conf` variables (`sysrc -x` for one that was not set). `scripts/ci-freebsd-e2e.sh` has the block, off unless `JAILOPS_E2E_HOST=1` (it changes the host's name and resolvers). `resolvconf(8)` on DHCP hosts rewrites `resolv.conf` (reported as drift); `rc.conf.local` is not read ([appliance.md](appliance.md)) |
 | Appliance mode, module 2 (host firewall) and commit confirmed | Built and tested with a fake `pfctl`, real files in temporary directories, the helper's rules over its socket and an injected clock and timer; never run on FreeBSD. Open: the rendered `pf.conf` with the real `pfctl` (`(self)`, `set state-policy if-bound`, the ICMPv6 lists), `pfctl -s info` reading, a host whose pf was disabled before the first apply, IPv6 sources from a real client, and the boot order of the rc.d script `jailops_revert` (`BEFORE: netif pf jailops_priv`; checked as header text only) with a real reboot while a change is pending. `scripts/ci-freebsd-e2e.sh` has the block, off unless `JAILOPS_E2E_HOSTFW=1` ([appliance.md](appliance.md)) |
@@ -1382,7 +1372,7 @@ proxy and the amd64 clean-install run on amd64). Everything not listed here is u
 
 Design consequences of prototype 2:
 
-- Image building copies the host's `/usr/share/keys` into the new root before the first `pkg -r` call, derives the repository URL from the release of the image (`base_release_<minor>` for a RELEASE, `base_latest` otherwise) and the ABI from that release too (`FreeBSD:<major>:<arch>`), not from the host's pkg. A RELEASE build checks the version of `FreeBSD-runtime` against the release (step `verify-release`) and fails when the packages are of another one.
+- Image building copies the host's `/usr/share/keys` into the new root before the first `pkg -r` call, derives the repository URL from the release of the image (`base_release_<minor>` for a RELEASE, `base_latest` otherwise) and the ABI from that release too (`FreeBSD:<major>:<arch>`), not from the host's pkg. Without `--keys` the key directory is that of the host's own `FreeBSD-base` repository (`/etc/pkg/FreeBSD.conf`, then `/usr/local/etc/pkg/repos/FreeBSD.conf`) when it is of the same kind (`base_release` or `base_latest`; a URL that names neither counts as the kind of the image's release), then `pkgbase-${VERSION_MAJOR}` and `pkg` (for `base_latest`: `pkg` first), the first one the host ships; none fails the build with the directories tried (16.0-CURRENT ships `pkg` and no `pkgbase-16`). A RELEASE build checks the version of `FreeBSD-runtime` against the release (step `verify-release`) and fails when the packages are of another one.
 
 Design consequences of prototype 8:
 
@@ -1618,7 +1608,7 @@ update` and `apt-get install` work, and the jail has v4 and v6 connectivity. Wha
   generic stream operations (`zfs.send`, `zfs.receive`) keep their old path and are not used by anything that moves
   large data. UNVERIFIED: why that path is slow on the real host.
 
-Not done for Debian: package provisioning runs `apk` only; an upgrade of a debootstrap generation is refused (build a
+Not done for Debian: an upgrade of a debootstrap generation is refused (build a
 new generation). Linux jails look after their own packages: JailOps does not update them.
 
 ### 18.8 Sealed secrets for jails
@@ -1631,7 +1621,7 @@ identity in `<data_dir>/secrets.key` (mode 0600) on first start and publishes th
 host's key, bad base64). The API returns the ciphertext, never the plaintext; the daemon opens it only when it starts a
 process, and the plaintext lives in the argument list of that call only. `jailops-sync secrets add-hosts` reads the
 recipients from the hosts and lists them in `secrets/recipients.txt`. Services started by the jail's own rc scripts do
-not get the environment (there is no agent in the jail); for those, put the value in a file through provisioning.
+not get the environment (there is no agent in the jail); for those, put the value in a file with a recipe (`jailops jail apply`).
 
 ### 18.9 Where pf sees a jail's traffic
 
@@ -1940,14 +1930,12 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
   layer. The key routes are global-admin only; the recovery key is in the creation reply once and nowhere else.
   `POST /api/v1/backups/run` and `/verify` are operations. A restore names the project it goes into (there is no
   default), is admitted like a new jail, and the adopt step writes `spec.json` and `bundle.json` itself.
-- **Updates and provisioning (8.4, 8.5).** Off for every jail until `update.mode` is set. Updates are for FreeBSD jails (a Linux
+- **Updates (8.4).** Off for every jail until `update.mode` is set. Updates are for FreeBSD jails (a Linux
   jail looks after its own packages). A check runs `pkg update` and `pkg upgrade -n` for the jail, and for a running
   jail pkg's dry run of its base packages; apply takes one atomic snapshot, updates, health-checks and records the
   result. A failed update is **not** rolled back by itself: the way back is `jail rollback --scope all` to the
   recorded snapshot with the jail stopped, which discards what the jail wrote since. The record says so. The schedule is evaluated by the
-  daemon (`updates.tick`); a jail that is busy is tried again at the next tick. Provisioning files come from
-  `<state_dir>/project-files/<project>/` (a symlink that leaves it is refused), run in the declared order, once per
-  jail, at the first start or with `provision --again`. The history and the provisioned marker are files below the
+  daemon (`updates.tick`); a jail that is busy is tried again at the next tick. The history is a file below the
   state directory. UNVERIFIED: the exact output of the dry runs and every command as run through `jexec`.
 - **Authentication hardening.** A TOTP step is accepted once: the read of the last accepted step, the validation and
   the write are one critical section. Verifying a secret for a signed-in user (current password, TOTP confirmation)

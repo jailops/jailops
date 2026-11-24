@@ -462,10 +462,20 @@ func (g runGuard) Run(ctx context.Context, c run.Cmd) (run.Result, error) {
 		c.Env = rule.Env
 	}
 	if rule.Name == "mount" && len(argv) > 1 {
+		var sources []string
+		if len(argv) > 3 && argv[2] == "nullfs" {
+			// the source as asked and as it resolves now (a directory of the host may sit behind a link of the host's
+			// own, such as /home): a mount from anything else went through a link swapped in meanwhile
+			src := argv[len(argv)-2]
+			sources = []string{src}
+			if r, err := filepath.EvalSymlinks(src); err == nil && r != src {
+				sources = append(sources, r)
+			}
+		}
 		before := g.l.mountPoints(ctx)
 		res, err := g.l.d.Runner.Run(ctx, c)
 		if err == nil {
-			err = g.l.checkMountLanded(ctx, before, argv[len(argv)-1])
+			err = g.l.checkMountLanded(ctx, before, argv[len(argv)-1], sources...)
 		}
 		return res, err
 	}

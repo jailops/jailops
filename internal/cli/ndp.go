@@ -29,6 +29,8 @@ type ndpView struct {
 	LastAnswer   *time.Time       `json:"last_answer,omitempty"`
 	LastAnnounce *time.Time       `json:"last_announce,omitempty"`
 	Addrs        []api.NDPAddress `json:"addrs,omitempty"`
+	// ReplyPath are the routers on the uplink that asked for an address of the host itself repeatedly.
+	ReplyPath []api.NDPReplyPath `json:"reply_path,omitempty"`
 }
 
 var toggleLong = map[bool]string{
@@ -72,7 +74,11 @@ answered, when the last question, answer and announcement were, and a table of t
 a running jail: how often each was asked, answered and dropped, and what happened to the last question.
 
 A jail without IPv6 outside is the first thing to look at here. An address with questions seen and none answered shows
-why in the last column; an address the router never asked for does not appear.`,
+why in the last column; an address the router never asked for does not appear.
+
+A "Host address" line names a router that asked for an address of the host itself again and again, with where the host
+sent its answer; an answer that went to another MAC than the router's never reached it (jailops doctor,
+network.nd_reply_path, says how to fix it).`,
 		Use:               "status NETWORK",
 		Short:             "Show what the proxy of a network answered",
 		Example:           "jailops network ndp-proxy status web\njailops network ndp-proxy status web -o json",
@@ -207,6 +213,11 @@ func (a *app) ndpStatus(cmd *cobra.Command, d *kindDesc[api.Network], name strin
 			}
 		}
 		sort.Slice(v.Addrs, func(i, j int) bool { return v.Addrs[i].Address < v.Addrs[j].Address })
+		for _, rp := range st.ReplyPath {
+			if rp.Uplink == n.Spec.Uplink {
+				v.ReplyPath = append(v.ReplyPath, rp)
+			}
+		}
 	}
 	switch a.format {
 	case fmtJSON, fmtYAML:
@@ -244,6 +255,18 @@ func (a *app) ndpStatus(cmd *cobra.Command, d *kindDesc[api.Network], name strin
 	fprintf(w, "Answers for:  %d addresses of %s%s\n", v.Answers, v.Range, more)
 	fprintf(w, "Questions:    %d seen, %d answered, %d dropped\n", v.Seen, v.Answered, v.Dropped)
 	fprintf(w, "Last question %s, last answer %s, last announcement %s\n", ago(v.LastSeen), ago(v.LastAnswer), ago(v.LastAnnounce))
+	for _, rp := range v.ReplyPath {
+		to := "no answer seen"
+		if rp.NADstMAC != "" {
+			to = "answered to " + rp.NADstMAC
+		}
+		verdict := ""
+		if rp.Misdirected {
+			verdict = ": not the router's MAC, see jailops doctor (network.nd_reply_path)"
+		}
+		fprintf(w, "Host address: %s asked %d time(s) again by %s (%s), %s ago; %s%s\n", rp.HostAddress, rp.Repeats, rp.Router, rp.RouterMAC,
+			age(now, rp.LastSeen), to, verdict)
+	}
 	if len(v.Addrs) == 0 {
 		fprintln(w, "\nNo address has been asked for yet.")
 		return nil

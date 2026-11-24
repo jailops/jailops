@@ -50,3 +50,20 @@ func TestProxySubnetMayHoldTheResolverAddressOnTheLoopback(t *testing.T) {
 		t.Fatalf("another address of the host inside the subnet must be refused: %v", err)
 	}
 }
+
+// The resolver address a deleted network with the same subnet left on the loopback does not refuse a routed network:
+// it is the address the new network holds there itself. Another address of the subnet on the host still does.
+func TestRoutedSubnetMayFindItsResolverAddressOnTheLoopback(t *testing.T) {
+	s := newSvc(t)
+	f := ifconfig.NewFake(ifconfig.Options{})
+	f.AddIface(ifconfig.Iface{Name: "lo0", Groups: []string{"lo"}, Flags: []string{"UP", "LOOPBACK"}, Inet6: []netip.Prefix{netip.MustParsePrefix("fd91:1::1/128")}})
+	s.d.Net = f
+	spec := api.NetworkSpec{IPv6: &api.IPv6Net{Subnet: "fd91:1::/64"}}
+	if err := s.checkNetworkHost(bg, spec); err != nil {
+		t.Fatalf("the left resolver address must not refuse the subnet: %v", err)
+	}
+	f.AddIface(ifconfig.Iface{Name: "lo1", Groups: []string{"lo"}, Flags: []string{"UP", "LOOPBACK"}, Inet6: []netip.Prefix{netip.MustParsePrefix("fd91:1::5/128")}})
+	if err := s.checkNetworkHost(bg, spec); err == nil || !strings.Contains(err.Error(), "overlaps fd91:1::5/128") {
+		t.Fatalf("another address of the subnet must be refused: %v", err)
+	}
+}

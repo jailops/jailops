@@ -148,16 +148,6 @@ func (s *Service) RenameProject(ctx context.Context, name string, o RenameOption
 					Change: api.RenameChange{Kind: api.RenameAnchor, Object: "PF anchor " + render.ProjectAnchor(name), Detail: "loaded as " + render.ProjectAnchor(to)}})
 			}
 		}
-		if s.d.StateDir != "" || s.d.ProjectFilesDir != "" {
-			from, dst := s.projectFilesDir(name), s.projectFilesDir(to)
-			if _, err := os.Stat(from); err == nil {
-				if _, err := os.Stat(dst); err == nil {
-					return nil, api.Errorf(api.CodeAlreadyExists, "%s exists", dst).WithHint("remove the provisioning files left by an earlier project of that name")
-				}
-				p.add(renameStep{Op: "dir", From: from, To: dst,
-					Change: api.RenameChange{Kind: api.RenameFile, Object: "provisioning files of project " + name, Detail: from + " -> " + dst}})
-			}
-		}
 		refs, err := s.d.DB.FindProjectRefs(ctx, name)
 		if err != nil {
 			return nil, internal(err)

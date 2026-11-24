@@ -146,8 +146,7 @@ func (d DevdConf) On() bool {
 type UpdatesConf struct {
 	// Tick is how often schedules are evaluated (default 1m).
 	Tick Duration `yaml:"tick"`
-	// ProjectFilesDir holds the provisioning files, one directory per project
-	// (default <state_dir>/project-files).
+	// ProjectFilesDir is not used; the key stays so that a configuration file that has it still loads.
 	ProjectFilesDir string `yaml:"project_files_dir"`
 }
 
