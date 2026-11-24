@@ -1,4 +1,8 @@
-# BEGIN jailops shell: managed by JailOps (jailops config set JAIL prompt none keeps the variables and drops the prompt)
-if [ -r /usr/local/etc/profile.d/jailops-env.sh ]; then . /usr/local/etc/profile.d/jailops-env.sh; fi
-if [ -r /usr/local/etc/profile.d/jailops-prompt.sh ]; then . /usr/local/etc/profile.d/jailops-prompt.sh; fi
+# BEGIN jailops shell: managed by JailOps (jailops jail shell-setup writes it)
+if [ -z "${_loaded:-}" ]; then
+	for _jailops_f in /usr/local/etc/profile.d/*.sh; do
+		if [ -r "$_jailops_f" ]; then . "$_jailops_f"; fi
+	done
+	unset _jailops_f
+fi
 # END jailops shell

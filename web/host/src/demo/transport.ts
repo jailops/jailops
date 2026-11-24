@@ -76,8 +76,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     cert: dc.certState(),
   }
   for (const j of db.jails) {
-    j.spec.provision = d2.provisionSpec(j.metadata.name)
-    j.status.provisioned_at = d2.provisionedAt(j.metadata.name)
     if (j.metadata.name === 'web' && (j.metadata.project ?? '') === 'web') j.spec.notes = d.webNotes
     if (j.metadata.name === 'web') j.spec.update = { mode: 'notify', schedule: '0 4 * * *', packages: true, os: true, reboot: 'manual' }
     if (j.metadata.name === 'db') j.spec.update = { mode: 'managed', schedule: '0 3 * * 0', packages: true, os: true, reboot: 'manual' }
@@ -1442,10 +1440,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           if (r === 'missing') return fail(404, { code: 'not_found', message: `jail "${name}" has no log file "${file}"`, hint: `list them with GET /api/v1/jails/${name}/logs` })
           if (r === 'compressed') return fail(400, { code: 'invalid', message: `${file} is not readable (compressed)`, hint: 'read the plain rotated copies, or the file from inside the jail' })
           return ok(r)
-        }
-        if (seg[2] === 'provision' && m === 'POST') {
-          if (j.status.provisioned_at && !body.again) return fail(409, { code: 'already_exists', message: 'Provisioning has run before.', hint: 'Use again to run it again.' })
-          return startOp(`Provision ${name}`, { jails: [src] }, 1500, () => { j.status.provisioned_at = new Date().toISOString() }, { jail: name, provisioned_at: new Date().toISOString(), steps: ['packages', 'files', 'services'] })
         }
         if (seg[2] === 'shell-setup' && m === 'POST') {
           if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `jail "${name}" is not running; the prompt is written inside it`, hint: 'start it first' })

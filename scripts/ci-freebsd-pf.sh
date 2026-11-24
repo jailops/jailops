@@ -479,12 +479,13 @@ done
 expect deny "a reaches a port of the host that no rule names (the host is closed to jails)" sh -c "jexec pfa_a nc -z -w2 $H4 22"
 expect allow "a pings the host (ping stays open)" icmp pfa:a "$H4"
 
-say "phase 0c: the anchors carry the ICMPv6 that must never be blocked (path MTU discovery) and the neighbour discovery rules"
+say "phase 0c: the anchors carry the ICMPv6 that must never be blocked into a jail (path MTU discovery) and the neighbour discovery rules"
 PRE=$(snapshot)
 # (Not automated: the packet-too-big itself. The host's pf refragments what it forwards instead of answering with the error, so
 # an ordinary echo does not produce one; it was checked with a forged error, see docs/networking-ipv6.md.)
 anchor_has() { pfctl -a jailops/pfa/a -sr 2>/dev/null | grep -q "$1"; }
-expect allow "a's anchor passes packet-too-big in both directions" anchor_has "icmp6-type toobig"
+expect allow "a's anchor passes packet-too-big into the jail" anchor_has "pass out quick on [^ ]* inet6 proto ipv6-icmp all icmp6-type toobig"
+expect deny "a's anchor has no pass of its own for the errors a sends (they go with a state or by its policies)" anchor_has "pass in quick on [^ ]* inet6 proto ipv6-icmp all icmp6-type toobig"
 expect allow "a's anchor blocks router advertisements from the jail" anchor_has "block drop in quick on .* icmp6-type routeradv"
 expect deny "a's anchor does not allow all of fe80::/10 as source" anchor_has "from fe80::/10"
 expect deny "a's anchor lets :: send anything but a neighbour solicitation to a solicited-node group" anchor_has "from :: to ff02::/16"

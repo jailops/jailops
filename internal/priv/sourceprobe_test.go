@@ -172,8 +172,8 @@ func TestMountRuleTakesAHostDirectorySourceForAnAdministrator(t *testing.T) {
 	}
 	admin, plain := WithAdmin(context.Background(), "root"), context.Background()
 	for _, a := range [][]string{
-		{"mount", "-t", "nullfs", share, target},
-		{"mount", "-t", "nullfs", "-o", "ro", share, target},
+		{"mount", "-t", "nullfs", "-o", "nosuid,nocover", share, target},
+		{"mount", "-t", "nullfs", "-o", "ro,nosuid,nocover", share, target},
 	} {
 		if err := check(admin, a...); err != nil {
 			t.Errorf("%q: %v", a, err)

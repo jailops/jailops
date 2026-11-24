@@ -339,7 +339,7 @@ func buildRegistry() []ckey {
 	str("update.healthcheck", "update.healthcheck", "Command run in the jail after an update.", "/usr/local/bin/check", false, true,
 		func(s *JailSpec) *string { return &s.Update.Healthcheck }, nil)
 	add(ckey{ConfigKey: ConfigKey{Name: "shell", Type: "string", Example: "bash", Profile: true, Path: "shell",
-		Description: "Shell that `jailops shell` and the console start: bash, sh or a path inside the jail (/bin/sh when empty). New FreeBSD jails get bash. A management setting; /etc/passwd is not touched. `jailops jail shell-setup` installs bash when it is missing."},
+		Description: "Preferred shell of `jailops shell` and the console: bash, sh or a path inside the jail (/bin/sh when empty). JailOps never installs it: a shell that is not installed in the jail is an error until it is (`jailops pkg install NAME -- bash`). A management setting; /etc/passwd is not touched."},
 		get: func(s *JailSpec, _ string) (string, bool) { return s.Shell, s.Shell != "" },
 		set: func(s *JailSpec, _, v string) error {
 			v = ShellPath(v)
@@ -353,7 +353,7 @@ func buildRegistry() []ckey {
 	str("prompt", "prompt", "Bash prompt of a FreeBSD jail, for every user: default (user@jail in colour, then in grey [project/host], then the directory), short (the same without the grey tag), none (no prompt, the variables stay), or a PS1 text such as \\u@\\h [{project}/{host}]:\\w\\$ with bash's escapes (no ', ` or $ other than \\$: nothing in it runs; \\e or \\033 start a colour) and the words {jail}, {project} and {host}, which read the variables JAILOPS_JAIL, JAILOPS_PROJECT and JAILOPS_HOST that every interactive bash of the jail has. A user's own ~/.bashrc wins. Written into "+PromptFile+" at once in a running jail, else at its next start.", "default", false, true,
 		func(s *JailSpec) *string { return &s.Prompt }, CheckPrompt)
 	add(ckey{ConfigKey: ConfigKey{Name: "update.mode", Type: "enum", Values: []string{"manual", "notify", "managed"}, Profile: true, Path: "update.mode",
-		Description: "manual: nothing happens unless you run it. notify: check on the schedule and report. managed: check and apply on the schedule. Off (manual) by default.", Example: "notify"},
+		Description: "manual: nothing happens unless you run it. notify: check on the schedule and report. managed: check and apply on the schedule. Off (manual) by default. FreeBSD jails only: Linux jails look after their own packages.", Example: "notify"},
 		get: func(s *JailSpec, _ string) (string, bool) { return string(s.Update.Mode), s.Update.Mode != "" },
 		set: func(s *JailSpec, _, v string) error {
 			switch UpdateMode(v) {
@@ -390,6 +390,23 @@ func buildRegistry() []ckey {
 			return err
 		},
 		unset: func(s *JailSpec, _ string) { s.SysVIPC = false }})
+	add(ckey{ConfigKey: ConfigKey{Name: "securelevel", Type: "int", Example: "1", RestartRequired: true, Profile: true, Path: "securelevel",
+		Description: "The jail's kern.securelevel, -1 to 3 (securelevel(7)). A FreeBSD jail that sets none runs at 2: root in the jail cannot turn off the system immutable and append-only flags, open a disk for writing, load kernel modules or step the clock. -1 is the host's level (a jail never runs below it); a Linux jail that sets none has the host's level."},
+		get: func(s *JailSpec, _ string) (string, bool) {
+			if s.SecureLevel == nil {
+				return "", false
+			}
+			return strconv.Itoa(*s.SecureLevel), true
+		},
+		set: func(s *JailSpec, _, v string) error {
+			n, err := atoiRange("securelevel", v, MinSecureLevel, MaxSecureLevel)
+			if err != nil {
+				return err
+			}
+			s.SecureLevel = &n
+			return nil
+		},
+		unset: func(s *JailSpec, _ string) { s.SecureLevel = nil }})
 	add(ckey{ConfigKey: ConfigKey{Name: "zfs_delegation", Type: "bool", Example: "true", RestartRequired: true, Path: "zfs_delegation",
 		Description: "Global administrators only. Hands the jail a ZFS dataset of its own, <container>/delegated: root in the jail can create datasets, snapshots and mounts below it, outside the rules JailOps applies to the jail's data. The host's priv.conf must allow it (admin-zfs-delegation)."},
 		get: func(s *JailSpec, _ string) (string, bool) { return "true", s.Delegate },
@@ -399,7 +416,7 @@ func buildRegistry() []ckey {
 			return err
 		},
 		unset: func(s *JailSpec, _ string) { s.Delegate = false }})
-	boolKey("update.packages", "update.packages", "Update the packages inside the jail (pkg or apk, from the host).", func(s *JailSpec) *bool { return &s.Update.Packages })
+	boolKey("update.packages", "update.packages", "Update the ports packages of a FreeBSD jail (pkg, from the host). Linux jails look after their own packages.", func(s *JailSpec) *bool { return &s.Update.Packages })
 	boolKey("update.os", "update.os", "Upgrade the FreeBSD base of the jail in place, inside its release: on the schedule of a managed jail (a global administrator turns that on), or on demand by a global administrator.", func(s *JailSpec) *bool { return &s.Update.OS })
 	add(ckey{ConfigKey: ConfigKey{Name: "update.reboot", Type: "enum", Values: []string{"manual", "auto"}, Profile: true, Path: "update.reboot",
 		Description: "Kept for compatibility: JailOps never stops or restarts a running jail for an update, so auto behaves as manual (the default) and the update record names the processes whose restart is pending.", Example: "manual"},
@@ -417,7 +434,7 @@ func buildRegistry() []ckey {
 		func(s *JailSpec) *[]string { return &s.Firewall.Policies }, nameCheck)
 	list("firewall.tags", "firewall.tags", "Tags that firewall rules refer to.", "web,public", false, true,
 		func(s *JailSpec) *[]string { return &s.Firewall.Tags }, nameCheck)
-	list("packages", "packages", "Cannot be set when a jail is created yet: a create that sets it is refused. Install packages with the provisioning packages step.", "nginx,curl", true, true, func(s *JailSpec) *[]string { return &s.Packages }, nil)
+	list("packages", "packages", "Cannot be set when a jail is created yet: a create that sets it is refused. Install packages with `jailops jail apply` (a recipe with a package step).", "nginx,curl", true, true, func(s *JailSpec) *[]string { return &s.Packages }, nil)
 	add(ckey{ConfigKey: ConfigKey{Name: "env.<var>", Type: "string", Description: "Environment variable of the jail's services.", Example: "env.TZ=UTC", RestartRequired: true, Profile: true, Path: "env.<var>"},
 		get: func(s *JailSpec, d string) (string, bool) { v, ok := s.Env[d]; return v, ok },
 		set: func(s *JailSpec, d, v string) error {

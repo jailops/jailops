@@ -711,8 +711,7 @@ func TestPFNeighbourDiscoveryAndICMPv6(t *testing.T) {
 		"from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to { fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv }",
 		// only its own addresses and groups reach the jail
 		"to { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2, ff02::1:ff00:100, ff02::1:ff88:fcd2 } icmp6-type { neighbrsol, neighbradv }",
-		// path MTU discovery: ICMPv6 errors pass both ways, also under a default deny
-		"pass in quick on joe1a inet6 proto icmp6 from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to any icmp6-type { unreach, toobig, timex, paramprob }",
+		// path MTU discovery: ICMPv6 errors into the jail pass, also under a default deny
 		"pass out quick on joe1a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob }",
 		"to ff02::/16 icmp6-type { listenrep, listendone, 143 }",
 	} {
@@ -725,6 +724,10 @@ func TestPFNeighbourDiscoveryAndICMPv6(t *testing.T) {
 	}
 	if strings.Contains(out, "to any icmp6-type { neighbrsol, neighbradv }") {
 		t.Errorf("a neighbour message of the jail may leave its link:\n%s", out)
+	}
+	// an error from the jail has no pass of its own: it goes with the state of the flow it is about, or by the policies
+	if strings.Contains(out, "pass in quick on joe1a inet6 proto icmp6 from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to any icmp6-type { unreach") {
+		t.Errorf("the jail's ICMPv6 errors pass to any destination ahead of the policies:\n%s", out)
 	}
 	// every ICMPv6 pass comes before the default deny
 	if i, j := strings.Index(out, "toobig"), strings.Index(out, "block drop out quick on joe1a all"); i < 0 || j < i {

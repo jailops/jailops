@@ -11,17 +11,3 @@ spec:
   firewall: {policies: [hello]}
   resources: {memory: 256M}
   expose: [{ports: ["8099"], comment: hello}]
-  # Runs once, at the jail's first start (or `jailops provision hello --again`). Order inside provision is fixed:
-  # packages, files, services, commands. Installing from a private repository needs the repository's configuration in the
-  # jail BEFORE `pkg install`, and `packages:` runs before `files:`, so everything that touches the repository is a command.
-  provision:
-    files:
-      # Sources are files of the project on the HOST: <state_dir>/project-files/apps/ (see the README); sync does not ship them.
-      - {source: pkg/hello.conf, destination: /usr/local/etc/pkg/repos/hello.conf, mode: "0644"}
-      - {source: pkg/hello.pub, destination: /usr/local/etc/pkg/keys/hello.pub, mode: "0644"}
-    commands:
-      - [pkg, update, -f]
-      - [pkg, install, -y, hello]
-      - [sysrc, "hello_flags=-listen 0.0.0.0:8099"]
-      - [sysrc, hello_enable=YES]
-      - [service, hello, start]

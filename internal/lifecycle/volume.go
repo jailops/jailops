@@ -568,10 +568,12 @@ func (s *Service) umountOne(ctx context.Context, target, path string) (bool, err
 }
 
 // nullfsVolumeArgv is the mount of a volume into a jail's root without its source and target: nosuid always (a setuid
-// file of a volume never gains root in a jail, as the fstab of a start mounts it), read-only when the attachment says.
+// file of a volume never gains root in a jail, as the fstab of a start mounts it), nocover always (the mount point is
+// resolved by path in a tree the running jail controls, and a link swapped in can at least never carry the mount over
+// another file system's root, such as /dev or another volume), read-only when the attachment says.
 func nullfsVolumeArgv(readOnly bool) []string {
 	if readOnly {
-		return []string{"mount", "-t", "nullfs", "-o", "ro,nosuid"}
+		return []string{"mount", "-t", "nullfs", "-o", "ro,nosuid,nocover"}
 	}
-	return []string{"mount", "-t", "nullfs", "-o", "nosuid"}
+	return []string{"mount", "-t", "nullfs", "-o", "nosuid,nocover"}
 }

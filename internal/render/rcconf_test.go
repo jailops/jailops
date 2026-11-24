@@ -38,3 +38,30 @@ func TestRcConfSet(t *testing.T) {
 		}
 	}
 }
+
+// RcConfGet reads what RcConfSet writes, and the plain forms an administrator or sysrc(8) writes.
+func TestRcConfGet(t *testing.T) {
+	file := "# comment\nnginx_enable=\"YES\"\nsshd_enable=NO # off\n  cron_flags='-J 60'\nesc=\"a\\\"b\\$c\"\nnginx_enable=\"NO\"\nempty=\"\"\n"
+	for name, want := range map[string]struct {
+		v  string
+		ok bool
+	}{
+		"nginx_enable": {"NO", true}, // the last assignment wins, as in sh
+		"sshd_enable":  {"NO", true},
+		"cron_flags":   {"-J 60", true},
+		"esc":          {`a"b$c`, true},
+		"empty":        {"", true},
+		"missing":      {"", false},
+	} {
+		if v, ok := RcConfGet(file, name); v != want.v || ok != want.ok {
+			t.Errorf("%s: %q %v, want %q %v", name, v, ok, want.v, want.ok)
+		}
+	}
+	out, err := RcConfSet("", []RcVar{{Name: "a_flags", Value: `x "y" $z`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := RcConfGet(out, "a_flags"); !ok || v != `x "y" $z` {
+		t.Errorf("round trip: %q %v", v, ok)
+	}
+}

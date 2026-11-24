@@ -273,6 +273,14 @@ func TestICMP(t *testing.T) {
 	none := anchor(t, nil)
 	toobig := Packet{Family: "inet6", Proto: "icmp6", Src: peer6, Dst: jail6, ICMPType: "toobig"}
 	check(t, "packet too big, no policy", Evaluate(none, toobig, intoJail), Pass, render.StageNeighbour)
+	// from the jail, an error is no pass of its own: one about a real flow goes with that flow's state (pf matches
+	// errors to states, which the simulator does not model), and any other is the policies' to decide. A jail whose
+	// policy denies everything sends no error to an address of its choosing. (audit-network MEDIUM-3)
+	unreach := Packet{Family: "inet6", Proto: "icmp6", Src: jail6, Dst: peer6, ICMPType: "unreach"}
+	check(t, "an error from the jail, default policy", Evaluate(none, unreach, fromJail), Pass, "default")
+	closed := anchor(t, func(in *render.PFInput) { in.DefaultOut = "deny" })
+	check(t, "an error from a jail that may send nothing", Evaluate(closed, unreach, fromJail), Block, "default")
+	check(t, "packet too big into a jail that may send nothing", Evaluate(closed, toobig, intoJail), Pass, render.StageNeighbour)
 	check(t, "ping6, no policy", Evaluate(none, echo6, intoJail), Block, "default")
 	// from the jail: typed rules come first, so without a type the test cannot say
 	r := Evaluate(a, Packet{Family: "inet6", Proto: "icmp6", Src: jail6, Dst: peer6}, fromJail)

@@ -1,0 +1,9 @@
+# jailops jail apply hello -f recipe/
+steps:
+  # the repository's configuration and key come first: the files are beside this recipe
+  - file: {path: /usr/local/etc/pkg/repos/hello.conf, source: pkg/hello.conf, mode: "0644"}
+  - file: {path: /usr/local/etc/pkg/keys/hello.pub, source: pkg/hello.pub, mode: "0644"}
+  - run: [pkg, update, -f]
+  - package: [hello]
+  - sysrc: {hello_enable: "YES", hello_flags: "-listen 0.0.0.0:8099"}
+  - service: {name: hello, running: true}

@@ -78,7 +78,7 @@ const (
 	OpJailSnapshot          OperationAction = "jail.snapshot"
 	OpJailSnapshotDelete    OperationAction = "jail.snapshot_delete"
 	OpJailImport            OperationAction = "jail.import"
-	OpJailProvision         OperationAction = "jail.provision"
+	OpJailApply             OperationAction = "jail.apply"
 	OpJailShellSetup        OperationAction = "jail.shell_setup"
 	OpJailRestore           OperationAction = "jail.restore"
 	OpAppInstall            OperationAction = "app.install"
@@ -109,7 +109,7 @@ const (
 // OperationActions lists every OperationAction.
 var OperationActions = []OperationAction{
 	OpJailCreate, OpJailDelete, OpJailStart, OpJailStop, OpJailRestart, OpJailConfigure, OpJailCopy,
-	OpJailUpgrade, OpJailRollback, OpJailSnapshot, OpJailSnapshotDelete, OpJailImport, OpJailProvision, OpJailShellSetup,
+	OpJailUpgrade, OpJailRollback, OpJailSnapshot, OpJailSnapshotDelete, OpJailImport, OpJailApply, OpJailShellSetup,
 	OpJailRestore, OpAppInstall, OpRename, OpVolumeCreate, OpVolumeDelete, OpVolumeSnapshot, OpVolumeSnapshotDelete,
 	OpVolumeRollback, OpVolumeAttach, OpVolumeDetach, OpVolumeLock, OpVolumeUnlock, OpVolumePassphrase, OpVolumeRestore,
 	OpImageBuild, OpImageUpgrade, OpImageGenerationDelete, OpImageAutoUpgrade, OpBackupRun, OpBackupVerify,
@@ -242,7 +242,7 @@ var Extensions = []string{
 	"backup_verify",
 	"updates",
 	"jail_shell",
-	"provisioning",
+	"jail_apply",
 	"sealed_secrets",
 	"image_upgrade",
 	"jail_usage",

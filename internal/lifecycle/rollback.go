@@ -12,12 +12,10 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// RollbackOptions is api.JailRollback plus the force flag (destroy later
-// snapshots) and a Stamp, see UpgradeRequest.
+// RollbackOptions is api.JailRollback plus the force flag and a Stamp, see UpgradeRequest.
 type RollbackOptions struct {
 	api.JailRollback
-	// Force allows destroying snapshots newer than the target and skipping
-	// datasets that do not have the snapshot.
+	// Force skips the datasets that do not have the snapshot.
 	Force bool
 	Stamp string
 	// Resume: see UpgradeRequest.Resume. Only scope root supports crash
@@ -48,7 +46,8 @@ type RollbackResult struct {
 //	all: zfs rollback of the root and the delegated dataset to a snapshot.
 //
 // data and all need ConfirmDataLoss and report what `written` says would be
-// lost. They refuse when snapshots newer than the target exist, unless Force.
+// lost. Every scope refuses when snapshots newer than the target exist on a dataset it rolls back, and names them,
+// unless DestroyNewer (which needs ConfirmDataLoss): nothing is destroyed that the request did not name.
 // Data is never rolled back automatically.
 func (s *Service) RollbackJail(ctx context.Context, name string, req RollbackOptions, dryRun bool) (RollbackResult, error) {
 	res := RollbackResult{Scope: req.Scope}
@@ -141,10 +140,8 @@ func (s *Service) rollbackData(ctx context.Context, st *jailState, req RollbackO
 			WithDetail("datasets", strings.Join(parts, ",")).
 			WithHint("set confirm_data_loss to proceed")
 	}
-	if len(later) > 0 && !req.Force {
-		return res, api.Errorf(api.CodePreconditionFailed, "snapshots newer than %q exist: %s", snap, strings.Join(later, ", ")).
-			WithDetail("later_snapshots", strings.Join(later, ",")).
-			WithHint("roll back to the newest snapshot, or use force to destroy the newer ones")
+	if len(later) > 0 && !req.DestroyNewer {
+		return res, newerSnapshotsError(snap, later)
 	}
 
 	// as for the root: datasets rolled back under running services kill them, and JailOps does not stop jails
@@ -159,7 +156,7 @@ func (s *Service) rollbackData(ctx context.Context, st *jailState, req RollbackO
 	for _, d := range rolled {
 		d := d
 		pl.Add(plan.Step{Name: "rollback-" + d[strings.LastIndex(d, "/")+1:], Describe: fmt.Sprintf("zfs rollback -r %s@%s", d, snap),
-			Do: func(ctx context.Context) error { return z.Rollback(ctx, d+"@"+snap, req.Force) }})
+			Do: func(ctx context.Context) error { return z.Rollback(ctx, d+"@"+snap, req.DestroyNewer) }})
 	}
 	res.Plan = pl.Describe()
 	if dryRun {
@@ -248,8 +245,11 @@ func (s *Service) newestUpgradeSnapshot(ctx context.Context, st *jailState) (str
 // planThickRollback builds the rollback of the last in-place upgrade (or base addition) of a FreeBSD jail: the
 // root returns to the newest jo-pre-upgrade snapshot, and nothing else. The root holds the base, the ports packages,
 // the package database and the data of the services, so all of it goes back; a volume attached to the jail is outside
-// the root and stays. Everything written to the root since the snapshot is lost, as are the snapshots taken after it,
-// so the request must confirm (ConfirmDataLoss); dry skips that refusal so that a dry run can show what would be lost.
+// the root and stays. Everything written to the root since the snapshot is lost, so the request must confirm
+// (ConfirmDataLoss). A snapshot of the root taken after it (a backup, a replication, one by hand) would be destroyed by
+// the rollback, so the request refuses and names them unless it says DestroyNewer; snapshots of the jail's other
+// datasets are never touched but for the used-up pre-upgrade one. dry skips both refusals so that a dry run can show
+// what would be lost.
 //
 //	zfs rollback of the root, destroy the snapshot
 //
@@ -283,13 +283,13 @@ func (s *Service) planThickRollback(ctx context.Context, st *jailState, req Roll
 	info.Snapshot, ur.Snapshot = snap, snap
 	rootSnap := st.Root + "@" + snap
 	wasRunning := false
+	if info.Later, err = s.laterSnapshots(ctx, st.Root, snap); err != nil {
+		return nil, ur, info, err
+	}
 	if resume != nil {
 		wasRunning = resume.WasRunning
 	} else {
 		if wasRunning, err = s.Jails.Running(ctx, name); err != nil {
-			return nil, ur, info, err
-		}
-		if info.Later, err = s.laterSnapshots(ctx, st.Root, snap); err != nil {
 			return nil, ur, info, err
 		}
 		if info.Written, err = z.Written(ctx, rootSnap); err != nil {
@@ -311,6 +311,9 @@ func (s *Service) planThickRollback(ctx context.Context, st *jailState, req Roll
 			}
 			return nil, ur, info, e
 		}
+		if !dry && len(info.Later) > 0 && !req.DestroyNewer {
+			return nil, ur, info, newerSnapshotsError(snap, info.Later)
+		}
 	}
 	// JailOps never stops a jail, and a root rolled back under a running jail kills its services: a program that maps a
 	// file the rollback changes dies of SIGBUS (VERIFIED on FreeBSD 16: local-unbound, syslogd, sh and then cron of the
@@ -325,14 +328,21 @@ func (s *Service) planThickRollback(ctx context.Context, st *jailState, req Roll
 		ur.Warnings = append(ur.Warnings, "the volumes attached to the jail are outside its root and are not rolled back")
 	}
 
+	// the later snapshots go only when the request named them (DestroyNewer; a dry run shows what that would do). A
+	// resumed run that finds a snapshot taken after the crash without DestroyNewer fails in zfs rollback and destroys
+	// nothing.
 	later := info.Later
+	if !req.DestroyNewer && !dry {
+		later = nil
+	}
 	pl := plan.New("rollback-jail " + name)
 	pl.Add(plan.Step{Name: "rollback-root", Describe: fmt.Sprintf("zfs rollback %s%s  (what was written to the root since is lost%s)", map[bool]string{true: "-r ", false: ""}[len(later) > 0], rootSnap, laterNote(later)),
 		Do: func(ctx context.Context) error { return z.Rollback(ctx, rootSnap, len(later) > 0) }})
 	all := st.all()
 	// best effort: the root is restored, so a snapshot that stays is no reason to fail (the retention removes the used
-	// one, it keeps its cleanup mark)
-	pl.Add(plan.Step{Name: "drop-snapshots", Describe: "zfs destroy " + snap + " on " + strings.Join(all, ", ") + " (used up)",
+	// one, it keeps its cleanup mark). A later snapshot the request named goes from every dataset of the jail, as a
+	// jail snapshot is one name across them; any other is not the rollback's to destroy.
+	pl.Add(plan.Step{Name: "drop-snapshots", Describe: "zfs destroy " + strings.Join(append([]string{snap}, laterNames(later)...), ", ") + " on " + strings.Join(all, ", ") + " (used up)",
 		Do: func(ctx context.Context) error {
 			for _, d := range all {
 				for _, n := range append([]string{snap}, laterNames(later)...) {
@@ -363,6 +373,15 @@ func (s *Service) laterSnapshots(ctx context.Context, ds, snap string) ([]string
 		}
 	}
 	return out, nil
+}
+
+// newerSnapshotsError is the refusal of a rollback over snapshots taken after its target: zfs rollback destroys them,
+// and they are someone's (a backup, a replication, a snapshot by hand), so the request has to name that it wants them
+// gone.
+func newerSnapshotsError(snap string, later []string) error {
+	return api.Errorf(api.CodePreconditionFailed, "snapshots taken after %q exist: %s; a rollback to %q destroys them", snap, strings.Join(later, ", "), snap).
+		WithDetail("later_snapshots", strings.Join(later, ",")).
+		WithHint("keep what you need from them (a clone, a send), then pass --destroy-newer with --confirm-data-loss (destroy_newer and confirm_data_loss in the API)")
 }
 
 // laterNames are the snapshot names of a list of dataset@name.

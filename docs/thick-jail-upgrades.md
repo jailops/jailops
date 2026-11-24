@@ -115,8 +115,10 @@ jailops start web --project shop
 ```
 
 The release recorded for the jail goes back with it. The command names the snapshot and how long ago it was taken, says
-that everything written to the root since and the snapshots taken after it are discarded, and asks you to type the jail
-name; in a script pass `--confirm-data-loss`. If the new version has written data you want to keep, export it first. The
+that everything written to the root since is discarded, and asks you to type the jail name; in a script pass
+`--confirm-data-loss`. A snapshot taken after it (by a backup, a replication or by hand) would be destroyed by the
+rollback, so the command refuses and names them: keep what you need from them, then add `--destroy-newer`, which destroys
+them with the same confirmation. If the new version has written data you want to keep, export it first. The
 volumes have their own snapshots and their own recovery decisions.
 
 A snapshot of your own is restored with `--scope all`:

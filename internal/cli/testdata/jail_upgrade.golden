@@ -2,19 +2,20 @@ $ jailops jail create web --image freebsd-15#g1 --network lan --storage default
 jail/web created
 
 $ jailops jail upgrade web --dry-run
-jail/web: nothing to upgrade (FreeBSD 15.1-RELEASE-p7)
+jail/web: up to date (FreeBSD 15.1-RELEASE-p7)
 
 $ jailops jail upgrade web
-jail/web: nothing to upgrade (FreeBSD 15.1-RELEASE-p7)
+jail/web: up to date (FreeBSD 15.1-RELEASE-p7)
 
 $ jailops jail upgrade web
-jail/web: nothing to upgrade (FreeBSD 15.1-RELEASE-p7)
+jail/web: up to date (FreeBSD 15.1-RELEASE-p7)
 
 $ jailops jail show web
 Name:        web
 UUID:        <uuid>
 Generation:  1
 Age:         3h
+Securelevel: 2 (the default)
 
 SPEC                    STATUS
 ----                    ------

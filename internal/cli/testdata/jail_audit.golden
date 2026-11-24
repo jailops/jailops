@@ -5,29 +5,40 @@ $ jailops jail create db --image freebsd-15 --network lan --storage default --la
 jail/db created
 
 $ jailops jail audit web
-CHECK                 RESULT   DETAIL
-root.links            PASS     no link out of the root on a path the base's packages own
-accounts.uid0         PASS     root and toor are the only accounts with uid 0
-pkg.base_repository   PASS     FreeBSD-base is disabled inside the jail; the host upgrades the base
-cron.jitter           PASS     cron starts the jobs of root (periodic among them) at a random second: cron_flags="-J 60"
-disk.limit            INFO     the jail has no disk limit: it can fill its storage
+CHECK                  RESULT   DETAIL
+root.links             PASS     no link out of the root on a path the base's packages own
+accounts.uid0          PASS     root and toor are the only accounts with uid 0
+pkg.base_repository    PASS     FreeBSD-base is disabled inside the jail; the host upgrades the base
+pkg.kmods_repository   PASS     FreeBSD-ports-kmods is disabled inside the jail
+pkg.vulnerabilities    PASS     pkg audit names no vulnerable package
+
+jail/web: 0 critical, 0 warning(s)
+
+$ jailops jail audit web --suggest
+CHECK                  RESULT   DETAIL
+root.links             PASS     no link out of the root on a path the base's packages own
+accounts.uid0          PASS     root and toor are the only accounts with uid 0
+pkg.base_repository    PASS     FreeBSD-base is disabled inside the jail; the host upgrades the base
+pkg.kmods_repository   PASS     FreeBSD-ports-kmods is disabled inside the jail
+pkg.vulnerabilities    PASS     pkg audit names no vulnerable package
+cron.jitter            PASS     suggestion: cron starts the jobs of root (periodic among them) at a random second: cron_flags="-J 60"
+disk.limit             INFO     suggestion: the jail has no disk limit: it can fill its storage
 
 Fix:
-  disk.limit: jailops config set web resources.disk=10G (a size that fits the jail)
+  disk.limit (suggestion): jailops config set web resources.disk=10G (a size that fits the jail)
 
 jail/web: 0 critical, 0 warning(s)
 
 $ jailops jail audit db
-CHECK                 RESULT     DETAIL
-root.links            PASS       no link out of the root on a path the base's packages own
-accounts.uid0         CRITICAL   accounts with uid 0 besides root and toor: backdoor
-pkg.base_repository   PASS       FreeBSD-base is disabled inside the jail; the host upgrades the base
-cron.jitter           PASS       cron starts the jobs of root (periodic among them) at a random second: cron_flags="-J 60"
-disk.limit            INFO       the jail has no disk limit: it can fill its storage
+CHECK                  RESULT     DETAIL
+root.links             PASS       no link out of the root on a path the base's packages own
+accounts.uid0          CRITICAL   accounts with uid 0 besides root and toor: backdoor
+pkg.base_repository    PASS       FreeBSD-base is disabled inside the jail; the host upgrades the base
+pkg.kmods_repository   PASS       FreeBSD-ports-kmods is disabled inside the jail
+pkg.vulnerabilities    PASS       pkg audit names no vulnerable package
 
 Fix:
-  accounts.uid0: remove each account (pw userdel NAME in the jail) unless you made it on purpose, and find out how it got there
-  disk.limit: jailops config set db resources.disk=10G (a size that fits the jail)
+  accounts.uid0: remove each account (jailops exec db -- pw userdel NAME) unless you made it on purpose, and find out how it got there
 
 jail/db: 1 critical, 0 warning(s)
 [exit 1]
@@ -50,7 +61,7 @@ $ jailops jail audit db -o json
       "group": "security",
       "result": "critical",
       "detail": "accounts with uid 0 besides root and toor: backdoor",
-      "fix": "remove each account (pw userdel NAME in the jail) unless you made it on purpose, and find out how it got there"
+      "fix": "remove each account (jailops exec db -- pw userdel NAME) unless you made it on purpose, and find out how it got there"
     },
     {
       "id": "pkg.base_repository",
@@ -59,17 +70,16 @@ $ jailops jail audit db -o json
       "detail": "FreeBSD-base is disabled inside the jail; the host upgrades the base"
     },
     {
-      "id": "cron.jitter",
-      "group": "practice",
+      "id": "pkg.kmods_repository",
+      "group": "security",
       "result": "pass",
-      "detail": "cron starts the jobs of root (periodic among them) at a random second: cron_flags=\"-J 60\""
+      "detail": "FreeBSD-ports-kmods is disabled inside the jail"
     },
     {
-      "id": "disk.limit",
-      "group": "practice",
-      "result": "info",
-      "detail": "the jail has no disk limit: it can fill its storage",
-      "fix": "jailops config set db resources.disk=10G (a size that fits the jail)"
+      "id": "pkg.vulnerabilities",
+      "group": "security",
+      "result": "pass",
+      "detail": "pkg audit names no vulnerable package"
     }
   ]
 }

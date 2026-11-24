@@ -32,7 +32,7 @@ backup_run
 backup_verify
 updates
 jail_shell
-provisioning
+jail_apply
 sealed_secrets
 image_upgrade
 jail_usage

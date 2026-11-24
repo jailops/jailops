@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,31 @@ toor:*:0:0::0:0:Bourne-again Superuser:/root:
 daemon:*:1:1::0:0:Owner of many system processes:/root:/usr/sbin/nologin
 www:*:80:80::0:0:World Wide Web Owner:/nonexistent:/usr/sbin/nologin
 `
+
+// ownPasswd is cleanPasswd with an account and a group of whoever runs the test, who owns the files of the tree (root
+// has both).
+func ownPasswd() (passwd, group string) {
+	passwd, group = cleanPasswd, "wheel:*:0:root\ndaemon:*:1:\nwww:*:80:\n"
+	if os.Getuid() != 0 {
+		passwd += "tester:*:" + strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()) + "::0:0:x:/home/tester:/bin/sh\n"
+	}
+	if os.Getgid() != 0 {
+		group += "tester:*:" + strconv.Itoa(os.Getgid()) + ":\n"
+	}
+	return passwd, group
+}
+
+// goMode turns the set-id bits of a numeric mode into os.FileMode's: os.Chmod takes only those.
+func goMode(m os.FileMode) os.FileMode {
+	out := m & 0o777
+	if m&0o4000 != 0 {
+		out |= os.ModeSetuid
+	}
+	if m&0o2000 != 0 {
+		out |= os.ModeSetgid
+	}
+	return out
+}
 
 func sum1(b string) string {
 	h := sha256.Sum256([]byte(b))
@@ -44,13 +70,20 @@ func auditTree(t *testing.T, e *env) (string, []jailaudit.File) {
 		if err := os.WriteFile(filepath.Join(root, p), []byte(s), mode); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chmod(filepath.Join(root, p), mode); err != nil {
+		if err := os.Chmod(filepath.Join(root, p), goMode(mode)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	w("bin/sh", "the shell", 0o555)
 	w("usr/bin/su", "su", 0o4555)
-	w("etc/master.passwd", cleanPasswd, 0o600)
+	pw, gr := ownPasswd()
+	w("etc/master.passwd", pw, 0o600)
+	w("etc/group", gr, 0o644)
+	// /tmp as FreeBSD makes it: anyone writes there, the sticky bit keeps the files of others; a file there may be
+	// written by anyone
+	os.MkdirAll(filepath.Join(root, "tmp"), 0o755)
+	os.Chmod(filepath.Join(root, "tmp"), 0o777|os.ModeSticky)
+	w("tmp/shared", "x", 0o666)
 	w("etc/crontab", "SHELL=/bin/sh\n", 0o644)
 	w("etc/rc.conf", "cron_flags=\"-J 60\"\n", 0o644)
 	w("etc/pkg/FreeBSD.conf", "FreeBSD-ports: {\n  url: \"pkg+https://pkg.FreeBSD.org/${ABI}/quarterly\",\n  enabled: yes\n}\nFreeBSD-base: {\n  url: \"pkg+https://pkg.FreeBSD.org/${ABI}/base_release_${VERSION_MINOR}\",\n  enabled: yes\n}\n", 0o644)
@@ -73,7 +106,8 @@ func TestAuditRootCleanJail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Suspected) != 0 || len(f.SetID) != 0 || len(f.Modified) != 0 || f.Verified != 3 || f.SSHD {
+	if len(f.Suspected) != 0 || len(f.SetID) != 0 || len(f.Modified) != 0 || f.Verified != 3 || f.SSHD ||
+		!f.OwnersRead || len(f.Unowned) != 0 || len(f.WorldDirs) != 0 || len(f.WorldFiles) != 0 {
 		t.Fatalf("a clean root: %+v", f)
 	}
 	a := f.Accounts
@@ -89,10 +123,14 @@ func TestAuditRootCleanJail(t *testing.T) {
 			t.Fatal("master.passwd left the helper")
 		}
 	}
-	// the jail's checks see nothing wrong in a clean root
-	for _, c := range jailaudit.Evaluate(jailaudit.Input{Facts: f, HasPkgDB: true, Owned: map[string]bool{"/usr/bin/su": true}}) {
-		if c.Group == jailaudit.GroupSecurity && c.Result != api.AuditPass {
-			t.Errorf("%s: %s %s", c.ID, c.Result, c.Detail)
+	// the jail's checks of what the helper reads see nothing wrong in a clean root
+	for _, c := range jailaudit.Evaluate(jailaudit.Input{Facts: f, HasPkgDB: true, Owned: map[string]bool{"/usr/bin/su": true}}, false) {
+		switch c.ID {
+		case "pkg.vulnerabilities", "base.updates", "jail.enforce_statfs": // not the helper's
+		default:
+			if c.Result != api.AuditPass {
+				t.Errorf("%s: %s %s", c.ID, c.Result, c.Detail)
+			}
 		}
 	}
 }
@@ -106,7 +144,7 @@ func TestAuditRootFindsWhatWasPlanted(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, p), []byte(s), mode); err != nil {
 			t.Fatal(err)
 		}
-		os.Chmod(filepath.Join(root, p), mode)
+		os.Chmod(filepath.Join(root, p), goMode(mode))
 	}
 	w("etc/master.passwd", cleanPasswd+"backdoor:$6$x$y:0:0::0:0:x:/root:/bin/sh\nguest::1001:1001::0:0:x:/home/guest:/bin/sh\n", 0o600)
 	os.Remove(filepath.Join(root, "etc/crontab"))
@@ -118,6 +156,12 @@ func TestAuditRootFindsWhatWasPlanted(t *testing.T) {
 	w("bin/sh", "a shell with something added", 0o555)
 	w("usr/sbin/sshd", "sshd", 0o555)
 	w("etc/ssh/sshd_config", "#PermitRootLogin no\nPermitRootLogin yes\nPasswordAuthentication yes\n", 0o644)
+	// a directory anyone writes to without the sticky bit, a file anyone writes to, a file of an owner the jail lacks
+	os.MkdirAll(filepath.Join(root, "srv/drop"), 0o755)
+	os.Chmod(filepath.Join(root, "srv/drop"), 0o777)
+	w("etc/rc.local", "x", 0o666)
+	pw, _ := ownPasswd() // the owner of the tree keeps an account
+	w("etc/master.passwd", pw+"backdoor:$6$x$y:0:0::0:0:x:/root:/bin/sh\nguest::1001:1001::0:0:x:/home/guest:/bin/sh\n", 0o600)
 	os.Remove(filepath.Join(root, "etc/periodic.conf"))
 	os.Symlink("/etc/periodic.conf", filepath.Join(root, "etc/periodic.conf"))
 	f, err := e.local.AuditRoot(context.Background(), RootAuditReq{Root: root, Files: files})
@@ -143,15 +187,19 @@ func TestAuditRootFindsWhatWasPlanted(t *testing.T) {
 	if _, ok := f.Texts["/etc/periodic.conf"]; ok || f.Unread["/etc/periodic.conf"] != "it is a symbolic link" {
 		t.Errorf("a link is read: %v %v", f.Texts["/etc/periodic.conf"], f.Unread)
 	}
+	if !slices.Equal(f.WorldDirs, []string{"/srv/drop"}) || !slices.Equal(f.WorldFiles, []string{"/etc/rc.local"}) {
+		t.Errorf("world-writable: dirs %v files %v", f.WorldDirs, f.WorldFiles)
+	}
 	got := map[string]api.JailAuditResult{}
-	for _, c := range jailaudit.Evaluate(jailaudit.Input{Facts: f, HasPkgDB: true, Owned: map[string]bool{"/usr/bin/su": true}}) {
+	for _, c := range jailaudit.Evaluate(jailaudit.Input{Facts: f, HasPkgDB: true, Owned: map[string]bool{"/usr/bin/su": true}}, false) {
 		got[c.ID] = c.Result
 		if c.ID == "pkg.base_repository" && !strings.Contains(c.Detail, "by /usr/local/etc/pkg/repos/FreeBSD-base.conf") {
 			t.Errorf("the file that turns FreeBSD-base on: %s", c.Detail)
 		}
 	}
 	want := map[string]api.JailAuditResult{"root.links": api.AuditCritical, "accounts.uid0": api.AuditCritical, "accounts.passwords": api.AuditWarn,
-		"files.setid": api.AuditWarn, "pkg.repositories": api.AuditWarn, "pkg.base_repository": api.AuditWarn, "base.checksums": api.AuditWarn, "sshd.config": api.AuditWarn}
+		"files.setid": api.AuditWarn, "pkg.repositories": api.AuditWarn, "pkg.base_repository": api.AuditWarn, "base.checksums": api.AuditWarn, "sshd.config": api.AuditWarn,
+		"files.sticky_bit": api.AuditWarn, "files.world_writable": api.AuditWarn}
 	if !setid {
 		delete(want, "files.setid")
 	}
@@ -159,6 +207,43 @@ func TestAuditRootFindsWhatWasPlanted(t *testing.T) {
 		if got[id] != r {
 			t.Errorf("%s: %s, want %s", id, got[id], r)
 		}
+	}
+}
+
+// A file whose owner or group the jail does not have is listed with the id it lacks; a jail whose group file cannot
+// be read is not looked at for them.
+func TestAuditRootUnowned(t *testing.T) {
+	e := newEnv(t)
+	root, files := auditTree(t, e)
+	g := strconv.Itoa(os.Getgid())
+	want := "gid " + g
+	if os.Getuid() == 0 {
+		// root can give a file an owner the jail lacks
+		os.WriteFile(filepath.Join(root, "srv-old"), []byte("x"), 0o644)
+		if err := os.Chown(filepath.Join(root, "srv-old"), 4242, os.Getgid()); err != nil {
+			t.Fatal(err)
+		}
+		want = "/srv-old (uid 4242)"
+	} else {
+		// whoever runs the test owns every file: its group taken from the jail makes every file a finding
+		os.WriteFile(filepath.Join(root, "etc/group"), []byte("wheel:*:0:root\n"), 0o644)
+	}
+	f, err := e.local.AuditRoot(context.Background(), RootAuditReq{Root: root, Files: files})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.OwnersRead || len(f.Unowned) == 0 || !strings.Contains(strings.Join(f.Unowned, ";"), want) {
+		t.Fatalf("unowned: %v (%d more)", f.Unowned, f.UnownedMore)
+	}
+	if os.Getuid() == 0 && len(f.Unowned) != 1 {
+		t.Fatalf("unowned: %v", f.Unowned)
+	}
+	if len(f.Unowned) > jailaudit.MaxListed {
+		t.Fatalf("%d listed", len(f.Unowned))
+	}
+	os.Remove(filepath.Join(root, "etc/group"))
+	if f, err = e.local.AuditRoot(context.Background(), RootAuditReq{Root: root, Files: files}); err != nil || f.OwnersRead || len(f.Unowned) != 0 {
+		t.Fatalf("without /etc/group: %v %v %v", err, f.OwnersRead, f.Unowned)
 	}
 }
 

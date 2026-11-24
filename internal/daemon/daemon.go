@@ -278,7 +278,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	case opts.Dev:
 		deps.Execer = service.LocalExecer{Prefix: []string{"jexec", "-l"}}
 	}
-	deps.UpdateTick, deps.ProjectFilesDir = cfg.Updates.Tick.Std(), cfg.Updates.ProjectFilesDir
+	deps.UpdateTick = cfg.Updates.Tick.Std()
 	deps.JailShell, deps.JailPrompt = cfg.Jails.Shell, cfg.Jails.Prompt
 	if cfg.Jails.PromptColor != nil {
 		deps.JailPromptColor = *cfg.Jails.PromptColor

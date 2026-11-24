@@ -98,7 +98,7 @@ func (s *Server) routes() {
 	m("POST /api/v1/updates/check", s.handleUpdatesCheck)
 	m("POST /api/v1/updates/apply", s.handleUpdatesApply)
 	m("GET /api/v1/jails/{name}/updates", s.handleUpdateHistory)
-	m("POST /api/v1/jails/{name}/provision", s.handleProvision)
+	m("POST /api/v1/jails/{name}/apply", s.handleApply)
 	m("POST /api/v1/jails/{name}/shell-setup", s.handleShellSetup)
 	m("POST /api/v1/jails/{name}/expose", s.handleExpose)
 	m("POST /api/v1/jails/{name}/unexpose", s.handleUnexpose)

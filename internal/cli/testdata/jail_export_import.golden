@@ -48,6 +48,7 @@ Name:        web2
 UUID:        <uuid>
 Generation:  1
 Age:         3h
+Securelevel: 2 (the default)
 
 SPEC                        STATUS
 ----                        ------

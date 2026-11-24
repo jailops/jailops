@@ -1,12 +1,13 @@
 # provisioning
 
-From a fresh FreeBSD 15.1+ VM with a ZFS pool to a running fleet, with one script. It is the cloud-init-style path:
+From a fresh FreeBSD 15.1+ VM with a ZFS pool to a running fleet, with one script. It is the first-boot path:
 install JailOps, set the host up, start the services, and let `jailops-sync` apply a fleet from git.
 
     provisioning/
       bootstrap.sh     the whole sequence of docs/install.md, repeatable
       user-data        a first-boot script for a cloud image that runs one: sets variables, fetches and runs bootstrap.sh
       fleet/           a small fleet the script applies (tested like every example): image, network, project, one nginx jail
+      recipe/          what goes inside that jail afterwards: `jailops jail apply web -f recipe/`
 
 ## The one-liner
 

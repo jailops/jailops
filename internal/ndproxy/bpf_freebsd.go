@@ -24,8 +24,9 @@ const (
 	bpfBufLen   = 65536
 	readTimeout = 500 * time.Millisecond
 	dltEN10MB   = 1
-	// UNVERIFIED: BPF_D_IN is 0 on FreeBSD (see sys/net/bpf.h).
-	bpfDirIn = 0
+	// BPF_D_INOUT is 1 on FreeBSD (sys/net/bpf.h): the host's own advertisements are seen too (replypath.go); the
+	// frames this descriptor writes are not (no BIOCFEEDBACK).
+	bpfDirInOut = 1
 )
 
 // BPF is the BPF capture and injector for one uplink. One descriptor serves
@@ -57,8 +58,8 @@ func ioctlU32(fd int, req uintptr, v uint32) error {
 // Open implements Capture.
 //
 // UNVERIFIED: /dev/bpf is a cloning device on FreeBSD 15; the order of
-// ioctls (BIOCSBLEN before BIOCSETIF), BIOCSDIRECTION to skip our own
-// transmissions, BIOCSHDRCMPLT to keep our source MAC, and the read timeout
+// ioctls (BIOCSBLEN before BIOCSETIF), BIOCSDIRECTION to see both
+// directions, BIOCSHDRCMPLT to keep our source MAC, and the read timeout
 // that lets Close interrupt a blocked read are all assumptions.
 func (b *BPF) Open(info LinkInfo, promisc bool) (Stream, error) {
 	b.mu.Lock()
@@ -103,7 +104,7 @@ func (b *BPF) Open(info LinkInfo, promisc bool) (Stream, error) {
 	if err := ioctlU32(fd, unix.BIOCSHDRCMPLT, 1); err != nil {
 		return fail("BIOCSHDRCMPLT", err)
 	}
-	if err := ioctlU32(fd, unix.BIOCSDIRECTION, bpfDirIn); err != nil {
+	if err := ioctlU32(fd, unix.BIOCSDIRECTION, bpfDirInOut); err != nil {
 		return fail("BIOCSDIRECTION", err)
 	}
 	tv := unix.Timeval{Sec: int64(readTimeout / time.Second), Usec: int64(readTimeout % time.Second / time.Microsecond)}

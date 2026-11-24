@@ -46,9 +46,19 @@ func (r *Reconciler) NDPStatus() api.NDPStatus {
 				LastSeen: tptr(a.LastSeen), LastFrom: addrString(a.LastFrom), LastVerdict: a.LastVerdict,
 				LastAnswer: tptr(a.LastAnswer), LastAnnounce: tptr(a.LastAnnounce), LastError: a.LastError})
 		}
+		u.HostSolicits = st.HostSolicits
+		for _, rp := range st.ReplyPath {
+			e := api.NDPReplyPath{Uplink: uplink, Router: rp.Router.String(), HostAddress: rp.Host.String(), Repeats: rp.Repeats,
+				LastSeen: rp.LastSeen, RouterMAC: rp.RouterMAC.String(), Misdirected: rp.Misdirected}
+			if !rp.NADst.IsZero() {
+				e.NADstMAC = rp.NADst.String()
+			}
+			out.ReplyPath = append(out.ReplyPath, e)
+		}
 		out.Uplinks = append(out.Uplinks, u)
 	}
 	sort.Slice(out.Uplinks, func(i, j int) bool { return out.Uplinks[i].Uplink < out.Uplinks[j].Uplink })
+	sort.SliceStable(out.ReplyPath, func(i, j int) bool { return out.ReplyPath[i].Uplink < out.ReplyPath[j].Uplink })
 	return out
 }
 

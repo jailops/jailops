@@ -89,6 +89,13 @@ func (s *Service) setShellMark(key string, m shellMark) {
 	}
 }
 
+// forgetJailState drops what the daemon keeps in memory and in its state directory for a deleted jail: its shell mark
+// and its update records.
+func (s *Service) forgetJailState(key string) {
+	s.forgetShell(key)
+	s.upd.forget(key)
+}
+
 func (s *Service) forgetShell(key string) {
 	s.shellM.mu.Lock()
 	delete(s.shellM.m, key)
@@ -198,7 +205,7 @@ func (s *Service) applyPrompt(ctx context.Context, key, ps1 string) ([]string, e
 		if err != nil && !notExist(err) {
 			return steps, fmt.Errorf("read %s: %w", p, err)
 		}
-		next, err := render.PromptHookSet(string(cur), withPrompt)
+		next, err := render.PromptHookSet(string(cur))
 		if err != nil {
 			// the text is the renderer's own (the file's path inside the jail, no host path): the reader needs it to fix the file
 			return steps, api.Errorf(api.CodeInvalid, "%s: %v", p, err)

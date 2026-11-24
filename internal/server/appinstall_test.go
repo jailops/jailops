@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -231,8 +232,8 @@ func TestAppInstall(t *testing.T) {
 	if !slices.Equal(pkgCalls, want) || want[0] != "pkg -r "+root+" -o PKG_CACHEDIR="+cache+" install -y web-server" {
 		t.Fatalf("pkg calls %q, want %q", pkgCalls, want)
 	}
-	// The jail's prompt, sourced by both start-up files of bash.
-	if !strings.Contains(e.File(root+api.PromptFile), `PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '`) || !strings.Contains(e.File(root+api.BashrcPath), api.PromptFile) || !strings.Contains(e.File(root+api.ProfilePath), api.PromptFile) {
+	// The jail's prompt, sourced through the directory profile.d by both start-up files of bash.
+	if !strings.Contains(e.File(root+api.PromptFile), `PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '`) || !strings.Contains(e.File(root+api.BashrcPath), "profile.d/*.sh") || !strings.Contains(e.File(root+api.ProfilePath), "profile.d/*.sh") {
 		t.Fatalf("prompt files: %v", e.Files.Paths())
 	}
 	// A volume is mounted on the host at its own place (zfs mount -a at boot, devices off) and reaches the jail
@@ -559,6 +560,62 @@ func TestAppInstallFailures(t *testing.T) {
 	if !errors.As(err, &ae) || ae.Detail["step"] != "start-service-web" || ae.Detail["jail_kept"] != "true" ||
 		!strings.Contains(ae.Message, "/usr/sbin/service web start") || !strings.Contains(ae.Message, "Permission denied") || strings.Contains(ae.Message, "mktemp") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// An installation that fails after the jail started (a service of the app does not start) finishes its rollback: the
+// volumes bound for the packages were unmounted before the start, and their undo does not unmount them a second time
+// (the helper refuses a path that is not a mount point). The jail is kept stopped, the run leaves the journal and the
+// doctor has nothing to say about it.
+func TestAppInstallFailedAfterStartClosesTheJournal(t *testing.T) {
+	e, c := appEnv(t, map[string]string{"web": appWeb})
+	var mu sync.Mutex
+	bound := map[string]bool{} // what mount -t nullfs bound, as the helper's mount table would list it
+	e.Run.Prepend(run.Rule{Name: "mount", Args: []string{run.RestArgs}, Fn: func(c run.Cmd) (run.Result, error) {
+		if len(c.Args) > 2 && c.Args[0] == "-t" && c.Args[1] == "nullfs" {
+			mu.Lock()
+			bound[c.Args[len(c.Args)-1]] = true
+			mu.Unlock()
+		}
+		return run.Result{}, nil
+	}})
+	e.Run.Prepend(run.Rule{Name: "umount", Args: []string{run.RestArgs}, Fn: func(c run.Cmd) (run.Result, error) {
+		p := c.Args[len(c.Args)-1]
+		mu.Lock()
+		defer mu.Unlock()
+		if !bound[p] {
+			return run.Result{ExitCode: 1, Stderr: []byte("umount: " + p + ": not a mount point")}, &run.ExitError{Code: 1, Stderr: "not a mount point"}
+		}
+		delete(bound, p)
+		return run.Result{}, nil
+	}})
+	e.Jails.SetExecFn(func(_ string, o jailos.ExecOpts) (run.Result, error) {
+		if o.Argv[0] == "/bin/sh" && o.Argv[len(o.Argv)-1] == "web" {
+			return run.Result{ExitCode: 1, Stdout: []byte("web does not start\n")}, errors.New("exit 1")
+		}
+		return run.Result{}, nil
+	})
+	op, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151", Network: "lan", Storage: "default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = op.Wait(c)
+	var ae *api.Error
+	if !errors.As(err, &ae) || ae.Detail["step"] != "start-service-web" || ae.Detail["jail_kept"] != "true" || strings.Contains(ae.Hint, "incomplete") {
+		t.Fatalf("%v (hint %q)\n%s", err, ae.Hint, e.Log())
+	}
+	if j, err := e.Admin.Jails().Get(c, "web"); err != nil || j.Status.Power != api.PowerStopped {
+		t.Fatalf("the jail is kept stopped: %v %+v", err, j.Status)
+	}
+	if left, _ := filepath.Glob(filepath.Join(e.Cfg.DataDir, "journal", "app-install~*")); len(left) > 0 {
+		t.Fatalf("the run is still in the journal: %v", left)
+	}
+	rep, err := e.Admin.Doctor(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.IndexFunc(rep.Checks, func(ch api.DoctorCheck) bool { return ch.Name == "operations.journal" }); i < 0 || rep.Checks[i].Status != api.DoctorOK {
+		t.Fatalf("operations.journal: %+v", rep.Checks)
 	}
 }
 

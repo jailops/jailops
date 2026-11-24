@@ -6,12 +6,12 @@ image.auto_upgrade
 image.build
 image.generation_delete
 image.upgrade
+jail.apply
 jail.configure
 jail.copy
 jail.create
 jail.delete
 jail.import
-jail.provision
 jail.restart
 jail.restore
 jail.rollback

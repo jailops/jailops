@@ -1815,15 +1815,17 @@ expect "the root has no origin" '^-$' zfs get -H -o value origin "$thk/root"
 expect "setuid files come with the copy" '^-r-sr-xr-x' ls -l "$mount/projects/demo/jails/thk/root/usr/bin/su"
 check "hard links come with the copy" test "$(stat -f %l "$mount/projects/demo/jails/thk/root/sbin/md5")" -gt 1
 expect "the jail runs" 'thk +running' $J list --project demo -c name,state
+# the upgrades, base packages and the ports package below all run against a jail at the default securelevel
+expect "a FreeBSD jail that sets none runs at securelevel 2" '^2$' $J exec --project demo thk -- sysctl -n kern.securelevel
 # an in-place upgrade: pkg against the repository of the release installed in the jail, the base from the host on the
 # running root; the jail is never stopped
 thkjid=$(jls -j demo_thk jid)
-expect "the dry run of an in-place upgrade says what it would do" 'would upgrade jail thk|nothing to upgrade' $J jail upgrade thk --project demo --dry-run
+expect "the dry run of an in-place upgrade says what it would do" 'would upgrade jail thk|up to date' $J jail upgrade thk --project demo --dry-run
 expect_refused "a release older than the installed one is refused" $J jail upgrade thk --project demo --release 14.0-RELEASE
 check "upgrade the jail in place" $J jail upgrade thk --project demo
 [ "$(jls -j demo_thk jid)" = "$thkjid" ] || fail "the upgrade stopped the jail (jid $thkjid changed)"
 check "the upgraded jail answers" $J exec --project demo thk -- freebsd-version -u
-expect "a jail that is up to date says so" 'nothing to upgrade' $J jail upgrade thk --project demo
+expect "a jail that is up to date says so" 'up to date' $J jail upgrade thk --project demo
 [ "$(jls -j demo_thk jid)" = "$thkjid" ] || fail "an upgrade with nothing to do stopped the jail (jid $thkjid changed)"
 # the base repository stays disabled inside the jail, as FreeBSD ships it: pkg there sees the ports only
 expect_refused "the upgrade enables no FreeBSD-base repository inside the jail" sh -c "cat $mount/projects/demo/jails/thk/root/usr/local/etc/pkg/repos/*.conf 2>/dev/null | tr -d ' \t\n' | grep -q 'FreeBSD-base:{[^}]*enabled:yes'"
@@ -1851,7 +1853,7 @@ check "plant a chain of links: etc/ssl -> ../var/e2echain, var/e2echain -> a hos
 expect "the chain is refused as suspected" 'suspected_compromised: jail thk: etc/ssl is a symbolic link \(to ../var/e2echain\) whose path escapes the root' sh -c "$J jail upgrade thk --project demo 2>&1; true"
 expect_refused "nothing was written to the host through the chain" test -e /tmp/e2e-hostssl
 check "remove the chain" $J exec --project demo thk -- sh -c 'rm /etc/ssl /var/e2echain && mv /etc/ssl.e2e /etc/ssl'
-expect "a clean jail goes on (its /etc/localtime link is no finding)" 'nothing to upgrade|upgraded' $J jail upgrade thk --project demo
+expect "a clean jail goes on (its /etc/localtime link is no finding)" 'up to date|upgraded' $J jail upgrade thk --project demo
 # several jails, one after the other, with a summary
 check "a second jail" $J create thk2 --project demo --image "$img" --network lan --storage default --start
 expect "a bulk upgrade names every jail" 'thk2' $J jail upgrade thk thk2 --project demo

@@ -1,0 +1,8 @@
+# jailops jail apply postgres -f examples/recipes/postgres.yaml
+steps:
+  - package: [postgresql17-server]
+  - sysrc: {postgresql_enable: "YES"}
+  # the database lives in the volume at /var/db/postgres: initdb runs once, while the volume has no cluster
+  - run: [service, postgresql, initdb]
+    creates: /var/db/postgres/data17/PG_VERSION
+  - service: {name: postgresql, running: true}

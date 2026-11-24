@@ -52,6 +52,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorHostDirs(ctx, c)
 	s.doctorLeftovers(ctx, c)
 	s.doctorDelegation(ctx, c)
+	s.doctorDevfsRuleset(ctx, c)
 	s.doctorEncryption(ctx, c)
 	s.doctorBlockCloning(ctx, c)
 	s.doctorPF(ctx, c)
@@ -61,6 +62,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorOldRuns(ctx, c)
 	s.doctorNDPProxy(c)
 	s.doctorNDPUplink(ctx, c)
+	s.doctorNDReplyPath(c)
 	s.doctorDNS(ctx, c)
 	s.doctorUnbound(ctx, c)
 	s.doctorNameLengths(ctx, c)
@@ -536,6 +538,8 @@ func (s *Service) doctorPF(ctx context.Context, c *checkSet) {
 		}
 		s.doctorPFInbound(c, rules)
 		s.doctorHostDefaultDeny(c, rules)
+		s.doctorLegacyRdr(ctx, c)
+		s.doctorURPF(ctx, c, rules)
 		if hasScrub(rules) {
 			c.add("pf.scrub", api.DoctorOK, "pf.conf normalises packets (scrub)", "")
 		} else {

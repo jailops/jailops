@@ -77,6 +77,8 @@ type Files struct {
 	ImportErr error
 	// ReadErr makes ReadFile of a path fail with the error (a file the helper refuses to read).
 	ReadErr map[string]error
+	// HostKeys are the key directories below /usr/share/keys that SeedKeys copies; nil is those of a FreeBSD 15 host.
+	HostKeys []string
 	// Imports records what ImportHostDir copied, "src dst".
 	Imports []string
 	Owners  map[string]string // SetOwner: path -> uid:gid:mode
@@ -429,6 +431,13 @@ func (f *Files) SeedKeys(_ context.Context, root string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Dirs[path.Join(root, "usr/share/keys")] = true
+	keys := f.HostKeys
+	if keys == nil {
+		keys = []string{"pkg", "pkgbase-15"}
+	}
+	for _, k := range keys {
+		f.Dirs[path.Join(root, "usr/share/keys", k)] = true
+	}
 	return nil
 }
 

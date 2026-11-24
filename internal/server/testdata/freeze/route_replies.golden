@@ -160,6 +160,7 @@ POST /api/v1/jail-imports either
 POST /api/v1/jails async
 POST /api/v1/jails/{name}/access/allow sync
 POST /api/v1/jails/{name}/access/deny sync
+POST /api/v1/jails/{name}/apply async
 POST /api/v1/jails/{name}/config async
 POST /api/v1/jails/{name}/console stream
 POST /api/v1/jails/{name}/console/{id}/input stream
@@ -167,7 +168,6 @@ POST /api/v1/jails/{name}/console/{id}/resize stream
 POST /api/v1/jails/{name}/copy async
 POST /api/v1/jails/{name}/exec stream
 POST /api/v1/jails/{name}/expose sync
-POST /api/v1/jails/{name}/provision async
 POST /api/v1/jails/{name}/rename either
 POST /api/v1/jails/{name}/rollback async
 POST /api/v1/jails/{name}/shell-setup async

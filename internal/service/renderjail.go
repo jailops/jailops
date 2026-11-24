@@ -313,6 +313,15 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 		host = j.Metadata.Name
 	}
 	in := render.JailConfInput{Name: name, Path: s.rootMount(name), Hostname: host, OS: osf, Interfaces: b.ifaces, SysVIPC: j.Spec.SysVIPC, Where: s.promptContext(name), StopTimeout: stopTimeoutOf(j.Spec)}
+	// The default securelevel is decided here, from the record, so that a jail made before it gets it at its next
+	// start. A FreeBSD jail runs at api.DefaultSecureLevel unless it sets another. A Linux jail keeps the host's level:
+	// the level guards system file flags, and an Alpine root has no file with schg or sappnd, while Linux tools cannot
+	// see or set FreeBSD flags (chattr fails with EINVAL under the Linuxulator); what else it refuses (modules, the
+	// clock, raw disks) a jail is refused already. A Linux jail at 2 runs, starts, stops and installs with apk alike
+	// (FreeBSD 15.2), so one that wants it sets it.
+	if lvl, ok := api.EffectiveSecureLevel(osf, j.Spec.SecureLevel); ok {
+		in.SecureLevel = &lvl
+	}
 	if j.Spec.Delegate {
 		// The jail manages <container>/delegated itself: jail(8) attaches it (zfs.dataset) once the dataset has the
 		// jailed property, which a global admin's request set when delegation was turned on.

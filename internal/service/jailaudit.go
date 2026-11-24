@@ -11,8 +11,8 @@ import (
 
 	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/jailaudit"
+	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/store"
-	"jailops.net/jailops/internal/sys/jailos"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -22,13 +22,17 @@ type auditNote struct {
 	ids                []string
 }
 
+// hostVulnXML is the host's vulnerability database the audit uses (a variable for tests).
+var hostVulnXML = jailaudit.HostVulnXML
+
 // JailAudit answers GET /api/v1/jails/{name}/audit: a read-only audit of a FreeBSD jail, running or stopped
-// (docs/audit.md). The root helper reads the jail's root on the host (lifecycle.AuditRoot); in a running jail the
-// listening sockets are read with sockstat, as an app draft does. Nothing is changed and the jail is neither stopped
-// nor started; a stopped jail's root is mounted for the read and unmounted after it. Operator: the helper reads the
-// tenant's files as root of the host and the jail runs a command, like exec. Audited. An audit with a critical finding
-// sends the event jail-audit-critical; the doctor names the jails whose last audit found something (jail.audit).
-func (s *Service) JailAudit(ctx context.Context, name string) (api.JailAudit, error) {
+// (docs/audit.md). The root helper reads the jail's root on the host and pkg audit reads a copy of its package
+// database (lifecycle.AuditRoot); the jail parameters come from the jail.conf JailOps renders, the pending base
+// packages from the last update check. Nothing is changed, nothing runs in the jail, and the jail is neither stopped
+// nor started; a stopped jail's root is mounted for the read and unmounted after it. suggest adds the suggestions.
+// Operator: the helper reads the tenant's files as root of the host. Audited. An audit with a critical finding sends
+// the event jail-audit-critical; the doctor names the jails whose last audit found something (jail.audit).
+func (s *Service) JailAudit(ctx context.Context, name string, suggest bool) (api.JailAudit, error) {
 	p, key, err := s.jailRef(ctx, name)
 	if err != nil {
 		return api.JailAudit{}, err
@@ -40,6 +44,13 @@ func (s *Service) JailAudit(ctx context.Context, name string) (api.JailAudit, er
 	if s.jailIsLinux(j) {
 		return api.JailAudit{}, invalid("jail %q is a Linux jail; the audit reads a FreeBSD jail", name)
 	}
+	// the host's vulnerability database is read as it is: the audit never fetches it
+	var vulns jailaudit.VulnAudit
+	if fi, err := os.Stat(hostVulnXML); err != nil || !fi.Mode().IsRegular() {
+		vulns.NotRun = "the host has no vulnerability database (" + hostVulnXML + ")"
+	} else {
+		vulns.DBDays = int(s.now().Sub(fi.ModTime()) / (24 * time.Hour))
+	}
 	// a stopped jail's root is mounted for the read: no operation may start or change the jail meanwhile
 	unlock, err := s.locks.lockPatient(ctx, "audit "+key, jailLock(key))
 	if err != nil {
@@ -49,12 +60,17 @@ func (s *Service) JailAudit(ctx context.Context, name string) (api.JailAudit, er
 	// the helper's read is bounded (MaxHashTotal); this bounds the time the jail is held whatever happens there
 	actx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	ra, running, err := s.life.AuditRoot(actx, key)
+	ra, running, err := s.life.AuditRoot(actx, key, vulns.NotRun == "")
 	if err != nil {
 		return api.JailAudit{}, err
 	}
+	if vulns.NotRun == "" && !ra.VulnRan {
+		vulns.NotRun = ra.VulnErr
+	}
+	vulns.Packages = ra.Vulns
 	in := jailaudit.Input{Jail: name, Facts: ra.Facts, HasPkgDB: ra.HasPkgDB, Owned: ra.Owned, Packages: ra.Packages, BasePackages: ra.BasePackages,
-		UsedBytes: s.jailsDiskUsed(ctx, []string{key})[key], DiskLimit: j.Spec.Resources.Disk, Running: running, Shell: j.Spec.Shell, Prompt: j.Spec.Prompt}
+		UsedBytes: s.jailsDiskUsed(ctx, []string{key})[key], DiskLimit: j.Spec.Resources.Disk, Running: running, Shell: j.Spec.Shell, Prompt: j.Spec.Prompt,
+		Vulns: vulns}
 	in.Hostname = j.Spec.Hostname
 	if in.Hostname == "" {
 		in.Hostname = j.Metadata.Name
@@ -67,31 +83,42 @@ func (s *Service) JailAudit(ctx context.Context, name string) (api.JailAudit, er
 			}
 		}
 	}
-	for _, e := range j.Spec.Expose {
-		for _, port := range e.Ports {
-			in.Exposed = append(in.Exposed, e.Protocol()+"/"+port)
-		}
-	}
 	if b, err := os.ReadFile(path.Join(hostPkgDir, "repos", apps.JailopsRepo+".conf")); err == nil {
 		in.JailopsRepoURL = jailaudit.RepoURL(string(b), apps.JailopsRepo)
 	}
-	if running {
-		if s.d.Jails == nil {
-			in.SocketsErr = "this daemon cannot run commands in a jail"
-		} else {
-			argv := apps.SockstatArgv()
-			res, err := s.d.Jails.Exec(ctx, key, jailos.ExecOpts{Argv: argv, Timeout: draftTimeout})
-			if err != nil {
-				in.SocketsErr = strings.Join(argv, " ") + ": " + err.Error()
-			}
-			for _, l := range apps.ParseSockstat(res.Stdout) {
-				in.Listeners = append(in.Listeners, jailaudit.Listener{Command: l.Command, Proto: l.Proto, Port: l.Port, Loopback: l.Loopback})
-			}
+	// the jail parameters as JailOps renders them for jail(8)
+	if b, err := s.d.Files.ReadFile(ctx, s.confPath(key)); err != nil {
+		in.Params.Err = err.Error()
+	} else {
+		in.Params = jailaudit.ParseJailConf(string(b))
+	}
+	if devs := render.SpecDevfsDevices(j.Spec); len(devs) > 0 {
+		if n, _, err := render.DevfsRuleset(devs); err == nil {
+			in.DevfsOwn = n
 		}
 	}
-	out := api.JailAudit{Jail: name, Running: running, Checks: jailaudit.Evaluate(in)}
+	// the base packages as the last update check found them: the audit fetches no catalogue
+	if rep, ok := s.upd.report(key); ok {
+		in.BaseUpdates = jailaudit.BaseUpdates{Checked: true, At: rep.CheckedAt}
+		if rep.OS != nil {
+			in.BaseUpdates.Pending = rep.OS.To
+		} else {
+			// the parts of the check's error that concern the base (checkJail): a stopped jail's base is not checked
+			var why []string
+			for _, e := range strings.Split(rep.Error, "; ") {
+				if strings.HasPrefix(e, "base packages") || strings.Contains(e, "is stopped") {
+					why = append(why, e)
+				}
+			}
+			in.BaseUpdates.Err = strings.Join(why, "; ")
+		}
+	}
+	out := api.JailAudit{Jail: name, Running: running, Checks: jailaudit.Evaluate(in, suggest)}
 	note := auditNote{}
 	for _, c := range out.Checks {
+		if c.Suggestion {
+			continue
+		}
 		switch c.Result {
 		case api.AuditCritical:
 			out.Critical++
@@ -119,7 +146,8 @@ func (s *Service) JailAudit(ctx context.Context, name string) (api.JailAudit, er
 }
 
 // doctorAudit names the jails whose last audit since the daemon started found something: a critical finding fails, a
-// warning warns. A jail that was not audited is not named; the audit itself runs on demand (jailops jail audit).
+// warning warns. Only the default checks count; a suggestion is never a finding. A jail that was not audited is not
+// named; the audit itself runs on demand (jailops jail audit).
 func (s *Service) doctorAudit(c *checkSet) {
 	s.auditMu.Lock()
 	notes := make(map[string]auditNote, len(s.audits))

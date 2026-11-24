@@ -1,0 +1,4 @@
+# jailops jail apply web -f recipe/
+steps:
+  - package: [nginx]
+  - service: {name: nginx, enabled: true, running: true}

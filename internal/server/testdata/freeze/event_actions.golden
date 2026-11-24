@@ -11,11 +11,11 @@ image-generation-created
 image-generation-deleted
 image-upgrade-failed
 image-upgraded
+jail-applied
 jail-audit-critical
 jail-created
 jail-deleted
 jail-exposed
-jail-provisioned
 jail-restarted
 jail-rolled-back
 jail-shell-set-up

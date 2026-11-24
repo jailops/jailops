@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"jailops.net/jailops/sdk/api"
@@ -68,19 +69,24 @@ func PromptFile(ps1 string) (string, error) {
 	return b.String(), nil
 }
 
-// The marked block that sources api.EnvFile and, when the jail has a prompt, api.PromptFile.
+// The marked block at the top of the two start-up files of bash (api.ProfilePath, read by a login bash, and api.BashrcPath,
+// read by every other interactive bash): it sources every file of /usr/local/etc/profile.d, JailOps' own (api.EnvFile and
+// api.PromptFile) and the ones an administrator or a recipe puts there. FreeBSD's /etc/profile reads that directory for a
+// login sh itself and starts a login bash's file after the variable _loaded was set; the block does the reading only
+// where nobody did it, so no file is sourced twice.
 const (
-	promptBegin = "# BEGIN jailops shell: managed by JailOps (jailops config set JAIL prompt none keeps the variables and drops the prompt)"
+	promptBegin = "# BEGIN jailops shell: managed by JailOps (jailops jail shell-setup writes it)"
 	promptEnd   = "# END jailops shell"
 )
 
-func promptBlock(withPrompt bool) string {
-	b := promptBegin + "\n" +
-		"if [ -r " + api.EnvFile + " ]; then . " + api.EnvFile + "; fi\n"
-	if withPrompt {
-		b += "if [ -r " + api.PromptFile + " ]; then . " + api.PromptFile + "; fi\n"
-	}
-	return b + promptEnd + "\n"
+func promptBlock() string {
+	return promptBegin + "\n" +
+		"if [ -z \"${_loaded:-}\" ]; then\n" +
+		"\tfor _jailops_f in " + path.Dir(api.EnvFile) + "/*.sh; do\n" +
+		"\t\tif [ -r \"$_jailops_f\" ]; then . \"$_jailops_f\"; fi\n" +
+		"\tdone\n" +
+		"\tunset _jailops_f\n" +
+		"fi\n" + promptEnd + "\n"
 }
 
 // splitPromptBlock returns existing without the marked block, and whether there was one. A begin line without
@@ -113,12 +119,12 @@ func splitPromptBlock(existing string) (string, bool, error) {
 // PromptHookSet returns existing (the content of api.ProfilePath or api.BashrcPath, empty when the file does not
 // exist) with the marked block at its top, so the file's own lines and the user's start-up files come after it
 // and win. A block that is there already is replaced; every other line is kept as it is.
-func PromptHookSet(existing string, withPrompt bool) (string, error) {
+func PromptHookSet(existing string) (string, error) {
 	rest, _, err := splitPromptBlock(existing)
 	if err != nil {
 		return "", err
 	}
-	return promptBlock(withPrompt) + rest, nil
+	return promptBlock() + rest, nil
 }
 
 // ShrcHookSet returns existing (the content of api.ShrcPath, empty when the file does not exist) with the marked block

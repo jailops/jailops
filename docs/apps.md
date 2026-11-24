@@ -258,7 +258,7 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    the end of an output that never comes. With the wrapper the rc script and everything it starts write to a temporary
    file in the jail; when the start fails, the file is printed and the error names `/usr/sbin/service <name> start` with
    that output. The service name is checked against `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` before the command is built.
-   The provisioning `services.start` step of a FreeBSD jail uses the same wrapper. `setup` and `health.exec` commands
+   The `service` step of a recipe (`jailops jail apply`) uses the same wrapper. `setup` and `health.exec` commands
    stay plain argv: they are the definition's own commands, without a shell. The jail's own start (`jail -c` running
    `/etc/rc`) is detached the same way by `exec.consolelog` in its `jail.conf`: the output of `/etc/rc` goes to
    `/var/log/jailops/jail_<project>_<jail>_console.log` on the host (design section 6).

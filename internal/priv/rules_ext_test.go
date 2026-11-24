@@ -327,13 +327,19 @@ func TestDevfsRule(t *testing.T) {
 		{"rule", "-s", "100", "add", "path", "tty", "mode", "u+s"}, {"rule", "-s", "100", "add", "path", "tty", "mode", "77777"}, {"rule", "-s", "100", "add", "path", "tty", "user", "-x"},
 		{"rule", "-s", "100", "add", "path", "tty", "user", "a b"}, {"rule", "-s", "100", "add", "path", "tty", "user", "0"}, {"rule", "-s", "100", "add", "path", "tty", "include", "x"},
 		{"rule", "-s", "100", "add", "include", "x"}, {"rule", "-s", "100", "add", "hide", "extra"}, {"rule", "-s", "100", "add", "path", "tty", "unhide", "extra"},
-		{"-m", "/dev", "rule", "-s", "100", "add", "hide"}, {"ruleset", "100"}, {"rule", "showsets"}, {"rule", "-s", "5", "delset"}, {"rule", "-s", "100", "delset", "x"}, {"rule", "-s", "100", "add", "path", "tty", "mode", "666", "user", "root", "x", "y"},
+		{"-m", "/dev", "rule", "-s", "100", "add", "hide"}, {"ruleset", "100"}, {"rule", "-s", "5", "delset"},
+		{"rule", "-s", "5", "show"}, {"rule", "-s", "5000", "show"}, {"rule", "-s", "4", "show", "x"}, {"rule", "showsets", "x"}, {"-m", "/dev", "rule", "-s", "4", "show"}, {"rule", "-s", "100", "delset", "x"}, {"rule", "-s", "100", "add", "path", "tty", "mode", "666", "user", "root", "x", "y"},
 		{"rule", "-s", "100", "add", "path", "tty", "-x"}, {"rule", "-s", "100", "add", "path", "*", "unhide", ";", "id"}, {},
 	} {
 		r.bad(t, append([]string{"devfs"}, a...)...)
 	}
 	// an admin may add rulesets below 100 through AdminPolicy.DevfsRulesets only for mounting, not defining
 	r.bad(t, "devfs", "rule", "-s", "10", "add", "hide")
+	// read-only: the sets the kernel has and the stock sets 1 to 4 (doctor: jail.devfs_ruleset)
+	r.ok(t, "devfs", "rule", "showsets")
+	for _, n := range []string{"1", "2", "3", "4"} {
+		r.ok(t, "devfs", "rule", "-s", n, "show")
+	}
 	// dropping the ruleset of a build jail is for an admin (the daemon's system actor) only
 	if err := r.check(WithAdmin(context.Background(), "jailopsd"), "devfs", "rule", "-s", "37885", "delset"); err != nil {
 		t.Errorf("admin delset: %v", err)
@@ -626,7 +632,9 @@ func TestLiveVolumeMountIsHeldToTheFstabChecks(t *testing.T) {
 		filepath.Join(r.root, "srv", "mail", "inner"), filepath.Join(r.root, "var", "x"), filepath.Join(r.root, "proc"), filepath.Join(r.root, "sys")} {
 		os.MkdirAll(d, 0o755)
 	}
-	mount := func(target string) []string { return []string{"mount", "-t", "nullfs", vol, target} }
+	mount := func(target string) []string {
+		return []string{"mount", "-t", "nullfs", "-o", "nosuid,nocover", vol, target}
+	}
 	// what is mounted below the jail's root now: the Linux layout and one volume at /srv/mail
 	list := strings.Join([]string{
 		"devfs " + filepath.Join(r.root, "dev") + " devfs rw 0 0",
@@ -638,7 +646,11 @@ func TestLiveVolumeMountIsHeldToTheFstabChecks(t *testing.T) {
 	withMountStubs(t, func() ([]mountEntry, error) { return mountTableFrom(list), nil })
 	os.MkdirAll(filepath.Join(r.root, "usr", "local", "www"), 0o755)
 	r.ok(t, mount(filepath.Join(r.root, "usr", "local", "www"))...)
-	r.ok(t, "mount", "-t", "nullfs", vol, filepath.Join(r.root, "srv", "other"))
+	r.ok(t, "mount", "-t", "nullfs", "-o", "ro,nosuid,nocover", vol, filepath.Join(r.root, "srv", "other"))
+	// a volume is nosuid and nocover: without them (or with only one) the helper refuses
+	r.bad(t, "mount", "-t", "nullfs", vol, filepath.Join(r.root, "srv", "other"))
+	r.bad(t, "mount", "-t", "nullfs", "-o", "nosuid", vol, filepath.Join(r.root, "srv", "other"))
+	r.bad(t, "mount", "-t", "nullfs", "-o", "ro,nocover", vol, filepath.Join(r.root, "srv", "other"))
 	os.MkdirAll(filepath.Join(r.root, "srv", "other"), 0o755)
 	r.ok(t, mount(filepath.Join(r.root, "srv", "other"))...)
 	// the second mount of a Linux jail: the same path below the mirror

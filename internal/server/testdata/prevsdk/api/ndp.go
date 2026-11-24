@@ -8,6 +8,27 @@ type NDPStatus struct {
 	Uplinks []NDPUplink `json:"uplinks"`
 	// Networks are the networks with an IPv6 prefix and what the proxy answers for on each.
 	Networks []NDPNetwork `json:"networks"`
+	// ReplyPath lists the routers that asked for an address of the host itself again and again (three or more
+	// solicitations within five seconds), with where the host sent its answers: the capture of the proxy sees both.
+	// An answer sent to another MAC than the router's never reaches that router (docs/networking-ipv6.md).
+	ReplyPath []NDPReplyPath `json:"reply_path,omitempty"`
+}
+
+// NDPReplyPath is one router that solicited an address of the host repeatedly on an uplink.
+type NDPReplyPath struct {
+	Uplink string `json:"uplink"`
+	// Router is the source address of the solicitations; HostAddress the host's address they asked for.
+	Router      string `json:"router"`
+	HostAddress string `json:"host_address"`
+	// Repeats counts the solicitations that came as the third or later within five seconds.
+	Repeats  uint64    `json:"repeats"`
+	LastSeen time.Time `json:"last_seen"`
+	// RouterMAC is the router's link-layer address (its source link-layer option, else the Ethernet source);
+	// NADstMAC the Ethernet destination of the host's last answer, empty when no answer was seen.
+	RouterMAC string `json:"router_mac"`
+	NADstMAC  string `json:"na_dst_mac,omitempty"`
+	// Misdirected is true when the host's answers went to another MAC than the router's.
+	Misdirected bool `json:"misdirected,omitempty"`
 }
 
 // AnswerLimit6 is how many addresses of the IPv6 allocation range of a network the proxy answers for, counted from the
@@ -45,6 +66,9 @@ type NDPUplink struct {
 	Floods       uint64       `json:"floods"`
 	InjectErrors uint64       `json:"inject_errors"`
 	Addrs        []NDPAddress `json:"addrs,omitempty"`
+	// HostSolicits counts the solicitations for an address of the host itself the capture saw since the daemon
+	// started (the observation of the reply path, ReplyPath of NDPStatus).
+	HostSolicits uint64 `json:"host_solicits,omitempty"`
 }
 
 // NDPAddress is what the proxy knows about one address: held or not, the solicitations it saw for it and what it did.

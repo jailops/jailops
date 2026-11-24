@@ -99,7 +99,7 @@ func TestNewJailGetsThePromptAndNoShellIsInstalled(t *testing.T) {
 		t.Fatalf("the prompt file holds names: %q", e.File(webRoot+api.PromptFile))
 	}
 	for _, p := range []string{api.ProfilePath, api.BashrcPath} {
-		if f := e.File(webRoot + p); !strings.HasPrefix(f, "# BEGIN jailops shell") || !strings.Contains(f, ". "+api.EnvFile) || !strings.Contains(f, ". "+api.PromptFile) {
+		if f := e.File(webRoot + p); !strings.HasPrefix(f, "# BEGIN jailops shell") || !strings.Contains(f, "profile.d/*.sh") {
 			t.Fatalf("%s: %q", p, f)
 		}
 	}
@@ -152,8 +152,8 @@ func TestNewJailGetsThePromptAndNoShellIsInstalled(t *testing.T) {
 	// none removes the prompt file and keeps the variables; a start-up file with lines of its own keeps them
 	e.Files.Put(webRoot+api.BashrcPath, []byte(e.File(webRoot+api.BashrcPath)+"alias ll='ls -l'\n"))
 	mustOp(e.Admin.Jails().Config(ctx, "web", map[string]string{"prompt": "none"}, nil, false))
-	if b := e.File(webRoot + api.BashrcPath); e.HasFile(webRoot+api.PromptFile) || !e.HasFile(webRoot+api.EnvFile) || !strings.Contains(b, ". "+api.EnvFile) ||
-		strings.Contains(b, api.PromptFile) || !strings.HasSuffix(b, "alias ll='ls -l'\n") {
+	if b := e.File(webRoot + api.BashrcPath); e.HasFile(webRoot+api.PromptFile) || !e.HasFile(webRoot+api.EnvFile) || !strings.Contains(b, "profile.d/*.sh") ||
+		!strings.HasSuffix(b, "alias ll='ls -l'\n") {
 		t.Fatalf("none left: %v %q", e.Files.Paths(), b)
 	}
 	// a stopped jail gets a changed prompt at its next start

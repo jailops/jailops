@@ -37,7 +37,7 @@ run_workflows() {
 
 	row patch-one "patch the operating system of one jail"
 	check "a file in the jail's data" wf_exec wft sh -c 'echo wf-keep > /var/db/wf-keep'
-	expect "a dry run says what it would do" 'would upgrade jail wft|nothing to upgrade' $J jail upgrade wft $P --dry-run
+	expect "a dry run says what it would do" 'would upgrade jail wft|up to date' $J jail upgrade wft $P --dry-run
 	check "the jail is upgraded in place" $J jail upgrade wft $P
 	expect "the data is where it was" 'wf-keep' wf_exec wft cat /var/db/wf-keep
 
@@ -114,7 +114,9 @@ run_workflows() {
 	row snapshot-rollback "snapshot a jail, roll it back"
 	check "a snapshot" $J jail snapshot create wft wfs1 $P
 	check "data written after it" wf_exec wft sh -c 'echo after > /var/db/wf-after'
+	check "stop the jail: a rollback of a running jail is refused" $J stop wft $P
 	check "roll the jail back to it" $J jail rollback wft $P --scope all --snapshot wfs1 --confirm-data-loss
+	check "start it again" $J start wft $P
 	wf_up wft
 	expect_refused "what was written after the snapshot is gone" wf_exec wft test -e /var/db/wf-after
 	expect "what was written before it stays" 'wf-keep' wf_exec wft cat /var/db/wf-keep

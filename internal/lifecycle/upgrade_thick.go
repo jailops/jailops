@@ -673,6 +673,12 @@ func (s *Service) planThickUpgrade(ctx context.Context, st *jailState, rec Recor
 		res.State.BaseChange, res.State.PortsStep = baseChange, portsStep
 		if !baseChange && !portsStep {
 			res.Nothing, res.Changed = true, false
+			if !add {
+				res.Checks = append(res.Checks, fmt.Sprintf("%d base packages are current in the repository of %s", len(installed), targetRel))
+				if !req.NoPackages && req.Ports != nil && !req.Ports.None {
+					res.Checks = append(res.Checks, "the ports packages are current")
+				}
+			}
 			// a jail that pkg finds current has no upgrade left half-done: an old note of a failed rollback goes
 			s.clearUpgradeIncomplete(ctx, st.Container)
 			return nil, res, nil
@@ -745,9 +751,6 @@ func (s *Service) planThickUpgrade(ctx context.Context, st *jailState, rec Recor
 			} else if busy {
 				return nil, res, api.Errorf(api.CodeBusy, "replication of jail %s is running", name)
 			}
-		}
-		if len(st.Volumes)+len(st.HostDirs) > 0 {
-			res.Warnings = append(res.Warnings, "the volumes attached to the jail are outside its root and are not rolled back with it")
 		}
 	}
 	all := st.all()

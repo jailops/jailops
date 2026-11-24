@@ -345,30 +345,39 @@ func isRelease(rel string) bool {
 // of the image's release written out: pkg expands ${VERSION_MINOR} from the
 // ABI it was given, which carries no minor, so it answered 0 and a 15.1 image
 // was built from the 15.0 packages. Anything else (STABLE, CURRENT) reads
-// base_latest.
+// base_latest. The key directory is chosen once the host's keys are in the root
+// (PkgBaseKeys), so the step runs after seed-keys.
 func (p PkgBase) repoConf(b *Build) plan.Step {
 	m := b.M
 	file := path.Join(b.Work, "repos", "jailops.conf")
-	url, keys, body, err := PkgBaseRepoConf(b.Spec)
+	url, keys, _, err := PkgBaseRepoConf(b.Spec)
 	if err != nil {
 		return plan.Step{Name: "write-repo-conf", Describe: "write the repository file",
 			Do: func(context.Context) error { return err }}
+	}
+	if b.Spec.Source.Keys == "" {
+		keys = "those of the host's FreeBSD-base repository, else " + strings.Join(keyCandidates(url, b.Spec.Release, "", ""), " or ")
 	}
 	return plan.Step{
 		Name: "write-repo-conf", Describe: "write " + file + " (url " + url + ", fingerprints " + keys + ")",
 		// Found on FreeBSD: the helper's atomic write does not create parent directories.
 		Do: func(ctx context.Context) error {
+			keys, err := PkgBaseKeys(ctx, m.Files, b.Root, b.Spec, url)
+			if err != nil {
+				return err
+			}
 			if err := m.Files.MkdirAll(ctx, path.Dir(file)); err != nil {
 				return err
 			}
-			return m.Files.WriteAtomic(ctx, file, []byte(body))
+			return m.Files.WriteAtomic(ctx, file, []byte(pkgBaseRepoBody(url, keys)))
 		},
 		Undo: func(ctx context.Context) error { return m.Files.RemoveAll(ctx, b.Work) },
 	}
 }
 
 // PkgBaseRepoConf is the repository file of a pkgbase image: its url, its fingerprints directory and the file body.
-// The file is the only form the helper accepts (internal/priv/pkgrepo.go).
+// The file is the only form the helper accepts (internal/priv/pkgrepo.go). Without --keys the key directory is the one
+// of the repository's kind; an image build checks that the host ships it (PkgBaseKeys).
 func PkgBaseRepoConf(spec api.ImageSpec) (url, keys, body string, err error) {
 	url = spec.Source.Repo
 	keys = spec.Source.Keys
@@ -380,23 +389,21 @@ func PkgBaseRepoConf(spec api.ImageSpec) (url, keys, body string, err error) {
 			}
 			url = fmt.Sprintf("pkg+https://pkg.FreeBSD.org/${ABI}/base_release_%d", minor)
 		} else {
-			// base_latest is signed with the key of the ports repositories, not the pkgbase release keys (verified on
-			// 15.2-PRERELEASE: with pkgbase-15 pkg answers "No trusted public keys found")
 			url = "pkg+https://pkg.FreeBSD.org/${ABI}/base_latest"
-			if keys == "" {
-				keys = "/usr/share/keys/pkg"
-			}
 		}
 	}
 	if keys == "" {
-		keys = "/usr/share/keys/pkgbase-${VERSION_MAJOR}"
+		keys = keyCandidates(url, spec.Release, "", "")[0]
 	}
+	return url, keys, pkgBaseRepoBody(url, keys), nil
+}
+
+func pkgBaseRepoBody(url, keys string) string {
 	mirror := ""
 	if strings.HasPrefix(url, "pkg+") {
 		mirror = "  mirror_type: \"srv\",\n"
 	}
-	body = repoBlock(PkgBaseRepoName, url, mirror, keys)
-	return url, keys, body, nil
+	return repoBlock(PkgBaseRepoName, url, mirror, keys)
 }
 
 func repoBlock(name, url, mirror, keys string) string {
@@ -405,7 +412,7 @@ func repoBlock(name, url, mirror, keys string) string {
 
 func (p PkgBase) Install(b *Build) ([]plan.Step, error) {
 	r := &pkgRun{p: p, b: b}
-	steps := append([]plan.Step{p.cacheStep(b), p.repoConf(b), r.abiStep()}, p.keysSteps(b)...)
+	steps := append(append([]plan.Step{p.cacheStep(b), r.abiStep()}, p.keysSteps(b)...), p.repoConf(b))
 	steps = append(steps,
 		r.step("pkg-update", "update", "-f", "-r", "jailops"),
 		r.step("pkg-install", append([]string{"install", "-y", "-r", "jailops"}, p.sets(b.Spec)...)...),
@@ -553,7 +560,7 @@ func (PkgBase) baseRepoOffStep(b *Build) plan.Step {
 
 func (p PkgBase) Upgrade(b *Build) ([]plan.Step, error) {
 	r := &pkgRun{p: p, b: b}
-	steps := append([]plan.Step{p.cacheStep(b), p.repoConf(b), r.abiStep()}, p.keysSteps(b)...)
+	steps := append(append([]plan.Step{p.cacheStep(b), r.abiStep()}, p.keysSteps(b)...), p.repoConf(b))
 	return append(steps,
 		r.step("pkg-update", "update", "-f", "-r", "jailops"),
 		r.step("pkg-upgrade", "upgrade", "-y", "-r", "jailops"),

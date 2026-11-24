@@ -55,6 +55,13 @@ jail/web rolled back
 $ jailops jail rollback web --scope all --snapshot good --confirm-data-loss
 Rolling back all of jail web to snapshot good (taken 3h ago).
 2.0 KiB written since then would be discarded.
+! precondition_failed: snapshots taken after "good" exist: newer; a rollback to "good" destroys them
+! hint: pass --destroy-newer with --confirm-data-loss (destroy_newer and confirm_data_loss in the API)
+[exit 5]
+
+$ jailops jail rollback web --scope all --snapshot good --confirm-data-loss --destroy-newer
+Rolling back all of jail web to snapshot good (taken 3h ago).
+2.0 KiB written since then would be discarded.
 jail/web rolled back
 
 $ jailops jail rollback web

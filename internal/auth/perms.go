@@ -173,7 +173,8 @@ var Perms = classifyAll([]Entry{
 	r("GET", "/api/v1/jails/{name}/updates", ro),
 	r("GET", "/api/v1/jails/{name}/reach", ro),
 	r("GET", "/api/v1/exposed", ro),
-	r("POST", "/api/v1/jails/{name}/provision", ad),
+	// runs the steps of a recipe in the jail as root: no more than an operator may do with exec, cp and pkg
+	r("POST", "/api/v1/jails/{name}/apply", op),
 	// installs one fixed package (bash) and writes JailOps' own prompt files: no more than an operator may do with exec
 	r("POST", "/api/v1/jails/{name}/shell-setup", op),
 	// only the package database of the jail changes (no file is touched, no script runs)

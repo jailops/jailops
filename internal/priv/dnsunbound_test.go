@@ -2,6 +2,7 @@ package priv
 
 import (
 	"context"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"jailops.net/jailops/internal/dnsprobe"
+	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/run"
 )
 
@@ -137,5 +139,32 @@ func TestDNSUnboundKeepsTheNamesWhenNothingAnsweredBefore(t *testing.T) {
 	res, err := d.l.DNSUnbound(WithAdmin(context.Background(), "root"), true)
 	if err != nil || !res.Changed || !strings.Contains(res.Warn, "does not answer at 127.0.0.1") || d.read(t) == "OLD\n" {
 		t.Fatalf("err %v, %+v", err, res)
+	}
+}
+
+// The resolver address of a network that is gone comes off the loopback without a sync of the names (the helper
+// starts, or the names are off); the address of a stored network stays, and an address the helper did not put there
+// is never touched.
+func TestStaleResolverAddressesComeOffTheLoopback(t *testing.T) {
+	e := newEnv(t)
+	e.local.cfg.HostDir = filepath.Join(e.base, "host")
+	e.net.AddIface(ifconfig.Iface{Name: "lo0", Groups: []string{"lo"}, Flags: []string{"UP", "LOOPBACK"}, Inet6: []netip.Prefix{
+		netip.MustParsePrefix("fd91:1::1/128"), netip.MustParsePrefix("2001:db8:1:2:100::1/128"), netip.MustParsePrefix("fd99::1/128")}})
+	e.runner.On("/sbin/ifconfig", []string{run.RestArgs}, "")
+	e.local.writeResolverAddrs([]string{"fd91:1::1", "2001:db8:1:2:100::1"})
+	e.local.DropStaleResolverAddrs(context.Background(), false)
+	got := strings.Join(e.runner.Argv(), "\n")
+	if !strings.Contains(got, "/sbin/ifconfig lo0 inet6 fd91:1::1 prefixlen 128 -alias") || strings.Contains(got, "2001:db8:1:2:100::1") || strings.Contains(got, "fd99::1") {
+		t.Fatalf("only the address of the deleted network comes off:\n%s", got)
+	}
+	b, _ := os.ReadFile(e.local.resolverAddrsFile())
+	if strings.TrimSpace(string(b)) != `["2001:db8:1:2:100::1"]` {
+		t.Fatalf("record %s", b)
+	}
+	// the names are off: every address the helper put there comes off
+	e.runner.Reset()
+	e.local.DropStaleResolverAddrs(context.Background(), true)
+	if got := strings.Join(e.runner.Argv(), "\n"); !strings.Contains(got, "2001:db8:1:2:100::1 prefixlen 128 -alias") || strings.Contains(got, "fd99::1") {
+		t.Fatalf("all of the helper's own addresses come off:\n%s", got)
 	}
 }

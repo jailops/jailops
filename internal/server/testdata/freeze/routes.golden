@@ -160,6 +160,7 @@ POST /api/v1/jail-imports
 POST /api/v1/jails
 POST /api/v1/jails/{name}/access/allow
 POST /api/v1/jails/{name}/access/deny
+POST /api/v1/jails/{name}/apply
 POST /api/v1/jails/{name}/config
 POST /api/v1/jails/{name}/console
 POST /api/v1/jails/{name}/console/{id}/input
@@ -167,7 +168,6 @@ POST /api/v1/jails/{name}/console/{id}/resize
 POST /api/v1/jails/{name}/copy
 POST /api/v1/jails/{name}/exec
 POST /api/v1/jails/{name}/expose
-POST /api/v1/jails/{name}/provision
 POST /api/v1/jails/{name}/rename
 POST /api/v1/jails/{name}/rollback
 POST /api/v1/jails/{name}/shell-setup

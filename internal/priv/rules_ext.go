@@ -280,6 +280,7 @@ func (c Config) checkMountOptions(typ, opts string) error {
 		switch {
 		case slices.Contains(simpleMounts, o):
 		case o == "late", typ == "fdescfs" && o == "linrdlnk": // the options the Linux dev layout uses (render/fstab.go)
+		case typ == "nullfs" && o == "nocover": // a live volume mount never covers another file system's root (verifyMount)
 		case typ == "tmpfs" && (reMountSize.MatchString(o) || reMountMode.MatchString(o)):
 			if strings.HasPrefix(o, "mode=") && len(o) == 9 && o[5] != '0' && o[5] != '1' {
 				return forbidden("mount: %s has a setuid or setgid bit", o)
@@ -348,6 +349,18 @@ func verifyMount(ctx context.Context, l *Local, args []string) error {
 	if i := slices.Index(args, "nullfs"); i == 1 && len(args) >= 4 {
 		if err := checkVolumeMountTarget(ctx, l, args[len(args)-2], args[len(args)-1]); err != nil {
 			return err
+		}
+		// a volume in a jail's root is nosuid and nocover: the mount point is resolved by path in a tree the jail
+		// controls (FreeBSD has no mount through a descriptor), and nocover keeps a link swapped in from carrying it
+		// over the root of another file system
+		if root, ok := l.cfg.jailRootPath(args[len(args)-1]); ok && args[len(args)-2] != root {
+			var opts []string
+			if args[2] == "-o" {
+				opts = strings.Split(args[3], ",")
+			}
+			if !slices.Contains(opts, "nosuid") || !slices.Contains(opts, "nocover") {
+				return forbidden("mount: a volume in a jail's root is mounted with -o nosuid,nocover")
+			}
 		}
 		// a source of the host's own directories is held to the allowed directory it lies below, links and all
 		src := args[len(args)-2]
@@ -517,6 +530,17 @@ func verifyJail(ctx context.Context, l *Local, args []string) error {
 func customDevfs(c Config, admin bool, args []string) error {
 	bad := func() error {
 		return forbidden("devfs: rule %q is not in the accepted grammar", strings.Join(args, " "))
+	}
+	// read-only: the sets the kernel has, and the rules of the stock sets 1 to 4 the jails build on (doctor:
+	// jail.devfs_ruleset)
+	if len(args) == 2 && args[0] == "rule" && args[1] == "showsets" {
+		return nil
+	}
+	if len(args) == 4 && args[0] == "rule" && args[1] == "-s" && args[3] == "show" {
+		if !slices.Contains([]string{"1", "2", "3", "4"}, args[2]) {
+			return forbidden("devfs: only the stock rulesets 1 to 4 are shown")
+		}
+		return nil
 	}
 	if len(args) == 4 && args[0] == "rule" && args[1] == "-s" && args[3] == "delset" { // drops a ruleset the build jail loaded
 		if !admin {

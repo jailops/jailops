@@ -293,13 +293,18 @@ func TestProbeOfAHungMountDoesNotHoldTheRequestBudget(t *testing.T) {
 // the host's mounts before and after.
 func TestAMountThatLandedElsewhereIsFound(t *testing.T) {
 	before := parseMountPoints("tank/a /a zfs rw 0 0\nvol /jail/srv nullfs rw 0 0\n")
-	ok := parseMountPoints("tank/a /a zfs rw 0 0\nvol /jail/srv nullfs rw 0 0\nvol2 /jail/y nullfs rw 0 0\n")
-	if got := landedElsewhere(before, ok, "/jail/y"); len(got) != 0 {
+	ok := mountTableFrom("tank/a /a zfs rw 0 0\nvol /jail/srv nullfs rw 0 0\nvol2 /jail/y nullfs rw 0 0\n")
+	if got := strayMounts(before, ok, "/jail/y", []string{"vol2"}); len(got) != 0 {
 		t.Errorf("a mount at its path: %v", got)
 	}
-	bad := parseMountPoints("tank/a /a zfs rw 0 0\nvol /jail/srv nullfs rw 0 0\nvol2 /usr/local/etc/rc.d nullfs rw 0 0\n")
-	if got := landedElsewhere(before, bad, "/jail/y"); len(got) != 1 || got[0] != "/usr/local/etc/rc.d" {
+	bad := mountTableFrom("tank/a /a zfs rw 0 0\nvol /jail/srv nullfs rw 0 0\nvol2 /usr/local/etc/rc.d nullfs rw 0 0\n")
+	if got := strayMounts(before, bad, "/jail/y", []string{"vol2"}); len(got) != 1 || got[0].mp != "/usr/local/etc/rc.d" {
 		t.Errorf("a mount that went through a link: %v", got)
+	}
+	// the mount point is right but the source went through a link (another jail's writable directory swapped for one)
+	src := mountTableFrom("tank/a /a zfs rw 0 0\nvol /jail/srv nullfs rw 0 0\n/etc /jail/y nullfs rw 0 0\n")
+	if got := strayMounts(before, src, "/jail/y", []string{"vol2"}); len(got) != 1 || got[0].dev != "/etc" {
+		t.Errorf("a mount from another source: %v", got)
 	}
 }
 

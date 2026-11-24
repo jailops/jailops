@@ -80,3 +80,50 @@ var rcEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`, "`", "\\`")
 func rcLine(name, value string) string {
 	return name + `="` + rcEscaper.Replace(value) + `"`
 }
+
+// RcConfGet returns the value that the last assignment of name in existing (the content of an rc.conf style file)
+// gives, and whether the file assigns it. The value is read the way sh reads a plain assignment: double or single
+// quoted text, or one word.
+func RcConfGet(existing, name string) (string, bool) {
+	val, found := "", false
+	for _, l := range strings.Split(existing, "\n") {
+		n, ok := rcAssignedName(l)
+		if !ok || n != name {
+			continue
+		}
+		t := strings.TrimLeft(l, " \t")[len(n)+1:]
+		val, found = rcUnquote(t), true
+	}
+	return val, found
+}
+
+func rcUnquote(t string) string {
+	if t == "" {
+		return ""
+	}
+	switch t[0] {
+	case '\'':
+		if i := strings.IndexByte(t[1:], '\''); i >= 0 {
+			return t[1 : 1+i]
+		}
+		return t[1:]
+	case '"':
+		var b strings.Builder
+		for i := 1; i < len(t); i++ {
+			switch {
+			case t[i] == '"':
+				return b.String()
+			case t[i] == '\\' && i+1 < len(t) && strings.IndexByte("\\\"$`", t[i+1]) >= 0:
+				i++
+				b.WriteByte(t[i])
+			default:
+				b.WriteByte(t[i])
+			}
+		}
+		return b.String()
+	}
+	if i := strings.IndexAny(t, " \t#;"); i >= 0 {
+		return t[:i]
+	}
+	return t
+}

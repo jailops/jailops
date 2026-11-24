@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"jailops.net/jailops/sdk/api"
 )
@@ -27,7 +28,7 @@ type Input struct {
 	UsedBytes              int64
 	// DiskLimit is the jail's resources.disk ("" for none).
 	DiskLimit string
-	// Running jails have their mounts and listening sockets read.
+	// Running jails have their mounts read.
 	Running bool
 	// Hostname and Addresses are what the JailOps block of /etc/hosts holds; Shell and Prompt what the jail's spec
 	// says of root's shell.
@@ -35,22 +36,55 @@ type Input struct {
 	Addresses []string
 	Shell     string
 	Prompt    string
-	// Listeners are the listening sockets of a running jail (sockstat); SocketsErr says why they were not read.
-	Listeners  []Listener
-	SocketsErr string
-	// Exposed are the jail's exposed ports, "tcp/80", ranges "tcp/8000-8100".
-	Exposed []string
 	// JailopsRepoURL is the url of the host's JailOps package repository, which a jail with an app has ("" for none).
 	JailopsRepoURL string
+	// Vulns is what pkg audit found in a copy of the jail's package database with the host's vulnerability database.
+	Vulns VulnAudit
+	// BaseUpdates is what the last update check of the jail said of its base packages.
+	BaseUpdates BaseUpdates
+	// Params are the jail parameters of the jail.conf JailOps renders for the jail (ParseJailConf).
+	Params JailParams
+	// DevfsOwn is the devfs ruleset JailOps makes for the jail's devices (0 when the jail names none: the stock
+	// DevfsJail).
+	DevfsOwn int
 }
 
-// Listener is one listening socket of a running jail.
-type Listener struct {
-	Command  string
-	Proto    string
-	Port     int
-	Loopback bool
+// VulnAudit is the outcome of pkg audit on a copy of the jail's package database.
+type VulnAudit struct {
+	// NotRun says why pkg audit did not run ("" when it ran).
+	NotRun string
+	// DBDays is the age of the host's vulnerability database in whole days.
+	DBDays int
+	// Packages are the vulnerable packages pkg audit named.
+	Packages []VulnPackage
 }
+
+// VulnPackage is one package pkg audit names as vulnerable: its name, version and the ids of the advisories (CVE, or
+// the VuXML id of an entry without one).
+type VulnPackage struct {
+	Name, Version string
+	IDs           []string
+}
+
+// BaseUpdates is what the last update check of the jail (jailops update check) said of its base packages: the
+// audit fetches no catalogue itself.
+type BaseUpdates struct {
+	// Checked is false when no update check of the jail ran since the daemon started.
+	Checked bool
+	At      time.Time
+	// Pending names the newer base packages ("" for none); Err says why the check did not look at the base.
+	Pending, Err string
+}
+
+// The bounds of the checks.
+const (
+	// VulnDBMaxDays is the age of the host's vulnerability database after which the audit asks for a fresh one.
+	VulnDBMaxDays = 7
+	// MaxAdvisories is the number of advisory ids named per vulnerable package.
+	MaxAdvisories = 5
+	// DevfsJail is the stock ruleset of jails (devfsrules_jail of /etc/defaults/devfs.rules).
+	DevfsJail = 4
+)
 
 // The groups of the checks.
 const (
@@ -58,32 +92,53 @@ const (
 	GroupPractice = "practice"
 )
 
-// Evaluate runs every check on in, the security checks first. Only a security check is ever critical; a practice check
-// warns at most.
-func Evaluate(in Input) []api.JailAuditCheck {
+// Evaluate runs the checks on in. The default checks say what the jail shows and what FreeBSD's documentation names
+// as practice (the Handbook's chapters on jails and on security, the CIS FreeBSD Benchmark): each is PASS, WARN or
+// CRITICAL, or INFO when it could not be made. With suggest the suggestions follow: notes on how a jail runs better
+// on JailOps, PASS or INFO only and marked Suggestion, which never count as a finding.
+func Evaluate(in Input, suggest bool) []api.JailAuditCheck {
 	f := in.Facts
+	out := []api.JailAuditCheck{
+		checkRootLinks(f),
+		checkUID0(in),
+		checkPasswords(in),
+		checkSetID(in),
+		checkStickyBit(in),
+		checkWorldFiles(in),
+		checkUnowned(in),
+		checkRepos(in),
+		checkBaseRepo(in),
+		checkKmodsRepo(in),
+		checkVulns(in),
+		checkBaseUpdates(in),
+		checkChecksums(in),
+		checkSSHD(in),
+		checkEnforceStatfs(in),
+	}
+	if !suggest {
+		return out
+	}
 	rc := shellVars(f.Texts["/etc/rc.conf"], f.Texts["/etc/rc.conf.local"])
 	pc := shellVars(f.Texts["/etc/periodic.conf"], f.Texts["/etc/periodic.conf.local"])
-	return []api.JailAuditCheck{
-		checkRootLinks(f),
-		checkUID0(f),
-		checkPasswords(f),
-		checkSetID(in),
-		checkRepos(in),
-		checkBaseRepo(f),
-		checkChecksums(in),
-		checkSSHD(f),
+	for _, c := range []api.JailAuditCheck{
+		checkRootLocked(in),
 		checkWorldKernel(pc),
 		checkPeriodicOutput(pc),
-		checkCronJitter(rc),
+		checkCronJitter(in, rc),
 		checkRcServices(rc),
 		checkShell(in),
 		checkHosts(in),
 		checkVolumes(in),
 		checkDiskLimit(in),
 		checkSize(in),
-		checkListeners(in),
+		checkSecureLevel(in),
+		checkAllow(in),
+		checkDevfsRuleset(in),
+	} {
+		c.Group, c.Suggestion = GroupPractice, true
+		out = append(out, c)
 	}
+	return out
 }
 
 func pass(id, group, detail string) api.JailAuditCheck {
@@ -92,6 +147,16 @@ func pass(id, group, detail string) api.JailAuditCheck {
 
 func found(id, group string, r api.JailAuditResult, detail, fix string) api.JailAuditCheck {
 	return api.JailAuditCheck{ID: id, Group: group, Result: r, Detail: detail, Fix: fix}
+}
+
+// notChecked is a default check that could not be made: INFO, and why.
+func notChecked(id, why, fix string) api.JailAuditCheck {
+	return found(id, GroupSecurity, api.AuditInfo, "not checked: "+why, fix)
+}
+
+// inJail is a command run in the jail, as a fix names it.
+func inJail(jail, cmd string) string {
+	return "jailops exec " + jail + " -- " + cmd
 }
 
 // listed joins at most MaxListed names and says how many more there are.
@@ -116,48 +181,68 @@ func checkRootLinks(f Facts) api.JailAuditCheck {
 		"this is what an attack on the host's pkg plants: look at the jail first; remove each link or make it point inside the jail, and remove the plugin settings")
 }
 
-func checkUID0(f Facts) api.JailAuditCheck {
+func checkUID0(in Input) api.JailAuditCheck {
 	const id = "accounts.uid0"
+	f := in.Facts
 	switch {
 	case !f.Accounts.Read:
 		return found(id, GroupSecurity, api.AuditWarn, "/etc/master.passwd cannot be read", "look at /etc/master.passwd of the jail")
 	case len(f.Accounts.UID0) > 0:
 		return found(id, GroupSecurity, api.AuditCritical, "accounts with uid 0 besides root and toor: "+listed(f.Accounts.UID0, 0),
-			"remove each account (pw userdel NAME in the jail) unless you made it on purpose, and find out how it got there")
+			"remove each account ("+inJail(in.Jail, "pw userdel NAME")+") unless you made it on purpose, and find out how it got there")
 	}
 	return pass(id, GroupSecurity, "root and toor are the only accounts with uid 0")
 }
 
-func checkPasswords(f Facts) api.JailAuditCheck {
+func checkPasswords(in Input) api.JailAuditCheck {
 	const id = "accounts.passwords"
+	f := in.Facts
 	if !f.Accounts.Read {
 		return found(id, GroupSecurity, api.AuditWarn, "/etc/master.passwd cannot be read", "look at /etc/master.passwd of the jail")
 	}
-	var bad []string
-	switch f.Accounts.Root {
-	case PassEmpty:
-		bad = append(bad, "root has an empty password (a member of wheel becomes root with su without one; jails made before root was locked in new images have it: pw usermod root -w no in the jail)")
-	case PassSet:
-		bad = append(bad, "root has a password")
+	var empty []string
+	for _, a := range []struct{ name, state string }{{"root", f.Accounts.Root}, {"toor", f.Accounts.Toor}} {
+		if a.state == PassEmpty {
+			empty = append(empty, a.name)
+		}
 	}
-	if f.Accounts.Toor == PassEmpty || f.Accounts.Toor == PassSet {
-		bad = append(bad, "toor is not locked")
+	empty = append(empty, f.Accounts.Empty...)
+	if len(empty) == 0 {
+		return pass(id, GroupSecurity, "no account has an empty password")
 	}
-	if len(f.Accounts.Empty) > 0 {
-		bad = append(bad, "accounts with an empty password: "+listed(f.Accounts.Empty, 0))
+	detail := "accounts with an empty password: " + listed(empty, 0)
+	if f.Accounts.Root == PassEmpty {
+		detail += " (a member of wheel becomes root with su without one)"
 	}
-	if len(bad) == 0 {
-		return pass(id, GroupSecurity, "root is locked and no account has an empty password")
+	return found(id, GroupSecurity, api.AuditWarn, detail,
+		"lock each one: "+inJail(in.Jail, "pw lock NAME")+", and for root "+inJail(in.Jail, "pw usermod root -w no")+" (jexec and jailops shell need no password)")
+}
+
+// checkRootLocked is a suggestion: root and toor locked, as the images of JailOps make them.
+func checkRootLocked(in Input) api.JailAuditCheck {
+	const id = "accounts.root_locked"
+	f := in.Facts
+	if !f.Accounts.Read {
+		return found(id, GroupPractice, api.AuditInfo, "/etc/master.passwd cannot be read", "")
 	}
-	return found(id, GroupSecurity, api.AuditWarn, strings.Join(bad, "; "),
-		"lock the password in the jail (pw usermod root -w no; pw lock NAME for another account): jexec and jailops shell need none")
+	var set []string
+	for _, a := range []struct{ name, state string }{{"root", f.Accounts.Root}, {"toor", f.Accounts.Toor}} {
+		if a.state == PassSet {
+			set = append(set, a.name)
+		}
+	}
+	if len(set) == 0 {
+		return pass(id, GroupPractice, "root and toor take no password")
+	}
+	return found(id, GroupPractice, api.AuditInfo, strings.Join(set, " and ")+" take a password: jexec and jailops shell need none, and the images of JailOps lock root",
+		inJail(in.Jail, "pw usermod root -w no")+" (pw lock toor for toor)")
 }
 
 func checkSetID(in Input) api.JailAuditCheck {
 	const id = "files.setid"
 	f := in.Facts
 	if !in.HasPkgDB {
-		return found(id, GroupSecurity, api.AuditInfo, "the jail has no package database: nothing tells the base's set-id files from others", "")
+		return notChecked(id, "the jail has no package database: nothing tells the base's set-id files from others", "")
 	}
 	var odd []string
 	for _, p := range f.SetID {
@@ -173,7 +258,7 @@ func checkSetID(in Input) api.JailAuditCheck {
 		return pass(id, GroupSecurity, "every set-uid and set-gid file belongs to an installed package"+cut)
 	}
 	return found(id, GroupSecurity, api.AuditWarn, "set-uid or set-gid files that no package installed: "+listed(odd, f.SetIDMore)+cut,
-		"look at each file; remove it or clear the bit (chmod u-s,g-s FILE in the jail) unless you put it there on purpose")
+		"look at each file; remove it or clear the bit ("+inJail(in.Jail, "chmod u-s,g-s FILE")+") unless you put it there on purpose")
 }
 
 // repo is one package repository as pkg sees it after reading every file: where it is and whether it is on.
@@ -322,22 +407,33 @@ func checkRepos(in Input) api.JailAuditCheck {
 		"keep a repository you added on purpose; otherwise remove its file or set enabled: no in it")
 }
 
-func checkBaseRepo(f Facts) api.JailAuditCheck {
+func checkBaseRepo(in Input) api.JailAuditCheck {
 	const id = "pkg.base_repository"
-	for _, r := range repos(f.Texts) {
+	for _, r := range repos(in.Facts.Texts) {
 		if r.Name == "FreeBSD-base" && r.Enabled {
 			return found(id, GroupSecurity, api.AuditWarn, "FreeBSD-base is enabled inside the jail (by "+r.where()+"): pkg there takes base packages it cannot install (FreeBSD bug 293817) and the base is upgraded from the host",
-				`echo 'FreeBSD-base: { enabled: no }' > /usr/local/etc/pkg/repos/FreeBSD-base.conf in the jail; jailops jail upgrade and jailops jail base add handle the base`)
+				inJail(in.Jail, `sh -c 'echo "FreeBSD-base: { enabled: no }" > /usr/local/etc/pkg/repos/FreeBSD-base.conf'`)+"; jailops jail upgrade and jailops jail base add handle the base")
 		}
 	}
 	return pass(id, GroupSecurity, "FreeBSD-base is disabled inside the jail; the host upgrades the base")
+}
+
+func checkKmodsRepo(in Input) api.JailAuditCheck {
+	const id = "pkg.kmods_repository"
+	for _, r := range repos(in.Facts.Texts) {
+		if r.Name == "FreeBSD-ports-kmods" && r.Enabled {
+			return found(id, GroupSecurity, api.AuditWarn, "FreeBSD-ports-kmods is enabled inside the jail (by "+r.where()+"): kernel modules belong to the host's kernel, so the repository is of no use here and costs a catalogue fetch at every pkg update",
+				inJail(in.Jail, `sh -c 'echo "FreeBSD-ports-kmods: { enabled: no }" > /usr/local/etc/pkg/repos/FreeBSD-ports-kmods.conf'`))
+		}
+	}
+	return pass(id, GroupSecurity, "FreeBSD-ports-kmods is disabled inside the jail")
 }
 
 func checkChecksums(in Input) api.JailAuditCheck {
 	const id = "base.checksums"
 	f := in.Facts
 	if !in.HasPkgDB || f.Verified == 0 && len(f.Modified) == 0 {
-		return found(id, GroupSecurity, api.AuditInfo, "no checksums of base programs to compare (the jail has no base packages in its package database)", "")
+		return notChecked(id, "no checksums of base programs to compare (the jail has no base packages in its package database)", "")
 	}
 	if len(f.Modified) == 0 {
 		msg := fmt.Sprintf("%d programs and libraries of the base match their packages", f.Verified)
@@ -370,8 +466,9 @@ func sshdValues(text string) map[string]string {
 	return out
 }
 
-func checkSSHD(f Facts) api.JailAuditCheck {
+func checkSSHD(in Input) api.JailAuditCheck {
 	const id = "sshd.config"
+	f := in.Facts
 	if !f.SSHD {
 		return pass(id, GroupSecurity, "sshd is not installed")
 	}
@@ -396,7 +493,7 @@ func checkSSHD(f Facts) api.JailAuditCheck {
 		return pass(id, GroupSecurity, "sshd is installed; /etc/ssh/sshd_config allows neither root logins nor passwords")
 	}
 	return found(id, GroupSecurity, api.AuditWarn, "/etc/ssh/sshd_config has "+strings.Join(bad, " and "),
-		"log in with keys: set PermitRootLogin prohibit-password (or no), PasswordAuthentication no and KbdInteractiveAuthentication no, then service sshd reload in the jail")
+		"log in with keys: the lines PermitRootLogin prohibit-password (or no), PasswordAuthentication no and KbdInteractiveAuthentication no in /etc/ssh/sshd_config of the jail, then "+inJail(in.Jail, "service sshd reload"))
 }
 
 // shellVars reads name="value" lines of rc.conf-style files, later files and lines winning. Anything that is not a
@@ -415,13 +512,131 @@ func shellVars(texts ...string) map[string]string {
 	return out
 }
 
+// walkCut says the walk of the root stopped at its bound.
+func walkCut(f Facts) string {
+	if f.SetIDCut {
+		return fmt.Sprintf(" (the walk stopped after %d entries)", MaxWalk)
+	}
+	return ""
+}
+
+func checkStickyBit(in Input) api.JailAuditCheck {
+	const id = "files.sticky_bit"
+	f := in.Facts
+	if len(f.WorldDirs) == 0 && f.WorldDirsMore == 0 {
+		return pass(id, GroupSecurity, "every directory anyone may write to has the sticky bit"+walkCut(f))
+	}
+	return found(id, GroupSecurity, api.AuditWarn, "directories anyone may write to without the sticky bit (anyone may remove or rename the files of others there): "+listed(f.WorldDirs, f.WorldDirsMore)+walkCut(f),
+		"set the sticky bit ("+inJail(in.Jail, "chmod +t DIR")+") or take the write permission of others away (chmod o-w DIR)")
+}
+
+func checkWorldFiles(in Input) api.JailAuditCheck {
+	const id = "files.world_writable"
+	f := in.Facts
+	if len(f.WorldFiles) == 0 && f.WorldFilesMore == 0 {
+		return pass(id, GroupSecurity, "no file outside /tmp and /var/tmp may be written by anyone"+walkCut(f))
+	}
+	return found(id, GroupSecurity, api.AuditWarn, "files anyone may write to: "+listed(f.WorldFiles, f.WorldFilesMore)+walkCut(f),
+		"take the write permission of others away ("+inJail(in.Jail, "chmod o-w FILE")+") unless the file is meant to be shared that way")
+}
+
+func checkUnowned(in Input) api.JailAuditCheck {
+	const id = "files.unowned"
+	f := in.Facts
+	if !f.OwnersRead {
+		return notChecked(id, "/etc/master.passwd or /etc/group of the jail cannot be read", "")
+	}
+	if len(f.Unowned) == 0 && f.UnownedMore == 0 {
+		return pass(id, GroupSecurity, "every file and directory belongs to an account and a group of the jail"+walkCut(f))
+	}
+	return found(id, GroupSecurity, api.AuditWarn, "files and directories whose owner or group the jail does not have (an account made later with that id owns them): "+listed(f.Unowned, f.UnownedMore)+walkCut(f),
+		"give each one an owner of the jail ("+inJail(in.Jail, "chown USER:GROUP PATH")+") or remove it")
+}
+
+func checkVulns(in Input) api.JailAuditCheck {
+	const id = "pkg.vulnerabilities"
+	v := in.Vulns
+	refresh := "pkg audit -F on the host (the daily periodic run of the host does it when security_status_pkgaudit_enable is on, pkg's default)"
+	switch {
+	case !in.HasPkgDB:
+		return notChecked(id, "the jail has no package database", "")
+	case v.NotRun != "":
+		return notChecked(id, v.NotRun, refresh)
+	}
+	stale := ""
+	if v.DBDays > VulnDBMaxDays {
+		stale = fmt.Sprintf(" (the vulnerability database of the host is %d days old: it is not current)", v.DBDays)
+	}
+	if len(v.Packages) == 0 {
+		if stale != "" {
+			return found(id, GroupSecurity, api.AuditInfo, "pkg audit names no vulnerable package"+stale, refresh)
+		}
+		return pass(id, GroupSecurity, "pkg audit names no vulnerable package")
+	}
+	var names []string
+	for _, p := range v.Packages {
+		ids := p.IDs
+		more := ""
+		if len(ids) > MaxAdvisories {
+			more = fmt.Sprintf(" and %d more", len(ids)-MaxAdvisories)
+			ids = ids[:MaxAdvisories]
+		}
+		s := p.Name + "-" + p.Version
+		if len(ids) > 0 {
+			s += " (" + strings.Join(ids, ", ") + more + ")"
+		}
+		names = append(names, s)
+	}
+	fix := "upgrade the packages: " + inJail(in.Jail, "pkg upgrade") + " for the ports packages, jailops jail upgrade " + in.Jail + " for the base (FreeBSD-*); pkg audit in the jail describes each advisory"
+	if stale != "" {
+		fix += "; and " + refresh
+	}
+	return found(id, GroupSecurity, api.AuditWarn, "packages with known vulnerabilities (pkg-audit(8)): "+listed(names, 0)+stale, fix)
+}
+
+func checkBaseUpdates(in Input) api.JailAuditCheck {
+	const id = "base.updates"
+	b := in.BaseUpdates
+	when := b.At.UTC().Format("2006-01-02 15:04 UTC")
+	switch {
+	case !b.Checked:
+		return notChecked(id, "no update check of the jail ran since the daemon started; the audit fetches no catalogue",
+			"jailops update check "+in.Jail+", or jailops jail upgrade "+in.Jail+" --dry-run")
+	case b.Pending != "":
+		return found(id, GroupSecurity, api.AuditWarn, "the update check of "+when+" found newer base packages: "+b.Pending,
+			"jailops jail upgrade "+in.Jail+" (--dry-run shows the change first)")
+	case b.Err != "":
+		return notChecked(id, "the update check of "+when+" did not look at the base: "+b.Err, "jailops jail upgrade "+in.Jail+" --dry-run")
+	}
+	return pass(id, GroupSecurity, "the update check of "+when+" found no newer base packages")
+}
+
+func checkEnforceStatfs(in Input) api.JailAuditCheck {
+	const id = "jail.enforce_statfs"
+	p := in.Params
+	switch {
+	case !p.Read:
+		return notChecked(id, "the jail.conf of the jail cannot be read: "+p.Err, "")
+	case p.EnforceStatfs < 2:
+		why := ""
+		if slices.Contains(p.Allow, "mount.zfs") {
+			why = " (zfs_delegation needs it: the jail mounts its own dataset)"
+		}
+		return found(id, GroupSecurity, api.AuditWarn, fmt.Sprintf("enforce_statfs = %d: the jail sees mount points beyond its root%s", p.EnforceStatfs, why),
+			"turn zfs_delegation off unless the jail needs its own dataset (jailops config set "+in.Jail+" zfs_delegation false)")
+	}
+	return pass(id, GroupSecurity, "enforce_statfs = 2: the jail sees only the mount points below its root")
+}
+
+// The suggestions: what a jail on JailOps runs better with. Each is PASS or INFO.
+
 func checkWorldKernel(pc map[string]string) api.JailAuditCheck {
 	const id = "periodic.world_kernel"
 	if v, ok := pc["daily_status_world_kernel"]; ok && !isYes(v) {
 		return pass(id, GroupPractice, `daily_status_world_kernel="NO": the daily report does not compare the userland with the host's kernel`)
 	}
 	return found(id, GroupPractice, api.AuditInfo, "the daily report compares the userland with the kernel, which in a jail is the host's: it reports a mismatch whenever the host is on another patch level",
-		`sysrc -f /etc/periodic.conf daily_status_world_kernel="NO" in the jail`)
+		`the line daily_status_world_kernel="NO" in /etc/periodic.conf of the jail`)
 }
 
 func checkPeriodicOutput(pc map[string]string) api.JailAuditCheck {
@@ -436,16 +651,16 @@ func checkPeriodicOutput(pc map[string]string) api.JailAuditCheck {
 		return pass(id, GroupPractice, "the reports of periodic go to files in /var/log")
 	}
 	return found(id, GroupPractice, api.AuditInfo, "periodic mails its reports to root, in a jail where nobody reads that mail: "+strings.Join(mail, ", "),
-		`sysrc -f /etc/periodic.conf daily_output="/var/log/daily.log" (weekly.log, monthly.log, and /var/log/security for the security reports); newsyslog rotates them`)
+		`the lines daily_output="/var/log/daily.log", weekly_output="/var/log/weekly.log", monthly_output="/var/log/monthly.log" and daily_status_security_output="/var/log/security" in /etc/periodic.conf of the jail; newsyslog rotates them`)
 }
 
-func checkCronJitter(rc map[string]string) api.JailAuditCheck {
+func checkCronJitter(in Input, rc map[string]string) api.JailAuditCheck {
 	const id = "cron.jitter"
 	if f := strings.Fields(rc["cron_flags"]); slices.ContainsFunc(f, func(s string) bool { return strings.HasPrefix(s, "-J") }) {
 		return pass(id, GroupPractice, "cron starts the jobs of root (periodic among them) at a random second: cron_flags=\""+rc["cron_flags"]+"\"")
 	}
 	return found(id, GroupPractice, api.AuditInfo, "cron starts the jobs of root, periodic among them, at the same second in every jail of the host",
-		`sysrc cron_flags="-J 60" and service cron restart in the jail`)
+		`the line cron_flags="-J 60" in /etc/rc.conf of the jail, then `+inJail(in.Jail, "service cron restart"))
 }
 
 // nojailVars are the rc.conf knobs of scripts that rc(8) skips in a jail (their KEYWORD line has nojail, read from
@@ -478,7 +693,7 @@ func checkRcServices(rc map[string]string) api.JailAuditCheck {
 		parts = append(parts, `sendmail_enable="YES" runs a mail server in the jail`)
 	}
 	return found(id, GroupPractice, api.AuditInfo, strings.Join(parts, "; "),
-		"sysrc -x NAME in the jail for each; keep sendmail_enable only if the jail receives mail")
+		"remove each line from /etc/rc.conf (or /etc/rc.conf.local) of the jail; keep sendmail_enable only if the jail receives mail")
 }
 
 func checkShell(in Input) api.JailAuditCheck {
@@ -551,7 +766,7 @@ func checkVolumes(in Input) api.JailAuditCheck {
 	if len(bad) == 0 {
 		return pass(id, GroupPractice, fmt.Sprintf("%d volume and host directory mounts, all nosuid", len(in.Facts.Mounts)))
 	}
-	return found(id, GroupPractice, api.AuditWarn, "mounts in the jail without nosuid (a set-uid file there runs as its owner): "+listed(bad, 0),
+	return found(id, GroupPractice, api.AuditInfo, "mounts in the jail without nosuid (a set-uid file there runs as its owner): "+listed(bad, 0),
 		"JailOps mounts its volumes nosuid; a mount without it was made by hand or by the jail's own fstab: remount it with -o nosuid")
 }
 
@@ -573,51 +788,53 @@ func mib(n int64) string {
 	return strconv.FormatFloat(float64(n)/(1<<20), 'f', 1, 64) + " MiB"
 }
 
-// exposed says whether a port of proto is among the jail's exposed ports.
-func exposed(list []string, proto string, port int) bool {
-	for _, e := range list {
-		p, ports, ok := strings.Cut(e, "/")
-		if !ok || p != proto {
-			continue
-		}
-		lo, hi, isRange := strings.Cut(ports, "-")
-		a, err1 := strconv.Atoi(lo)
-		b := a
-		var err2 error
-		if isRange {
-			b, err2 = strconv.Atoi(hi)
-		}
-		if err1 == nil && err2 == nil && port >= a && port <= b {
-			return true
-		}
+func checkSecureLevel(in Input) api.JailAuditCheck {
+	const id = "jail.securelevel"
+	p := in.Params
+	switch {
+	case !p.Read:
+		return found(id, GroupPractice, api.AuditInfo, "the jail.conf of the jail cannot be read: "+p.Err, "")
+	case p.SecureLevel != nil && *p.SecureLevel >= 2:
+		return pass(id, GroupPractice, fmt.Sprintf("securelevel = %d", *p.SecureLevel))
 	}
-	return false
+	lvl := "jail.conf sets no securelevel: the jail runs at the host's kern.securelevel (-1 unless the host raises it)"
+	if p.SecureLevel != nil {
+		lvl = fmt.Sprintf("securelevel = %d", *p.SecureLevel)
+	}
+	return found(id, GroupPractice, api.AuditInfo, lvl+"; 2 is the hardened setting (security(7)): no file flag can be cleared, no disk written raw, and the time set only forward",
+		"raise it when nothing in the jail needs to change what securelevel 2 freezes (docs/security-model.md)")
 }
 
-func checkListeners(in Input) api.JailAuditCheck {
-	const id = "ports.listening"
+func checkAllow(in Input) api.JailAuditCheck {
+	const id = "jail.allow"
+	p := in.Params
 	switch {
-	case !in.Running:
-		return found(id, GroupPractice, api.AuditInfo, "the jail is not running: its listening sockets are read while it runs", "")
-	case in.SocketsErr != "":
-		return found(id, GroupPractice, api.AuditInfo, "the listening sockets were not read: "+in.SocketsErr, "")
+	case !p.Read:
+		return found(id, GroupPractice, api.AuditInfo, "the jail.conf of the jail cannot be read: "+p.Err, "")
+	case len(p.Allow) == 0:
+		return pass(id, GroupPractice, "jail.conf sets no allow.* parameter")
 	}
-	seen := map[string]bool{}
-	var odd []string
-	for _, l := range in.Listeners {
-		k := fmt.Sprintf("%s/%d", l.Proto, l.Port)
-		if l.Loopback || seen[k] || exposed(in.Exposed, l.Proto, l.Port) {
-			continue
-		}
-		seen[k] = true
-		odd = append(odd, k+" ("+l.Command+")")
+	var names []string
+	for _, a := range p.Allow {
+		names = append(names, "allow."+a)
 	}
-	if len(odd) == 0 {
-		return pass(id, GroupPractice, "every port the jail listens on beyond loopback is exposed")
+	return found(id, GroupPractice, api.AuditInfo, "jail.conf sets "+strings.Join(names, ", ")+": each one gives the jail something the host's kernel otherwise keeps from it",
+		"keep each one the jail needs; jailops config "+in.Jail+" shows the keys that set them")
+}
+
+func checkDevfsRuleset(in Input) api.JailAuditCheck {
+	const id = "jail.devfs_ruleset"
+	p := in.Params
+	switch {
+	case !p.Read:
+		return found(id, GroupPractice, api.AuditInfo, "the jail.conf of the jail cannot be read: "+p.Err, "")
+	case p.DevfsRuleset == DevfsJail:
+		return pass(id, GroupPractice, "devfs_ruleset = 4: the stock ruleset of jails")
+	case p.DevfsRuleset != 0 && p.DevfsRuleset == in.DevfsOwn:
+		return pass(id, GroupPractice, fmt.Sprintf("devfs_ruleset = %d: the ruleset JailOps makes for the devices of the jail's spec", p.DevfsRuleset))
 	}
-	sort.Strings(odd)
-	return found(id, GroupPractice, api.AuditInfo, "listening beyond loopback on ports the jail does not expose: "+listed(odd, 0),
-		"jailops expose "+in.Jail+" PORT if the outside is meant to reach it; otherwise bind the service to 127.0.0.1 or leave it")
+	return found(id, GroupPractice, api.AuditInfo, fmt.Sprintf("devfs_ruleset = %d: neither the stock ruleset of jails (4) nor the one JailOps makes for the jail's devices", p.DevfsRuleset),
+		"restart the jail: JailOps renders its jail.conf from the spec")
 }
 
 // RepoURL is the url the repository file text gives the repository name ("" for none).

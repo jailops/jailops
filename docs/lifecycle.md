@@ -274,7 +274,7 @@ it, how much the root grows and every step.
 
 Several jails: `jailops jail upgrade web db ns1`, `-l env=prod` or `--all` (the project's jails) upgrade each jail on its
 own, one after the other; a jail that fails is reported and the run goes on (`--stop-on-error` stops it), and a summary
-table ends the run (`upgraded`, `nothing to upgrade`, `failed`, `skipped`, and `not tried` for the jails
+table ends the run (`upgraded`, `up to date`, `failed`, `skipped`, and `not tried` for the jails
 `--stop-on-error` left out; with `--no-wait` a row says `started`), with a non-zero exit status when any jail failed.
 
 **On a schedule**, a jail whose update policy says so (`update.mode=managed` with `update.os=true`, at its
@@ -318,8 +318,9 @@ root the jail's administrator controls ([security-model.md](security-model.md#th
    upgrade (or base addition) within its 14 days; a successful rollback uses it up. **The whole root goes back**: the
    base, the ports packages, the package database and everything the services wrote to the root since the snapshot.
    Only the volumes are outside the root and stay as they are. The command names the snapshot and how long ago it was
-   taken, says that what was written to the root since and the snapshots taken after it are discarded, and asks you to
-   type the jail name (`--confirm-data-loss` in a script). Data that must survive a rollback belongs in a volume
+   taken, says that what was written to the root since is discarded, and asks you to type the jail name
+   (`--confirm-data-loss` in a script). A snapshot taken after it (by a backup, a replication or by hand) would be
+   destroyed with it, so the rollback refuses and names them; `--destroy-newer` destroys them with the same confirmation. Data that must survive a rollback belongs in a volume
    ([storage.md](storage.md#volumes)). A snapshot of your own is restored with `--scope all --snapshot S
    --confirm-data-loss`.
 

@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"syscall"
 
 	"jailops.net/jailops/sdk/api"
 )
@@ -102,7 +101,7 @@ func rootFindings(l *Local, root string, paths []string) ([]string, error) {
 		}
 	}
 	for _, conf := range []string{"usr/local/etc/pkg.conf", "etc/pkg.conf"} {
-		if pkgConfLoadsPlugins(filepath.Join(root, conf)) {
+		if pkgConfLoadsPlugins(jr, conf) {
 			found = append(found, conf+" turns pkg plugins on")
 		}
 	}
@@ -150,10 +149,14 @@ func findingOf(err error, root string) string {
 
 var rePkgPlugins = regexp.MustCompile(`(?im)^\s*(pkg_enable_plugins\s*[:=]\s*"?(true|yes|on)"?|plugins\s*[:=\[])`)
 
-// pkgConfLoadsPlugins says whether the pkg configuration at p turns plugins on or names plugins: a setting, not a
-// comment (the file pkg installs has them all commented out).
-func pkgConfLoadsPlugins(p string) bool {
-	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+// pkgConfLoadsPlugins says whether the pkg configuration at rel (beneath the open root jr: no link, in any component,
+// leads out of it) turns plugins on or names plugins: a setting, not a comment (the file pkg installs has them all
+// commented out).
+func pkgConfLoadsPlugins(jr *os.Root, rel string) bool {
+	if fi, err := jr.Lstat(rel); err != nil || !fi.Mode().IsRegular() {
+		return false // a missing file, or a link or device: nothing is read
+	}
+	f, err := jr.Open(rel)
 	if err != nil {
 		return false
 	}

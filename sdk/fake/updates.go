@@ -4,12 +4,11 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 
 	"jailops.net/jailops/sdk/api"
 )
 
-// The fake's managed updates and provisioning. A test seeds the package
+// The fake's managed updates and recipes. A test seeds the package
 // updates a jail has (SeedPackageUpdates) and can make the next health check
 // fail (SeedUpdateFailure); image generations come from SeedGeneration.
 
@@ -222,8 +221,9 @@ func (s *Server) handleUpdateHistory(w http.ResponseWriter, r *http.Request) {
 	writeSync(w, 200, out)
 }
 
-func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
-	req, e := decodeOptional[api.ProvisionRequest](r)
+// handleApply reports every step of a recipe as done (an unguarded run as executed); a dry run reports would change.
+func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
+	req, e := decodeOptional[api.ApplyRequest](r)
 	if e != nil {
 		writeErr(w, e)
 		return
@@ -233,45 +233,45 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 	jk := s.jails.key(r, name)
 	s.mu.Lock()
 	rp := func() reply {
-		j := s.jails.items[jk]
-		if j == nil {
+		if s.jails.items[jk] == nil {
 			return reply{err: notFound("jail", name)}
 		}
-		if j.Spec.Provision == nil {
-			return reply{err: api.Errorf(api.CodeInvalid, "jail %q declares no provisioning", name)}
-		}
-		if !j.Status.ProvisionedAt.IsZero() && !req.Again {
-			return reply{err: api.Errorf(api.CodeAlreadyExists, "jail %q was provisioned at %s", name, j.Status.ProvisionedAt.Format(time.RFC3339)).
-				WithHint("changing the declaration does nothing until you ask: provision --again")}
-		}
-		op := s.startOp(rc.project, "jails.provision", "Provision jail "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
+		op := s.startOp(rc.project, "jail.apply", "Apply a recipe to jail "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
 			j := s.jails.items[jk]
 			if j == nil {
 				return nil, notFound("jail", name)
 			}
 			if j.Status.Power != api.PowerRunning {
-				return nil, api.Errorf(api.CodeBusy, "jail %q is not running; provisioning runs inside it", name).WithHint("start it first")
+				return nil, api.Errorf(api.CodeBusy, "jail %q is not running; a recipe runs inside it", name).WithHint("start it first")
 			}
-			p := j.Spec.Provision
-			steps := []string{}
-			if len(p.Packages) > 0 {
-				steps = append(steps, "packages")
+			res := api.ApplyResult{Jail: name, DryRun: req.DryRun, Steps: []api.ApplyStep{}}
+			for _, st := range req.Recipe.Steps {
+				kind, label := "run", strings.Join(st.Run, " ")
+				switch {
+				case st.Package != nil:
+					kind, label = "package", strings.Join(st.Package, " ")
+				case st.File != nil:
+					kind, label = "file", st.File.Path
+				case st.Sysrc != nil:
+					kind, label = "sysrc", "rc.conf"
+				case st.Service != nil:
+					kind, label = "service", st.Service.Name
+				}
+				status := api.StepChanged
+				switch {
+				case req.DryRun && kind == "run" && st.Creates == "" && st.Unless == nil:
+					status = api.StepWouldExecute
+				case req.DryRun:
+					status = api.StepWouldChange
+				case kind == "run" && st.Creates == "" && st.Unless == nil:
+					status = api.StepExecuted
+				}
+				res.Steps = append(res.Steps, api.ApplyStep{Kind: kind, Name: label, Status: status})
 			}
-			for _, f := range p.Files {
-				steps = append(steps, "file "+f.Destination)
+			if !req.DryRun {
+				s.emitIn(rc.project, "jail-applied", "/api/v1/jails/"+name)
 			}
-			for _, x := range p.Services.Enable {
-				steps = append(steps, "enable "+x)
-			}
-			for _, x := range p.Services.Start {
-				steps = append(steps, "start "+x)
-			}
-			for _, c := range p.Commands {
-				steps = append(steps, "run "+strings.Join(c, " "))
-			}
-			j.Status.ProvisionedAt = s.now()
-			s.emitIn(rc.project, "jail-provisioned", "/api/v1/jails/"+name)
-			return api.ProvisionResult{Jail: name, ProvisionedAt: j.Status.ProvisionedAt, Steps: steps}, nil
+			return res, nil
 		})
 		return reply{op: &op}
 	}()

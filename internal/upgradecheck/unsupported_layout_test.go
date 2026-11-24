@@ -158,7 +158,7 @@ func TestADaemonOnAHostWithUnsupportedLayoutJails(t *testing.T) {
 		{"DELETE", "/api/v1/jails/old/snapshots/s1" + q, ""},
 		{"POST", "/api/v1/jails/old/exec" + q, `{"argv":["true"]}`},
 		{"POST", "/api/v1/jails/old/rename" + q, `{"new_name":"older"}`},
-		{"POST", "/api/v1/jails/old/provision" + q, `{}`},
+		{"POST", "/api/v1/jails/old/apply" + q, `{"recipe":{"steps":[{"run":["true"]}]}}`},
 		{"PUT", "/api/v1/jails/old/files/etc/x" + q, "x"},
 	} {
 		code, body := e2.Raw(rq.method, rq.path, tok, rq.body)

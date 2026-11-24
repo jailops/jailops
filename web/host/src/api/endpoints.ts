@@ -6,7 +6,7 @@ import type {
   Jail, JailAction, JailRollback, JailUpgrade, JailCopy, JailSnapshot, Image, ImageAutoUpgrade, ImageBuild, ImageUpgrade, Network, Lease,
   FirewallPolicy, AddressSet, FirewallTestRequest, FirewallTestResult, BackupTarget, BackupPolicy, Backup, RestoreRequest, RestorePreflight,
   Certificate, User, UserCreate, UserCreated, PasswordSet, Remote, Operation, AuditEntry, MutationResult, PoolUsage, DoctorReport, NDPStatus, Token,
-  Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult, ShellSetupResult,
+  Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ShellSetupResult,
   BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, BackupKeyImport, BackupKeyImported, ExecRequest,
   Project, ProjectAggregate, Storage, TrustTokenRequest, TrustToken, Session, Identity,
   JailReach, JailImportPreflight, JailImportRequest, JailImported, Exposed, ExposeRequest, ExposeResult, UnexposeRequest, AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
@@ -308,9 +308,6 @@ export const api = {
     check: (b: UpdateCheckRequest) => c().mutate<UpdateReport[]>('POST', '/updates/check', b),
     apply: (b: UpdateApplyRequest) => c().mutate<UpdateRecord[]>('POST', '/updates/apply', b),
     history: (n: string) => c().list<UpdateRecord>(`/jails/${e(n)}/updates`),
-  },
-  provision: {
-    run: (n: string, b: ProvisionRequest) => c().mutate<ProvisionResult>('POST', `/jails/${e(n)}/provision`, b),
   },
   /** Extension jail_files: a file of a running jail, to and from the browser (operator in the project). */
   files: {

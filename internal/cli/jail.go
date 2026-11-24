@@ -34,7 +34,7 @@ func (a *app) jailDesc() *kindDesc[api.Jail] {
 		return c.Jails().Rename(ctx, n, req, etag)
 	}
 	d.renameLong = renameLong("jail", `its datasets (snapshots go with them) and their
-mountpoints, its records, its update history, the marks of its provisioning and shell setup, and the boot
+mountpoints, its records, its update history, the mark of its shell setup, and the boot
 order of the jails that depend on it. The jail must be stopped: the kernel knows a running jail by its
 name, and its mounts, interfaces and firewall anchor are set up under it. Its hostname does not change`)
 	d.create = func(ctx context.Context, c *sdk.Client, v api.Jail) (opHandle, api.Jail, error) {
@@ -126,12 +126,7 @@ for a stopped jail or one the daemon has not seen start. -o wide shows them with
 	}
 	d.show = func(a *app, j api.Jail) error {
 		var extra []string
-		switch {
-		case !j.Status.ProvisionedAt.IsZero():
-			extra = append(extra, fmt.Sprintf("Provisioned: %s ago", age(a.env.Now(), j.Status.ProvisionedAt)))
-		case j.Spec.Provision != nil:
-			extra = append(extra, fmt.Sprintf("Provisioned: no (run 'jailops provision %s')", j.Metadata.Name))
-		}
+		extra = append(extra, "Securelevel: "+securelevelText(j.Spec))
 		if n := notesSummary(j.Spec.Notes, "jailops jail notes "+j.Metadata.Name); n != "" {
 			extra = append(extra, "Notes:       "+n)
 		}
@@ -146,6 +141,20 @@ for a stopped jail or one the daemon has not seen start. -o wide shows them with
 	d.emptyHint = "jailops jail create NAME --image IMAGE --network NETWORK --storage STORAGE"
 	d.prepare = a.jailDefaults
 	return &d
+}
+
+// securelevelText is the securelevel a jail runs at, and where it comes from.
+func securelevelText(s api.JailSpec) string {
+	lvl, ok := api.EffectiveSecureLevel(s.OS, s.SecureLevel)
+	switch {
+	case !ok && s.SecureLevel == nil:
+		return "the host's (the default of a Linux jail)"
+	case !ok:
+		return "the host's (securelevel -1)"
+	case s.SecureLevel == nil:
+		return fmt.Sprintf("%d (the default)", lvl)
+	}
+	return strconv.Itoa(lvl)
 }
 
 // jailLoss says what deleting a jail destroys: the sizes of its root and data, its volumes and the number of its
@@ -420,8 +429,8 @@ jailops jail start web`, "jails")
 	addNotes(a, jc, d, func(j *api.Jail) *string { return &j.Spec.Notes })
 	jc.AddCommand(a.jailInfo(d))
 	jc.AddCommand(a.jailLifecycleSet(d)...)
-	jc.AddCommand(a.jailExec(d), a.pkgCmd(), a.cpCmd(), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.jailConsole(d), a.jailSnapshotCmd(d), a.jailRollback(d), a.jailUpgrade(d), a.jailBase(d), a.jailAudit(d), a.jailCopy(d), a.jailLogs(d), a.jailExport(d), a.jailImport())
-	jc.AddCommand(a.jailShellSetup(d))
+	jc.AddCommand(a.jailExec(d), a.pkgCmd(), a.cpCmd(), a.jailShell(d), a.labelCmd(), a.jailConsole(d), a.jailSnapshotCmd(d), a.jailRollback(d), a.jailUpgrade(d), a.jailBase(d), a.jailAudit(d), a.jailCopy(d), a.jailLogs(d), a.jailExport(d), a.jailImport())
+	jc.AddCommand(a.jailShellSetup(d), a.jailApply(d))
 	return jc
 }
 
@@ -482,14 +491,14 @@ func (a *app) addJailShortcuts(root *cobra.Command) {
 	addRename(a, root, d, d.renameLong)
 	root.AddCommand(a.jailInfo(d))
 	root.AddCommand(a.jailLifecycleSet(d)...)
-	root.AddCommand(a.jailExec(d), a.pkgCmd(), a.cpCmd(), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.logsCmd(d), a.exposeCmd(), a.unexposeCmd())
+	root.AddCommand(a.jailExec(d), a.pkgCmd(), a.cpCmd(), a.jailShell(d), a.labelCmd(), a.logsCmd(d), a.exposeCmd(), a.unexposeCmd())
 }
 
 func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	var (
 		image, hostname, memory, disk, storage, comment             string
 		shell, prompt, cpuset                                       string
-		cpu, pids, priority, stopTimeout                            int
+		cpu, pids, priority, stopTimeout, securelevel               int
 		networks, envs, labels, depends, tags, profiles, fwPolicies []string
 		autostart, zfsDelegation                                    bool
 	)
@@ -511,6 +520,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.BoolVar(&zfsDelegation, "zfs-delegation", false, "global administrators only: hand the jail a ZFS dataset of its own, <container>/delegated, which root in the jail manages (the host's priv.conf must allow it: admin-zfs-delegation)")
 	f.IntVar(&priority, "boot-priority", 0, "boot order, lower starts first")
 	f.IntVar(&stopTimeout, "stop-timeout", 0, "seconds the jail has to shut down by itself before it is killed (default: thirty)")
+	f.IntVar(&securelevel, "securelevel", api.DefaultSecureLevel, "the jail's kern.securelevel, -1 (the host's) to 3; a Linux jail without it has the host's")
 	f.StringArrayVar(&depends, "depends", nil, "jail that must start first (repeatable)")
 	f.StringArrayVar(&envs, "env", nil, "environment variable KEY=VALUE (repeatable)")
 	f.StringArrayVar(&labels, "label", nil, "label KEY=VALUE (repeatable)")
@@ -547,6 +557,12 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 			Boot:      api.BootPolicy{Autostart: autostart, Priority: priority, Depends: dropEmpty(depends), StopTimeoutSeconds: stopTimeout},
 			Shell:     api.ShellPath(shell), Prompt: prompt,
 			Delegate: zfsDelegation,
+		}
+		if cmd.Flags().Changed("securelevel") {
+			if securelevel < api.MinSecureLevel || securelevel > api.MaxSecureLevel {
+				return api.Jail{}, usagef("--securelevel: %d is not between %d and %d", securelevel, api.MinSecureLevel, api.MaxSecureLevel)
+			}
+			spec.SecureLevel = &securelevel
 		}
 		if prompt != "" {
 			if err := api.CheckPrompt(prompt); err != nil {
@@ -860,7 +876,7 @@ func (a *app) emitOne(v any, noun, name, verb string) error {
 }
 
 func (a *app) jailRollback(d *kindDesc[api.Jail]) *cobra.Command {
-	var confirmLoss bool
+	var confirmLoss, destroyNewer bool
 	var snapshot, scopeFlag string
 	cmd := &cobra.Command{
 		Use:   "rollback NAME",
@@ -871,13 +887,16 @@ func (a *app) jailRollback(d *kindDesc[api.Jail]) *cobra.Command {
                 in-place upgrade (or 'jail base add') took, kept 14 days. The root holds
                 the base, the ports packages, their database and the data of the
                 services, so all of it goes back; everything written to the root since
-                that snapshot, and the snapshots taken after it, are discarded for good.
-                A volume attached to the jail is not rolled back.
+                that snapshot is discarded for good. A volume attached to the jail is
+                not rolled back.
   --scope data  rolls the dataset the jail manages itself (zfs_delegation) back to a
                 snapshot. Everything written to it since is discarded for good.
   --scope all   rolls the root and that dataset back to a snapshot.
 
 Every scope refuses a running jail: stop it first (JailOps does not stop it for you).
+A rollback destroys the snapshots taken after its target (by a backup, a replication or
+by hand), so it refuses while there are any and names them; --destroy-newer destroys
+them with it, and asks for the same confirmation as the data loss.
 Before a data or all rollback the command shows how many bytes were written since the
 snapshot, which is what would be lost, and asks you to type the jail name. In a
 script, pass --confirm-data-loss once you have decided; -y does not apply to
@@ -885,6 +904,7 @@ data loss. Without --snapshot the most recent snapshot is used.`,
 		Example: `jailops jail rollback web
 jailops jail rollback web --scope data --snapshot before-upgrade
 jailops jail rollback web --scope all --confirm-data-loss
+jailops jail rollback web --destroy-newer
 jailops jail rollback web --scope data --dry-run`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, d),
@@ -901,9 +921,17 @@ jailops jail rollback web --scope data --dry-run`,
 			if err != nil {
 				return err
 			}
-			rb := api.JailRollback{Scope: scope, Snapshot: snapshot}
+			rb := api.JailRollback{Scope: scope, Snapshot: snapshot, DestroyNewer: destroyNewer}
 			if scope != api.RollbackRoot {
 				sn, err := pickSnapshot(ctx, c, name, snapshot)
+				if err != nil {
+					return err
+				}
+				items, err := collect(c.Jails().Snapshots(name).List(ctx))
+				if err != nil {
+					return err
+				}
+				newer, err := newerThan(items, sn, destroyNewer)
 				if err != nil {
 					return err
 				}
@@ -916,8 +944,8 @@ jailops jail rollback web --scope data --dry-run`,
 					return err
 				}
 				rb.ConfirmDataLoss = false
-				warn := fmt.Sprintf("This destroys %s of data written to jail %q since snapshot %q. It cannot be undone.",
-					humanBytes(sn.Status.Written), name, sn.Metadata.Name)
+				warn := fmt.Sprintf("This destroys %s of data written to jail %q since snapshot %q%s. It cannot be undone.",
+					humanBytes(sn.Status.Written), name, sn.Metadata.Name, newerNote(newer))
 				if err := a.confirmTyped(warn, name, confirmLoss, "--confirm-data-loss"); err != nil {
 					return err
 				}
@@ -938,14 +966,18 @@ jailops jail rollback web --scope data --dry-run`,
 					return api.Errorf(api.CodeNotFound, "jail %q has no snapshot from an in-place upgrade to go back to", name).
 						WithHint("the snapshot of an upgrade is kept for 14 days and a successful rollback uses it up")
 				}
+				newer, err := newerThan(items, *sn, destroyNewer)
+				if err != nil {
+					return err
+				}
 				fprintf(a.env.Stdout, "Rolling back the root of jail %s to snapshot %s (taken %s ago).\n",
 					name, sn.Metadata.Name, age(a.env.Now(), sn.Metadata.CreatedAt))
 				rb.ConfirmDataLoss = true
 				if ok, err := a.dry("roll back the root of jail "+name+" to the snapshot of its last upgrade", rb); ok || err != nil {
 					return err
 				}
-				warn := fmt.Sprintf("This discards everything written to the root of jail %q since snapshot %q, and the snapshots taken after it. It cannot be undone.",
-					name, sn.Metadata.Name)
+				warn := fmt.Sprintf("This discards everything written to the root of jail %q since snapshot %q%s. It cannot be undone.",
+					name, sn.Metadata.Name, newerNote(newer))
 				if err := a.confirmTyped(warn, name, confirmLoss, "--confirm-data-loss"); err != nil {
 					return err
 				}
@@ -965,7 +997,33 @@ jailops jail rollback web --scope data --dry-run`,
 	f.StringVar(&snapshot, "snapshot", "", "snapshot to roll back to (default: the latest)")
 	_ = cmd.RegisterFlagCompletionFunc("snapshot", a.completeSnapshots())
 	f.BoolVar(&confirmLoss, "confirm-data-loss", false, "confirm that data written since the snapshot may be destroyed")
+	f.BoolVar(&destroyNewer, "destroy-newer", false, "also destroy the snapshots taken after the target, which a rollback otherwise refuses over (asks for the same confirmation)")
 	return cmd
+}
+
+// newerThan lists the snapshots of a jail taken after sn. Without --destroy-newer any such snapshot is a refusal that
+// names them, before the question: a rollback would destroy them, and they are someone's (a backup, a replication, a
+// snapshot by hand).
+func newerThan(items []api.JailSnapshot, sn api.JailSnapshot, destroy bool) ([]string, error) {
+	var newer []string
+	for _, it := range items {
+		if it.Metadata.Name != sn.Metadata.Name && it.Metadata.CreatedAt.After(sn.Metadata.CreatedAt) {
+			newer = append(newer, it.Metadata.Name)
+		}
+	}
+	if len(newer) > 0 && !destroy {
+		return nil, api.Errorf(api.CodePreconditionFailed, "snapshots taken after %q exist: %s; a rollback to %q destroys them", sn.Metadata.Name, strings.Join(newer, ", "), sn.Metadata.Name).
+			WithHint("keep what you need from them, then add --destroy-newer")
+	}
+	return newer, nil
+}
+
+// newerNote is the part of the rollback's question that names the snapshots it destroys.
+func newerNote(newer []string) string {
+	if len(newer) == 0 {
+		return ""
+	}
+	return ", and destroys the snapshots taken after it (" + strings.Join(newer, ", ") + ")"
 }
 
 func pickSnapshot(ctx context.Context, c *sdk.Client, jail, name string) (api.JailSnapshot, error) {
@@ -1000,7 +1058,7 @@ func (a *app) jailUpgrade(d *kindDesc[api.Jail]) *cobra.Command {
 started or restarted. The base is upgraded from the host with pkg -r on the jail's root, as the FreeBSD Handbook
 upgrades a pkgbase jail, and the ports packages inside the jail. First the command finds out, without touching the jail,
 whether a base package of the release installed in the jail has a newer version in its repository; if nothing is newer
-it says "nothing to upgrade" and does nothing at all. Otherwise the packages are fetched, the root is snapshotted
+it says "up to date" and does nothing at all. Otherwise the packages are fetched, the root is snapshotted
 (jo-pre-upgrade-<time>, kept 14 days, for a manual rollback), pkg upgrades the base on the running root, what the
 scripts of the base packages do runs inside the jail, the ports packages are upgraded and one health check runs. The
 services keep running their old files until they are restarted: the result lists them ("restart pending"). A failure
@@ -1019,7 +1077,7 @@ not newer than the host's kernel. Without it the release never changes.
 
 Several jails are named, selected by label with -l, or all of the project with --all; each is upgraded on its own, one
 after the other, a failure is reported for that jail and the run goes on (--stop-on-error stops it). A summary table
-follows (upgraded, nothing to upgrade, failed, skipped) and the exit code is non-zero if any jail failed. With --dry-run
+follows (upgraded, up to date, failed, skipped) and the exit code is non-zero if any jail failed. With --dry-run
 every jail is checked and nothing changes.
 
 The order of the steps for the host and its jails, the checks to run after an upgrade and the way back are in docs/lifecycle.md.`,
@@ -1058,7 +1116,7 @@ jailops jail upgrade web --no-packages`,
 		var results []upgradeResult
 		failed := 0
 		for _, name := range names {
-			r, err := a.upgradeInPlace(ctx, c, name, release, noPackages, force)
+			r, err := a.upgradeInPlace(ctx, c, name, release, noPackages, force, many)
 			if !many {
 				return err
 			}
@@ -1102,7 +1160,7 @@ jailops jail upgrade web --no-packages`,
 // upgradeResult is what became of one jail of an upgrade run.
 type upgradeResult struct {
 	Jail   string `json:"jail"`
-	Result string `json:"result"` // upgraded, nothing to upgrade, failed, skipped, started (--no-wait), not tried
+	Result string `json:"result"` // upgraded, up to date, failed, skipped, started (--no-wait), not tried
 	Reason string `json:"reason,omitempty"`
 	From   string `json:"from,omitempty"`
 	To     string `json:"to,omitempty"`
@@ -1135,7 +1193,12 @@ func (a *app) emitUpgradeSummary(results []upgradeResult) error {
 		rows := make([][]string, len(results))
 		for i, r := range results {
 			change := ""
-			if r.From != "" || r.To != "" {
+			switch {
+			case r.Result == "up to date" && r.From != "":
+				change = "FreeBSD " + r.From
+			case strings.HasPrefix(r.To, "newer "):
+				change = strings.TrimPrefix(r.To, "newer ") + " (" + r.From + ")"
+			case r.From != "" || r.To != "":
 				change = r.From + " -> " + r.To
 			}
 			rows[i] = []string{r.Jail, r.Result, change, r.Reason}
@@ -1151,7 +1214,7 @@ func (a *app) emitUpgradeSummary(results []upgradeResult) error {
 }
 
 // upgradeInPlace upgrades a jail in place and says what the server did.
-func (a *app) upgradeInPlace(ctx context.Context, c *sdk.Client, name, release string, noPackages, force bool) (upgradeResult, error) {
+func (a *app) upgradeInPlace(ctx context.Context, c *sdk.Client, name, release string, noPackages, force, inTable bool) (upgradeResult, error) {
 	res := upgradeResult{Jail: name}
 	up := api.JailUpgrade{DryRun: a.dryRun, Release: release, NoPackages: noPackages, Force: force}
 	h, err := handle(c.Jails().Upgrade(ctx, name, up))
@@ -1171,18 +1234,30 @@ func (a *app) upgradeInPlace(ctx context.Context, c *sdk.Client, name, release s
 	u := m.Upgrade
 	switch {
 	case u != nil && u.Nothing:
-		res.Result = "nothing to upgrade"
-		if u.Installed != "" {
-			res.Reason = "FreeBSD " + u.Installed
-		}
+		res.Result, res.From = "up to date", u.Installed
 		if a.dryRun && (a.format == fmtJSON || a.format == fmtYAML) {
 			return res, a.preview("upgrade jail "+name, up)
 		}
-		a.say("jail/%s: nothing to upgrade (%s)\n", name, strings.TrimPrefix(res.Reason, ""))
+		switch {
+		case inTable: // the summary table says it
+		case u.Installed != "":
+			a.say("jail/%s: up to date (FreeBSD %s)\n", name, u.Installed)
+		default:
+			a.say("jail/%s: up to date\n", name)
+		}
+		if !inTable {
+			for _, c := range u.Checks {
+				if strings.Contains(c, " are current") {
+					a.say("  %s\n", c)
+				}
+			}
+		}
 		return res, nil
 	case u == nil:
-		res.Result = "nothing to upgrade"
-		a.say("jail/%s: nothing to upgrade\n", name)
+		res.Result = "up to date"
+		if !inTable {
+			a.say("jail/%s: up to date\n", name)
+		}
 		return res, nil
 	}
 	res.Result, res.From, res.To = "upgraded", u.From, u.To
@@ -1442,11 +1517,11 @@ written. It installs nothing: when the shell is bash and the jail has none, the
 answer says so and names 'jailops pkg install NAME -- bash'. Running it again
 repairs the files and changes nothing else.
 
-Two files in /usr/local/etc/profile.d are sourced from a marked block at the top of
-/usr/local/etc/profile (login shells) and /usr/local/etc/bash.bashrc (other
-interactive shells), so they survive OS updates: jailops-env.sh exports
-JAILOPS_JAIL, JAILOPS_PROJECT and JAILOPS_HOST, and jailops-prompt.sh sets the
-prompt. A user's own ~/.bashrc, ~/.bash_profile or ~/.profile wins over them.
+The files of /usr/local/etc/profile.d that end in .sh are sourced from a marked block at
+the top of /usr/local/etc/profile (login bash) and /usr/local/etc/bash.bashrc (other
+interactive bash), and by FreeBSD's /etc/profile for a login sh, so they survive OS
+updates: jailops-env.sh exports JAILOPS_JAIL, JAILOPS_PROJECT and JAILOPS_HOST,
+jailops-prompt.sh sets the prompt, and a file of your own (or of a recipe) is read too. A user's own ~/.bashrc, ~/.bash_profile or ~/.profile wins over them.
 The default prompt shows the jail, and in grey its project and the host it runs
 on: root@web [shop/babel]:/# . Change it with 'jailops config set NAME prompt ...'
 (default, short, none or a PS1 text); a text may hold {jail}, {project} and {host},

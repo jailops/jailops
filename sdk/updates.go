@@ -59,13 +59,13 @@ func (j *JailClient) UpdateHistory(ctx context.Context, name string) ([]api.Upda
 	return v, err
 }
 
-// Provision runs the jail's provisioning (design 8.5). It refuses when
-// provisioning completed before, unless again is set.
-func (j *JailClient) Provision(ctx context.Context, name string, again bool) (*Operation[api.ProvisionResult], error) {
-	if err := j.c.need("provisioning"); err != nil {
+// Apply runs a recipe inside a running FreeBSD jail (see api.Recipe). With DryRun in the request it only reports what
+// would change.
+func (j *JailClient) Apply(ctx context.Context, name string, req api.ApplyRequest) (*Operation[api.ApplyResult], error) {
+	if err := j.c.need("jail_apply"); err != nil {
 		return nil, err
 	}
-	op, _, err := sendOp[api.ProvisionResult](ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/provision", body: api.ProvisionRequest{Again: again}}, nil)
+	op, _, err := sendOp[api.ApplyResult](ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/apply", body: req}, nil)
 	return op, err
 }
 

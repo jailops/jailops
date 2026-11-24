@@ -157,9 +157,6 @@ type Deps struct {
 	// unsupported. FileCopyMax is the most bytes one transfer may carry (default DefaultFileCopyMax).
 	JailFiles   JailFiles
 	FileCopyMax int64
-	// ProjectFilesDir holds the provisioning files of each project, one
-	// directory per project (default <StateDir>/project-files).
-	ProjectFilesDir string
 	// JailShell (bash or sh), JailPrompt (default, short, none or a PS1 text) and JailPromptColor are the jails section of
 	// jailopsd.yaml: what a new FreeBSD jail gets when its keys leave shell and prompt empty. An empty JailShell
 	// means sh and an empty JailPrompt none (a Service built without a configuration changes nothing in jails);
@@ -325,7 +322,6 @@ type Service struct {
 
 	upd     updateState
 	imgAuto imageAutoState
-	prov    provMarks
 	shellM  shellMarks
 	histMem histMemory
 	// keys holds the failed unlocks of each jail and the jails a boot wanted to start while they were locked
@@ -505,6 +501,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if err := s.recoverInterrupted(ctx); err != nil {
 		s.log.Error("recovering interrupted operations failed", "err", err)
 	}
+	s.recoverStartTimes(ctx)
 	s.cleanImportStaging()
 	if err := s.applyMigratedForwards(ctx); err != nil {
 		return fmt.Errorf("service: migrating stored port forwards: %w", err)

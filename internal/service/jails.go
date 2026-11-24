@@ -169,7 +169,6 @@ func (s *Service) view(ctx context.Context, e *jailEntry, running map[string]int
 		st.Warnings = append(st.Warnings, w)
 	}
 	st.Drift = rt.drift
-	st.ProvisionedAt = s.provisionedAt(name)
 	st.Conditions = append(st.Conditions, rt.conditions...)
 	shellConds, shellSetup := s.shellCondition(name)
 	st.Conditions = append(st.Conditions, shellConds...)
@@ -770,7 +769,7 @@ func (s *Service) DeleteJail(ctx context.Context, name string, expect int64) (ap
 			}
 			s.mu.Lock()
 			delete(s.jails, key)
-			s.forgetProvisioned(key)
+			s.forgetJailState(key)
 			delete(s.status, key)
 			s.mu.Unlock()
 			s.forgetKeys(key)
@@ -838,13 +837,8 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 				}
 				s.setLocked(key, nil)
 				s.markStartDue(key, false)
-				// A new jail gets its prompt at its first start, before its own provisioning (nothing is installed).
+				// A new jail gets its prompt at its first start.
 				_ = h.Timed("shell-setup", func() error { s.shellAtStart(ctx, key); return nil })
-				// A jail that declares provisioning is provisioned at its first start.
-				if err := h.Timed("provisioning", func() error { return s.provisionPending(ctx, key) }); err != nil {
-					s.kick()
-					return nil, err
-				}
 			}
 			s.emitIn(ctx, p.Meta.Name, "jail-"+done, "/api/v1/jails/"+name)
 			s.kick()
@@ -1125,6 +1119,10 @@ func (s *Service) RollbackJail(ctx context.Context, name string, rb api.JailRoll
 	if rb.Scope != api.RollbackRoot && !rb.ConfirmDataLoss {
 		return api.Operation{}, api.Errorf(api.CodeDataLoss, "scope %q discards data written since the snapshot", rb.Scope).
 			WithHint("check what was written, then set confirm_data_loss")
+	}
+	if rb.DestroyNewer && !rb.ConfirmDataLoss {
+		return api.Operation{}, api.Errorf(api.CodeDataLoss, "destroy_newer destroys the snapshots taken after the target").
+			WithHint("set confirm_data_loss with it")
 	}
 	opts := lifecycle.RollbackOptions{JailRollback: rb, Stamp: s.stamp()}
 	return s.Submit(ctx, OpSpec{

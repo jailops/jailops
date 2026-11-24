@@ -16,7 +16,8 @@ beside it. An example that stops working fails the build.
 | [`multi-host-fleet`](multi-host-fleet) | two hosts, one project across both, age and SOPS secrets, groups, a rollout | 2 |
 | [`provisioning`](provisioning) | a fresh FreeBSD VM to a running fleet: install, `jailops-priv init`, services, `jailops-sync` from git | 1 |
 | [`app-access-fleet`](app-access-fleet) | PostgreSQL and nginx from the application catalog (`App`), and who may reach them (`AppAccess`): a database role for the web jail, port 80 for a network | 1 |
-| [`pkgops-packaged-service`](pkgops-packaged-service) | a Go service packaged with PkgOps installed into a jail by a provisioning step (what works, what is planned) | 1 |
+| [`recipes`](recipes) | recipes for `jailops jail apply`: nginx and PostgreSQL inside the jails of `web-stack` | - |
+| [`pkgops-packaged-service`](pkgops-packaged-service) | a Go service packaged with PkgOps installed into a jail by a recipe (what works, what is planned) | 1 |
 
 Try any of them offline:
 

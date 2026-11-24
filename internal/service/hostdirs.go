@@ -418,28 +418,36 @@ func (s *Service) remountHostDirUsers(ctx context.Context, o object[api.VolumeSp
 	return all
 }
 
-// hostDirAdmission refuses a project operator that attaches a volume of a host directory the jail did not have, or that
-// changes an existing host-directory attachment in a way that widens it: moving its mount point, or turning it from
-// read-only to writable. Only a global administrator gives jails the host's directories, and those are exactly the two
-// ways a kept name would otherwise grant more of the host's files than the global administrator allowed. A host
-// directory already attached the same way stays. Comparing only the name let an operator flip read_only to false or
-// move the mount of a volume the jail already carried.
+// hostDirAdmission refuses a project operator that attaches a host directory the jail did not have, or that changes a
+// host-directory attachment in a way that widens it: moving its mount point, or turning it from read-only to writable.
+// Only a global administrator gives jails the host's directories, and those are exactly the two ways a kept attachment
+// would otherwise grant more of the host's files than the global administrator allowed. Every attachment is held on its
+// own, by the host directory it carries (two volumes can name the same directory): it stays only when the jail already
+// had that host directory on the same mount point at least as writable, wherever in the list that attachment was.
 func (s *Service) hostDirAdmission(ctx context.Context, project string, now, was []api.VolumeAttach) error {
 	if isGlobalAdmin(ActorFrom(ctx)) {
 		return nil
 	}
+	hostDir := func(name string) string {
+		if o, err := s.volKind.p(project).get(name); err == nil && o.Spec.IsHostDir() {
+			return o.Spec.Path
+		}
+		return ""
+	}
 	for _, v := range now {
-		o, err := s.volKind.p(project).get(v.Name)
-		if err != nil || !o.Spec.IsHostDir() {
+		dir := hostDir(v.Name)
+		if dir == "" {
 			continue
 		}
-		i := slices.IndexFunc(was, func(w api.VolumeAttach) bool { return w.Name == v.Name })
-		if i >= 0 && was[i].Mount == v.Mount && !(was[i].ReadOnly && !v.ReadOnly) {
+		same := func(w api.VolumeAttach) bool { return w.Name == v.Name || hostDir(w.Name) == dir }
+		if slices.ContainsFunc(was, func(w api.VolumeAttach) bool {
+			return same(w) && w.Mount == v.Mount && (!w.ReadOnly || v.ReadOnly)
+		}) {
 			continue // the same host directory, mounted where it was and no more writable than it was
 		}
 		what := "attaching it"
-		if i >= 0 {
-			what = "moving where it is mounted, or making it writable,"
+		if slices.ContainsFunc(was, same) {
+			what = "attaching it again, moving where it is mounted, or making it writable,"
 		}
 		return api.Errorf(api.CodeForbidden, "volume %q is a directory of the host: %s is granted by a global administrator only", v.Name, what).
 			WithHint("the volume's files are the host's, outside the project's storage")

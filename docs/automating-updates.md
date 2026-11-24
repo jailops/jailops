@@ -149,13 +149,13 @@ would start the next step while the build still runs.
 
 **`jailops jail upgrade --all --project shop`** upgrades every FreeBSD jail of the project in place, one after the
 other, while it runs ([lifecycle.md 3.5](lifecycle.md#35-a-freebsd-jail)). For each jail it asks pkg first, read-only:
-with no newer base package of the jail's installed release the answer is `nothing to upgrade` and nothing happens.
+with no newer base package of the jail's installed release the answer is `up to date` and nothing happens.
 Otherwise the root is snapshotted while the jail runs (`jo-pre-upgrade-<time>`, kept 14 days), the base is upgraded
 from the host with `pkg -r`, the ports packages inside the jail with `pkg -j`, and one health check runs. The jail is
 never stopped, started or restarted: the result lists the services that still run replaced files ("restart pending"),
 and you restart them in a window of your choosing. A failure is reported, the jail runs on as pkg left it and the next
 night completes it; nothing rolls back on its own. A stopped jail is not upgraded. A Linux jail is not part of a selection: it looks after its own packages. A
-summary table ends the run (`upgraded`, `nothing to upgrade`, `failed`, `skipped`), and the exit status is 1 when a
+summary table ends the run (`upgraded`, `up to date`, `failed`, `skipped`), and the exit status is 1 when a
 jail failed. Each jail is an operation of its own (`jailops op list`) and a record in its update history (`jailops
 update history web --project shop`). The token of the script is a global administrator's: only a global administrator
 upgrades the base of a jail ([security-model.md](security-model.md#the-in-place-upgrade-of-a-jail)).

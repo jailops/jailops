@@ -3,8 +3,6 @@ package validate
 import (
 	"fmt"
 	"net/netip"
-	"path"
-	"regexp"
 	"strings"
 
 	"jailops.net/jailops/internal/schedule"
@@ -54,11 +52,6 @@ func JailSpec(name string, s api.JailSpec) error {
 	if s.Prompt != "" {
 		if err := api.CheckPrompt(s.Prompt); err != nil {
 			return Invalid("prompt", "prompt: %v", err)
-		}
-	}
-	if s.Provision != nil {
-		if err := provision(*s.Provision); err != nil {
-			return err
 		}
 	}
 	if s.Resources.CPU < 0 || s.Resources.CPU > 4096 {
@@ -142,6 +135,9 @@ func JailSpec(name string, s api.JailSpec) error {
 	}
 	if s.Boot.StopTimeoutSeconds < 0 || s.Boot.StopTimeoutSeconds > api.MaxStopTimeout {
 		return Invalid("boot.stop_timeout_seconds", "stop timeout must be between 0 and %d seconds", api.MaxStopTimeout)
+	}
+	if l := s.SecureLevel; l != nil && (*l < api.MinSecureLevel || *l > api.MaxSecureLevel) {
+		return Invalid("securelevel", "securelevel must be between %d and %d", api.MinSecureLevel, api.MaxSecureLevel)
 	}
 	for i, d := range s.Boot.Depends {
 		f := fmt.Sprintf("boot.depends[%d]", i)
@@ -350,65 +346,6 @@ func updatePolicy(u api.UpdatePolicy) error {
 	case "", api.RebootManual, api.RebootAuto:
 	default:
 		return Invalid("update.reboot", "update reboot %q must be manual or auto", u.Reboot)
-	}
-	return nil
-}
-
-var (
-	provPkgRE  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$`)
-	provSvcRE  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
-	provUserRE = regexp.MustCompile(`^([a-z_][a-z0-9_-]{0,31}\$?|[0-9]{1,10})$`)
-	provModeRE = regexp.MustCompile(`^0?[0-7]{3,4}$`)
-)
-
-// provision validates the provisioning declaration of design 8.5. Nothing in
-// it is a shell string: packages, services and users are names, files are
-// project-relative sources and absolute destinations, commands are argv.
-func provision(p api.Provision) error {
-	if len(p.Packages) > 200 || len(p.Files) > 200 || len(p.Commands) > 100 || len(p.Services.Enable) > 100 || len(p.Services.Start) > 100 {
-		return Invalid("provision", "provision lists are too long")
-	}
-	for i, n := range p.Packages {
-		if !provPkgRE.MatchString(n) {
-			return Invalid(fmt.Sprintf("provision.packages[%d]", i), "package name %q is not valid", n)
-		}
-	}
-	for i, f := range p.Files {
-		fld := fmt.Sprintf("provision.files[%d]", i)
-		if f.Source == "" || strings.HasPrefix(f.Source, "/") || strings.ContainsAny(f.Source, "\x00\\") || path.Clean(f.Source) != f.Source || f.Source == "." || strings.HasPrefix(f.Source, "../") {
-			return Invalid(fld+".source", "source %q must be a clean path below the project's files, not an absolute or host path", f.Source)
-		}
-		if err := AbsPath(fld+".destination", f.Destination); err != nil {
-			return err
-		}
-		if f.Destination == "/" || strings.Contains(f.Destination, "..") {
-			return Invalid(fld+".destination", "destination %q is not usable", f.Destination)
-		}
-		for k, v := range map[string]string{"owner": f.Owner, "group": f.Group} {
-			if v != "" && !provUserRE.MatchString(v) {
-				return Invalid(fld+"."+k, "%s %q is not a user or group name or id", k, v)
-			}
-		}
-		if f.Mode != "" && !provModeRE.MatchString(f.Mode) {
-			return Invalid(fld+".mode", "mode %q must be octal such as 0644", f.Mode)
-		}
-	}
-	for _, l := range [][]string{p.Services.Enable, p.Services.Start} {
-		for i, n := range l {
-			if !provSvcRE.MatchString(n) {
-				return Invalid(fmt.Sprintf("provision.services[%d]", i), "service name %q is not valid", n)
-			}
-		}
-	}
-	for i, argv := range p.Commands {
-		if len(argv) == 0 || argv[0] == "" || len(argv) > 64 {
-			return Invalid(fmt.Sprintf("provision.commands[%d]", i), "a command is a non-empty argv of at most 64 words")
-		}
-		for _, a := range argv {
-			if strings.ContainsRune(a, 0) || len(a) > 4096 {
-				return Invalid(fmt.Sprintf("provision.commands[%d]", i), "a command word is not valid")
-			}
-		}
 	}
 	return nil
 }

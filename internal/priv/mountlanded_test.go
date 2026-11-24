@@ -24,10 +24,11 @@ func mountTableFrom(list string) []mountEntry {
 func withMountStubs(t *testing.T, table func() ([]mountEntry, error)) *[]string {
 	t.Helper()
 	var unmounted []string
-	origTable, origUnmount := mountTableReader, forceUnmount
+	origTable, origUnmount, origEntry := mountTableReader, forceUnmount, forceUnmountEntry
 	mountTableReader = table
 	forceUnmount = func(p string) error { unmounted = append(unmounted, p); return nil }
-	t.Cleanup(func() { mountTableReader = origTable; forceUnmount = origUnmount })
+	forceUnmountEntry = func(e mountEntry) error { unmounted = append(unmounted, "fsid:"+e.mp); return nil }
+	t.Cleanup(func() { mountTableReader = origTable; forceUnmount = origUnmount; forceUnmountEntry = origEntry })
 	return &unmounted
 }
 
@@ -54,8 +55,28 @@ func TestCheckMountLandedStrayIsUnmountedBySyscall(t *testing.T) {
 	if err == nil {
 		t.Fatal("a mount that landed elsewhere must be refused")
 	}
-	if !slices.Contains(*unmounted, "/sbin") {
-		t.Fatalf("the stray mount on /sbin must be undone by syscall, got %v", *unmounted)
+	if !slices.Contains(*unmounted, "fsid:/sbin") {
+		t.Fatalf("the stray mount on /sbin must be undone by its file system ID, got %v", *unmounted)
+	}
+}
+
+func TestCheckMountLandedWrongSourceIsUndone(t *testing.T) {
+	before := map[string]string{"/a\x00tank/a": "/a"}
+	// the mount point is right, but the source path crossed a link: the jail sees the host's /etc.
+	after := []mountEntry{{dev: "tank/a", mp: "/a", typ: "zfs"}, {dev: "/etc", mp: "/jail/srv", typ: "nullfs"}}
+	unmounted := withMountStubs(t, func() ([]mountEntry, error) { return after, nil })
+	l := &Local{}
+	if err := l.checkMountLanded(context.Background(), before, "/jail/srv", "/vols/a"); err == nil {
+		t.Fatal("a mount from another source must be refused")
+	}
+	if !slices.Contains(*unmounted, "fsid:/jail/srv") {
+		t.Fatalf("the mount from the wrong source must be undone, got %v", *unmounted)
+	}
+	// the same mount from the asked-for source passes
+	after[1].dev = "/vols/a"
+	*unmounted = nil
+	if err := l.checkMountLanded(context.Background(), before, "/jail/srv", "/vols/a"); err != nil || len(*unmounted) != 0 {
+		t.Fatalf("the asked-for source should pass: %v %v", err, *unmounted)
 	}
 }
 

@@ -121,6 +121,10 @@ type Status struct {
 	Addrs []AddrStats
 	// FloodsLastHour is how many solicitations the limits dropped in the last hour.
 	FloodsLastHour uint64
+	// ReplyPath are the routers that asked for an address of the host repeatedly (replypath.go); HostSolicits the
+	// solicitations for an address of the host seen since the proxy started.
+	ReplyPath    []ReplyPath
+	HostSolicits uint64
 	Metrics
 }
 
@@ -230,6 +234,8 @@ type Proxy struct {
 	bucket    float64
 	last      time.Time
 	reload    chan struct{}
+	// reply observes the answers of the host to solicitations for its own addresses (replypath.go).
+	reply replyPath
 }
 
 // New builds a Proxy.
@@ -714,6 +720,7 @@ func (p *Proxy) Status() Status {
 	st.Addrs = p.Addresses()
 	st.Metrics = p.Metrics()
 	st.FloodsLastHour = p.FloodsLastHour()
+	st.ReplyPath, st.HostSolicits = p.ReplyPaths()
 	return st
 }
 
@@ -735,12 +742,17 @@ func (p *Proxy) HandleFrame(frame []byte) {
 		}
 		return
 	}
-	if pkt.Type != TypeNeighborSolicitation {
-		return
-	}
 	p.mu.Lock()
 	host := p.hostMAC
 	p.mu.Unlock()
+	if pkt.Type != TypeNeighborSolicitation {
+		// the capture sees the uplink both ways: an advertisement the host sent for an address that is not the proxy's
+		// is the host's answer for one of its own addresses
+		if pkt.EthSrc == host && !host.IsZero() && !p.ours(pkt.Target) {
+			p.reply.advert(pkt, p.deps.Clock.Now())
+		}
+		return
+	}
 	if pkt.EthSrc == host {
 		return // our own transmission
 	}
@@ -773,6 +785,7 @@ func (p *Proxy) HandleFrame(frame []byte) {
 	if !p.ours(pkt.Target) {
 		p.m.unknown.Add(1)
 		p.m.dropped.Add(1)
+		p.reply.solicit(pkt, mac, host, p.deps.Clock.Now())
 		return
 	}
 	if !p.admit(pkt.EthSrc) {

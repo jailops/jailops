@@ -35,6 +35,7 @@ import (
 type installState struct {
 	started  bool
 	kept     bool // the root was mounted and the packages are going in: a failure leaves the jail, stopped, to look at
+	unbound  bool // the volumes bound for the packages are off again: their undo has nothing to unmount
 	version  string
 	snapshot string
 }
@@ -465,8 +466,16 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 		// The volumes of the app cover directories of the packages (/usr/local/www, /var/db/postgres): bound into the
 		// root as they are when the jail runs, the files of the packages land in them.
 		pl.Add(plan.Step{Name: "bind-volumes", Describe: "mount the volumes of " + jail + " into its root, as its start does, so the files of the packages go into them",
-			Do:   func(ctx context.Context) error { return s.life.BindVolumes(ctx, key) },
-			Undo: func(ctx context.Context) error { return s.life.UnbindVolumes(ctx, key) }, UndoOnFail: true})
+			Do: func(ctx context.Context) error { return s.life.BindVolumes(ctx, key) },
+			Undo: func(ctx context.Context) error {
+				if st.unbound {
+					// unbind-volumes took them off, and the start and stop of the jail mount and unmount them itself:
+					// a second unmount fails (the helper refuses a path that is not a mount point) and would leave the
+					// rollback incomplete and the run in the journal
+					return nil
+				}
+				return s.life.UnbindVolumes(ctx, key)
+			}, UndoOnFail: true})
 	}
 	ports, jailops := apps.PackageGroups(app.Packages)
 	for _, grp := range []struct {
@@ -500,7 +509,13 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 		}})
 	if len(nj.Spec.Volumes) > 0 {
 		pl.Add(plan.Step{Name: "unbind-volumes", Describe: "unmount them again: the start mounts them",
-			Do: func(ctx context.Context) error { return s.life.UnbindVolumes(ctx, key) }})
+			Do: func(ctx context.Context) error {
+				if err := s.life.UnbindVolumes(ctx, key); err != nil {
+					return err
+				}
+				st.unbound = true
+				return nil
+			}})
 	}
 	pl.Add(plan.Step{Name: "start-jail", Describe: "start " + jail,
 		Do: func(ctx context.Context) error {
@@ -630,7 +645,7 @@ func (s *Service) dropCreatedJail(ctx context.Context, proj, key string) error {
 	s.mu.Lock()
 	_, had := s.jails[key]
 	delete(s.jails, key)
-	s.forgetProvisioned(key)
+	s.forgetJailState(key)
 	delete(s.status, key)
 	s.mu.Unlock()
 	if had {

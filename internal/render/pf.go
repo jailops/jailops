@@ -506,8 +506,11 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			"pass in quick on %s inet6 proto icmp6 from %s to %s icmp6-type { neighbrsol, neighbradv }", ifs, from6, listStr(ndTo))
 		b.rule(icmp6(StageNeighbour, "pass", "in", src6m, listMatch([]string{"ff02::/16"}), "listenrep", "listendone", "143"),
 			"pass in quick on %s inet6 proto icmp6 from %s to ff02::/16 icmp6-type { listenrep, listendone, 143 }", ifs, from6)
-		b.rule(icmp6(StageNeighbour, "pass", "in", src6m, anyMatch(), "unreach", "toobig", "timex", "paramprob"),
-			"pass in quick on %s inet6 proto icmp6 from %s to any icmp6-type { unreach, toobig, timex, paramprob }", ifs, from6)
+		// An ICMPv6 error the jail sends has no pass of its own: pf matches an error to the state of the connection it is
+		// about and passes it with that state (pf.conf(5), PACKET FILTERING), and every pass rule keeps state, so the
+		// errors about the jail's real flows go through. Any other error is judged by the jail's policies like the rest
+		// of its traffic: an unconditional pass let a jail whose policy denies everything send errors with a payload of its
+		// choosing to any address. The errors into the jail stay passed (below): path MTU discovery depends on them.
 		// the host forwarding from a jail to a neighbour on the same interface would send a redirect; a jail has no
 		// on-link neighbour and must not learn one
 		b.rule(icmp6(StageNeighbour, "block", "out", anyMatch(), anyMatch(), "redir", "routeradv"),

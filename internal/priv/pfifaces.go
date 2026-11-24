@@ -116,48 +116,93 @@ func (l *Local) ifIsTunnel(ctx context.Context, name string) bool {
 	return false
 }
 
+// The rules the renderer writes on an uplink (or on a tunnel of JailOps), matched whole: a rule that adds anything (a
+// route-to, a dup-to, a tag, an rdr-to, a second interface, a label that holds text) is not one of them. pfEndpoint is
+// a source as the renderer writes it: any, urpf-failed, a table, an address or a prefix, or a list of tables and
+// addresses; pfDests are the jail's addresses, one or a list.
+const (
+	pfAddr     = `[0-9A-Fa-f.:]+(?:/[0-9]{1,3})?`
+	pfItem     = `(?:<[A-Za-z0-9_]{1,64}>|` + pfAddr + `)`
+	pfEndpoint = `(?:any|urpf-failed|` + pfItem + `|\{ ` + pfItem + `(?:, ` + pfItem + `)* \})`
+	pfDests    = `(?:[0-9A-Fa-f.:]+|\{ [0-9A-Fa-f.:]+(?:, [0-9A-Fa-f.:]+)* \})`
+	pfPort     = `[0-9]{1,5}(?::[0-9]{1,5})?`
+	pfPortList = `(?:` + pfPort + `|\{ ` + pfPort + `(?:, ` + pfPort + `)* \})`
+)
+
+var (
+	// match out on UPLINK inet from SUBNET to ! SUBNET nat-to (UPLINK:0): the translation of a network (PFNet)
+	reUplinkNAT = regexp.MustCompile(`^match out on (\S+) inet from ([0-9.]+/[0-9]{1,2}) to ! ([0-9.]+/[0-9]{1,2}) nat-to \((\S+):0\)$`)
+	// match in on UPLINK inet proto P from SRC to (UPLINK)|LISTEN port N rdr-to JAIL port M: a forward
+	reUplinkRdr = regexp.MustCompile(`^match in on (\S+) inet proto (?:tcp|udp) from ` + pfEndpoint + ` to (\(\S+\)|[0-9.]+) port [0-9]{1,5} rdr-to [0-9.]+ port [0-9]{1,5}$`)
+	// pass|block drop in [log] quick on UPLINK FAMILY [proto P] from SRC to JAIL-ADDRESSES [port PORTS] [label] [keep
+	// state]: the pass of a forward, what the policies admit from outside, and the blocks that go with them
+	reUplinkFilter = regexp.MustCompile(`^(?:pass|block drop) in(?: log)? quick on (\S+) inet6? (?:proto (?:tcp|udp|icmp|icmp6) )?from ` + pfEndpoint +
+		` to (` + pfDests + `)(?: port ` + pfPortList + `)?(?: label "[A-Za-z0-9_-]{1,64}")?(?: keep state \((?:max [0-9]{1,9}, )?if-bound\))?$`)
+)
+
 // uplinkShape accepts a rule on an uplink only in the forms the renderer writes for a network's translation and a
-// jail's port forwards.
+// jail's port forwards and policies, matched whole (a prefix match let a rule carry options of its own).
 func (l *Local) uplinkShape(ctx context.Context, at, t string) error {
-	switch {
-	case strings.HasPrefix(t, "match in on ") && strings.Contains(t, " rdr-to "):
-		return l.checkForward(ctx, at, t)
-	case strings.HasPrefix(t, "match out on ") && strings.Contains(t, " nat-to "):
-		return nil
-	case strings.HasPrefix(t, "pass in quick on "), strings.HasPrefix(t, "pass in log quick on "),
-		strings.HasPrefix(t, "block drop in quick on "), strings.HasPrefix(t, "block drop in log quick on "):
-		// What the renderer writes on the uplink for a jail: the pass of a forward, what the jail's policies admit from
-		// outside, and the blocks that go with them (forged sources, a deny rule). All of them are inbound and name the
-		// jail's own addresses as their destination (one address or a list), never `any` and never an address of the host.
-		m := reTo.FindStringSubmatch(t)
-		if m == nil {
-			return forbidden("%s: a rule on the uplink names its destination", at)
+	t = strings.Join(strings.Fields(t), " ")
+	if m := reUplinkNAT.FindStringSubmatch(t); m != nil {
+		// the subnet of a stored network on that uplink, translated to that uplink's address
+		if m[1] != m[4] || m[2] != m[3] {
+			return forbidden("%s: a translation names its uplink and its subnet as the renderer writes them", at)
 		}
-		dests := strings.FieldsFunc(strings.Trim(m[1], "{}"), func(r rune) bool { return r == ',' || r == ' ' })
-		if len(dests) == 0 || strings.HasPrefix(m[1], "<") {
-			return forbidden("%s: a rule on the uplink names the addresses of a jail as its destination, not a table", at)
+		p, err := netip.ParsePrefix(m[2])
+		if err != nil || p != p.Masked() {
+			return forbidden("%s: a translation names the subnet of a network", at)
 		}
-		local, _ := localAddrs()
-		for _, d := range dests {
-			a, err := netip.ParseAddr(d)
-			if err != nil {
-				return forbidden("%s: a rule on the uplink names addresses of a jail as its destination", at)
+		nets, err := l.storedNetworks()
+		if err != nil {
+			return err
+		}
+		for _, n := range nets {
+			if n.Spec.Uplink != m[1] || n.Spec.IPv4 == nil {
+				continue
 			}
-			for _, h := range local {
-				if h == a.Unmap() {
-					return forbidden("%s: the destination %s is an address of the host", at, a)
-				}
-			}
-			if l.isNetworkHostAddr(a.Unmap()) {
-				return forbidden("%s: the destination %s is the address a network gives the host", at, a)
-			}
-			if err := l.checkStoredNetworkAddr(a.Unmap(), "the destination of a rule on the uplink"); err != nil {
-				return forbidden("%s: %v", at, err)
+			if q, err := netip.ParsePrefix(n.Spec.IPv4.Subnet); err == nil && q.Masked() == p {
+				return nil
 			}
 		}
-		return nil
+		return forbidden("%s: a translation names the IPv4 subnet of a network on its uplink", at)
 	}
-	return forbidden("%s: a rule on the uplink must be a translation, a forward or the pass of a forward", at)
+	if m := reUplinkRdr.FindStringSubmatch(t); m != nil {
+		if strings.HasPrefix(m[2], "(") && m[2] != "("+m[1]+")" {
+			return forbidden("%s: a forward takes the address of its own uplink", at)
+		}
+		return l.checkForward(ctx, at, t)
+	}
+	m := reUplinkFilter.FindStringSubmatch(t)
+	if m == nil {
+		return forbidden("%s: a rule on the uplink must be a translation, a forward or the pass of a forward, as the renderer writes them", at)
+	}
+	// What the renderer writes on the uplink for a jail: the pass of a forward, what the jail's policies admit from
+	// outside, and the blocks that go with them (forged sources, a deny rule). All of them are inbound and name the
+	// jail's own addresses as their destination (one address or a list), never `any` and never an address of the host.
+	dests := strings.FieldsFunc(strings.Trim(m[2], "{}"), func(r rune) bool { return r == ',' || r == ' ' })
+	if len(dests) == 0 {
+		return forbidden("%s: a rule on the uplink names the addresses of a jail as its destination", at)
+	}
+	local, _ := localAddrs()
+	for _, d := range dests {
+		a, err := netip.ParseAddr(d)
+		if err != nil {
+			return forbidden("%s: a rule on the uplink names addresses of a jail as its destination", at)
+		}
+		for _, h := range local {
+			if h == a.Unmap() {
+				return forbidden("%s: the destination %s is an address of the host", at, a)
+			}
+		}
+		if l.isNetworkHostAddr(a.Unmap()) {
+			return forbidden("%s: the destination %s is the address a network gives the host", at, a)
+		}
+		if err := l.checkStoredNetworkAddr(a.Unmap(), "the destination of a rule on the uplink"); err != nil {
+			return forbidden("%s: %v", at, err)
+		}
+	}
+	return nil
 }
 
 // networkUplinks are the uplinks of the networks JailOps has stored.
