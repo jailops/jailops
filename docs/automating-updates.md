@@ -236,7 +236,7 @@ there.
 5. **A jail that must not change at night:** name the others instead of `--all`, in both steps
    (`jailops jail upgrade web --project shop`, `jailops update apply web --packages -y --project shop`), or select
    them by a label (`-l nightly=yes`); upgrade that jail by hand when it suits it
-   ([lifecycle.md 3.10](lifecycle.md#310-a-jail-that-stays-behind)).
+   ([lifecycle.md 3.9](lifecycle.md#39-a-jail-that-stays-behind)).
 
 **To skip a night:** `sysrc -f /etc/periodic.conf daily_jail_upgrade_enable=NO`, and `YES` the day after. A file
 without the executable bit is ignored by periodic too (`chmod -x` the script), but the variable is the switch the

@@ -98,12 +98,6 @@ export function sortFiles(files: JailLogFile[]): JailLogFile[] {
   return [...files].sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name, undefined, { numeric: true }) : a.kind === 'active' ? -1 : 1))
 }
 
-/** A log path of an app definition as a name below /var/log, or '' when it lies elsewhere (the viewer reads /var/log only). */
-const VAR_LOG = '/var/log/'
-export function logFileOf(path: string): string {
-  return path.startsWith(VAR_LOG) ? path.slice(VAR_LOG.length) : ''
-}
-
 /** The text of the buffer for copy and download: markers are left out. */
 export function plainText(lines: ViewLine[]): string {
   return lines.filter((l) => !l.marker).map((l) => l.text).join('\n') + '\n'
@@ -112,7 +106,7 @@ export function plainText(lines: ViewLine[]): string {
 // ---- the unified view (/logs): many jails merged into one stream by the server ----
 
 /** The filters of the Logs page. `all` reads every project the identity may use instead of `project`. */
-export interface UnifiedFilter { project: string; all: boolean; jails: string[]; app: string; grep: string; since: string; file: string; appLogs: boolean }
+export interface UnifiedFilter { project: string; all: boolean; jails: string[]; grep: string; since: string; file: string; }
 export const UNIFIED_SINCE = ['15m', '1h', '6h', '1d', ''] as const
 export const DEFAULT_FILE = 'messages'
 /** Lines kept while following the merged stream; the oldest go first. */
@@ -130,11 +124,9 @@ export function filterFromQuery(q: Record<string, unknown>, current: string): Un
     project: all ? '' : str(q.project) || current,
     all,
     jails: [...new Set(strs(q.jail))],
-    app: str(q.app),
     grep: str(q.grep),
     since: q.since === undefined ? '1h' : (UNIFIED_SINCE as readonly string[]).includes(since) ? since : '1h',
     file: str(q.file) || DEFAULT_FILE,
-    appLogs: str(q.app_logs) === 'true' || str(q.app_logs) === '1',
   }
 }
 
@@ -144,11 +136,9 @@ export function filterToQuery(f: UnifiedFilter, current: string): Record<string,
   if (f.all) q.project = '*'
   else if (f.project && f.project !== current) q.project = f.project
   if (f.jails.length) q.jail = [...f.jails]
-  if (f.app) q.app = f.app
   if (f.grep) q.grep = f.grep
   if (f.since !== '1h') q.since = f.since
   if (f.file && f.file !== DEFAULT_FILE) q.file = f.file
-  if (f.appLogs) q.app_logs = 'true'
   return q
 }
 
@@ -158,8 +148,6 @@ export function unifiedQuery(f: UnifiedFilter, cursor?: Record<string, number>, 
   if (f.all) p.set('all_projects', 'true')
   else if (f.project) p.set('project', f.project)
   for (const j of f.jails) p.append('jail', j)
-  if (f.app) p.set('app', f.app)
-  if (f.appLogs) p.set('app_logs', 'true')
   if (f.file && f.file !== DEFAULT_FILE) p.set('file', f.file)
   if (tail && tail !== DEFAULT_TAIL) p.set('limit', String(tail))
   if (f.since) p.set('since', f.since)

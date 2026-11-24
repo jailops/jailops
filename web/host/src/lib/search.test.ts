@@ -34,7 +34,6 @@ describe('rank', () => {
     jail('api', { env: 'prod', team: 'web', app: 'nginx' }),
     jail('db', { env: 'prod', team: 'data' }, ['10.20.0.12']),
     jail('webmail', { env: 'dev' }),
-    entry({ kind: 'app', id: 'app:nginx', title: 'nginx', sub: 'Web server', to: '/apps/nginx', icon: 'store', extra: ['web server'] }),
     entry({ kind: 'project', id: 'project:web', title: 'web', to: '/projects/web', icon: 'users' }),
     page('Networks', '/networks'),
     page('Firewall', '/firewall'),
@@ -55,9 +54,9 @@ describe('rank', () => {
     // a page has no labels: a label term leaves it out
     expect(rank(index, 'env=prod net').total).toBe(0)
   })
-  it('finds a jail by address, label text and app', () => {
+  it('finds a jail by address and label text', () => {
     expect(rank(index, '10.20.0.12').groups[0].items[0].title).toBe('db')
-    expect(rank(index, 'nginx').groups.map((g) => g.items[0].title)).toEqual(['nginx', 'api'])
+    expect(rank(index, 'nginx').groups.map((g) => g.items[0].title)).toEqual(['api'])
     expect(rank(index, 'fire').groups[0].items[0].title).toBe('Firewall')
   })
   it('gives nothing for an empty query and caps each group with a count of the rest', () => {

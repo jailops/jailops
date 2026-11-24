@@ -67,7 +67,7 @@ func labelNameOK(s string, max int, extra string) bool {
 }
 
 // ValidLabelKey checks a label key: a name of at most 63 characters (letters, digits, "-", "_" and ".", beginning and
-// ending with a letter or digit), with an optional prefix of at most 253 characters and a "/" before it ("jailops.app",
+// ending with a letter or digit), with an optional prefix of at most 253 characters and a "/" before it ("team.name",
 // "example.org/tier").
 func ValidLabelKey(k string) error {
 	prefix, name, hasPrefix := strings.Cut(k, "/")

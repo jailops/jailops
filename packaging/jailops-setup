@@ -447,8 +447,7 @@ fi
 rel=$(freebsd-version -u 2>/dev/null | sed 's/-p[0-9]*$//')
 case $rel in [0-9]*.[0-9]*-*) ;; *) rel=15.1-RELEASE ;; esac
 img=freebsd-$(printf '%s' "$rel" | sed 's/^\([0-9]*\)\.\([0-9]*\).*/\1-\2/')
-say "Next: the first image, network and jail, docs/install.md section 7 (jailops image create $img --release $rel);"
-say "the application catalog: jailops app list."
+say "Next: the first image, network and jail, docs/install.md section 7 (jailops image create $img --release $rel)."
 if [ "$problems" -gt 0 ]; then
 	say "x $problems step(s) are not done; the lines starting with x above say which. Run jailops-setup again after fixing them."
 	exit 1

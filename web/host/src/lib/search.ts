@@ -3,8 +3,8 @@
 import type { IconName } from '@jailops/shared/lib/icons'
 import { parseQuery, termHolds, type Labels, type Term } from './labels'
 
-export type Kind = 'jail' | 'app' | 'image' | 'network' | 'project' | 'storage' | 'page'
-export const KINDS: Kind[] = ['jail', 'app', 'image', 'network', 'project', 'storage', 'page']
+export type Kind = 'jail' | 'image' | 'network' | 'project' | 'storage' | 'page'
+export const KINDS: Kind[] = ['jail', 'image', 'network', 'project', 'storage', 'page']
 
 export interface Entry {
   kind: Kind
@@ -20,8 +20,6 @@ export interface Entry {
   /** A jail's power state, for the pill and the quick actions. */
   state?: string
   labels?: Labels
-  /** The app an installed jail runs (its jailops.app label). */
-  app?: string
   /** Lower-case text a word is looked for in; the title is always the first. */
   fields: string[]
 }

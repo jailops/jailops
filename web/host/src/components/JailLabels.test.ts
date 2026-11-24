@@ -68,7 +68,7 @@ describe('labels in the console', () => {
     await flushPromises()
     expect(w.text()).toContain("Letters, digits, '-', '_' and '.'")
     expect(document.activeElement?.id).toBe('lbl-key')
-    await w.get('[data-test="label-key"]').setValue('jailops.app')
+    await w.get('[data-test="label-key"]').setValue('jailops.custom')
     await w.get('form').trigger('submit')
     await flushPromises()
     expect(w.text()).toContain('set by JailOps')
@@ -91,10 +91,8 @@ describe('labels in the console', () => {
     expect((await api.jails.get('build')).metadata.labels).toEqual({ role: 'ci', team: 'platform', tier: 'edge' })
   })
 
-  it('a chip filters the jail list; an app jail shows its system labels read-only', async () => {
+  it('a chip filters the jail list', async () => {
     w = await mountJail('web')
-    expect(w.find('.lsys').text()).toContain('jailops.app')
-    expect(w.text()).not.toContain('jailops.app.hash')
     await w.get('[data-label="env=prod"]').trigger('click')
     await until(() => router.currentRoute.value.path === '/jails')
     expect(router.currentRoute.value.query.q).toBe('env=prod')

@@ -123,14 +123,11 @@ type Env struct {
 	repoVer  string              // the package version the fake repository serves (SetRepoVersion)
 	// Loaded lists the modules the daemon loaded with kldload.
 	Loaded []string
-	// DialFn answers the host-to-jail connections of an app installation's
-	// health check; nil refuses them (there is no network in tests).
-	DialFn func(ctx context.Context, network, address string) (net.Conn, error)
-	// PkgInstallErr makes the fake pkg fail an app's package installation.
-	PkgInstallErr error
-	pkgDry        string // what `pkg -r ROOT upgrade -n` lists until an upgrade ran (SetPkgUpgrades)
-	pkgUpgErr     error  // makes `pkg -r ROOT upgrade -y` fail (SetPkgUpgradeErr)
-	pkgUpgraded   bool
+	// DialFn answers the host-to-jail connections of the daemon; nil refuses them (there is no network in tests).
+	DialFn      func(ctx context.Context, network, address string) (net.Conn, error)
+	pkgDry      string // what `pkg -r ROOT upgrade -n` lists until an upgrade ran (SetPkgUpgrades)
+	pkgUpgErr   error  // makes `pkg -r ROOT upgrade -y` fail (SetPkgUpgradeErr)
+	pkgUpgraded bool
 	// Installed lists what the fake pkg installed into jail roots, "root name".
 	Installed []string
 	// Host is the simulated host of host management.
@@ -159,13 +156,6 @@ func (e *Env) SetPkgUpgradeErr(err error) {
 	e.sysmu.Lock()
 	defer e.sysmu.Unlock()
 	e.pkgUpgErr = err
-}
-
-// SetPkgInstallErr sets PkgInstallErr while the daemon may be running.
-func (e *Env) SetPkgInstallErr(err error) {
-	e.sysmu.Lock()
-	defer e.sysmu.Unlock()
-	e.PkgInstallErr = err
 }
 
 func (e *Env) dial(ctx context.Context, network, address string) (net.Conn, error) {
@@ -311,8 +301,6 @@ func New(t testing.TB, o Options) *Env {
 	e.Cfg.DataDir = filepath.Join(e.Dir, "data")
 	e.Cfg.ConfDir = "/etc/jailops/jails"
 	e.Cfg.WorkDir = filepath.Join(e.Dir, "work")
-	// the host's own app definitions: none unless a test puts some there
-	e.Cfg.Apps.LocalDir = filepath.Join(e.Dir, "apps-local")
 	e.Cfg.Hub = o.Hub
 	e.Cfg.Listen.Unix.Path = ""
 	if o.Listen {
@@ -484,12 +472,6 @@ func (e *Env) script() {
 				e.Files.Put(root+"/.pkgs", []byte("FreeBSD-runtime "+v+"\nFreeBSD-utilities "+v+"\n"))
 				return run.Result{}, nil
 			}
-			e.sysmu.Lock()
-			failErr := e.PkgInstallErr
-			e.sysmu.Unlock()
-			if failErr != nil {
-				return run.Result{ExitCode: 1, Stderr: []byte(failErr.Error() + "\n")}, failErr
-			}
 			for j := 0; j < len(rest); j++ {
 				if rest[j] == "-r" { // the repository name follows
 					j++
@@ -534,20 +516,6 @@ func (e *Env) script() {
 					return run.Result{Stdout: []byte(v + "\n")}, nil
 				}
 				return run.Result{ExitCode: 1, Stderr: []byte("pkg: " + rest[1] + " is not installed\n")}, fmt.Errorf("pkg query: %s is not installed", rest[1])
-			}
-			if len(rest) == 3 && rest[0] == "-e" && rest[1] == "%a = 0" { // the packages an app installed, for a draft
-				var sb strings.Builder
-				e.sysmu.Lock()
-				installed := append([]string(nil), e.Installed...)
-				e.sysmu.Unlock()
-				for _, in := range installed {
-					if r, name, _ := strings.Cut(in, " "); r == root {
-						b, _ := e.Files.Get(root + "/.app-pkgs/" + name)
-						_, v, _ := strings.Cut(strings.TrimSpace(string(b)), " ")
-						sb.WriteString(name + " " + v + " FreeBSD https://example.com/" + name + "\n")
-					}
-				}
-				return run.Result{Stdout: []byte(sb.String())}, nil
 			}
 			b, _ := e.Files.ReadFile(context.Background(), root+"/.pkgs")
 			var sb strings.Builder

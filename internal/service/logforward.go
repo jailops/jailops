@@ -88,10 +88,7 @@ func (noLogs) TailFile(context.Context, string, int64, int64) ([]byte, int64, in
 func (s *Service) forwardJails(ctx context.Context) ([]logfwd.Jail, error) {
 	var out []logfwd.Jail
 	for _, j := range s.logJails(func(string) bool { return true }) {
-		lj := logfwd.Jail{Project: j.project, Name: j.name, Labels: j.labels, App: j.app, LogDir: JailLogDir(s.rootMount(j.key))}
-		if j.app != "" && s.d.Logs != nil {
-			lj.AppFiles = s.appLogFiles(ctx, j.key, j.app)
-		}
+		lj := logfwd.Jail{Project: j.project, Name: j.name, Labels: j.labels, LogDir: JailLogDir(s.rootMount(j.key))}
 		out = append(out, lj)
 	}
 	return out, nil

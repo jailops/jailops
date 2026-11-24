@@ -37,18 +37,10 @@ func RenderJail(s *Service, project, name string) error {
 	return err
 }
 
-// SetManagedPolicy stores a firewall policy that something else manages, as app access does for app-JAIL.
+// SetManagedPolicy stores a firewall policy that something else manages, as the fleet sync does.
 func SetManagedPolicy(s *Service, project, name, managedBy string, spec api.FirewallPolicySpec) error {
 	_, err := s.polKind.p(project).create(context.Background(), api.ObjectMeta{Name: name, ManagedBy: managedBy}, spec)
 	return err
-}
-
-// SeedJailopsRepo runs the copy of the JailOps repository's configuration into a jail root, from the host directory dir.
-func SeedJailopsRepo(s *Service, ctx context.Context, dir, root string) error {
-	old := hostPkgDir
-	hostPkgDir = dir
-	defer func() { hostPkgDir = old }()
-	return s.seedJailopsRepo(ctx, root)
 }
 
 // SetHostDirTimeouts shortens how long a read and a probe wait for a host directory that does not answer, and returns
@@ -108,4 +100,11 @@ func ThickPorts(s *Service, ctx context.Context, key string, dryRun bool) (pendi
 // HostDirAdmission runs the admission of host-directory attachments.
 func HostDirAdmission(s *Service, ctx context.Context, project string, now, was []api.VolumeAttach) error {
 	return s.hostDirAdmission(ctx, project, now, was)
+}
+
+// SetShellFormat sets the format number in the prompt record of a jail (0: a record an earlier release wrote).
+func SetShellFormat(s *Service, key string, format int) {
+	m := s.shellMark(key)
+	m.Format = format
+	s.setShellMark(key, m)
 }

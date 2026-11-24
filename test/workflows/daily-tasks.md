@@ -40,7 +40,6 @@ becomes a real one and its entry leaves the roadmap section, all in the change t
 | shell-and-command | open a shell in a jail and run one command | `jailops shell NAME`, `jailops exec NAME -- CMD` | OK | - | shell-and-command |
 | exec-many | run a command, or install a package, in many jails at once | `jailops exec (NAME... \| -l KEY=VALUE \| --all) -- CMD`, `jailops pkg install -l KEY=VALUE -- PKG` | OK | - | exec-many |
 | profiles | apply the same settings to several jails | `jailops profile create`, `jailops create --profile` | OK | - | profiles |
-| apps | install an application from the catalog as a jail | `jailops app install APP` | OK | - | apps |
 | copy-files | copy files into and out of a jail | `jailops cp SRC DST` with `NAME:/path` on either side | OK | - | copy-files |
 | volume | give a jail a volume, move it to another jail | `jailops volume create`, `volume attach`, `volume detach` | OK | - | volume |
 | host-dir | mount a directory of the host in a jail | `jailops volume create NAME --from-dir /host/dir`, then `jailops volume attach` | OK | - | host-dir |

@@ -17,8 +17,8 @@ func TestFirewallTest(t *testing.T) {
 		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}})
 	h.srv.SeedGeneration("freebsd-151")
 	tr := h.transcript()
-	tr.ok("app", "install", "postgresql", "db", "--image", "freebsd-151")
-	tr.ok("app", "install", "nginx", "web", "--image", "freebsd-151")
+	tr.ok("jail", "create", "db", "--image", "freebsd-151", "--network", "lan", "--storage", "default", "--start")
+	tr.ok("jail", "create", "web", "--image", "freebsd-151", "--network", "lan", "--storage", "default", "--start")
 	tr.ok("firewall", "address-set", "create", "postgresql-allow", "--address", "jail:web", "--comment", "the web jail")
 	tr.ok("firewall", "policy", "create", "postgres", "--default-in", "deny")
 	tr.ok("firewall", "rule", "add", "postgres", "in", "--action", "allow", "--proto", "tcp", "--from", "set:postgresql-allow", "--port", "5432", "--comment", "who may reach PostgreSQL")
@@ -58,7 +58,7 @@ func TestFirewallTestCompletion(t *testing.T) {
 		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}})
 	h.srv.SeedGeneration("freebsd-151")
 	for _, args := range [][]string{
-		{"app", "install", "postgresql", "db", "--image", "freebsd-151"},
+		{"jail", "create", "db", "--image", "freebsd-151", "--network", "lan", "--storage", "default", "--start"},
 		{"firewall", "address-set", "create", "office", "--address", "198.51.100.0/24"},
 	} {
 		if o, e, code := h.run("", args...); code != 0 {

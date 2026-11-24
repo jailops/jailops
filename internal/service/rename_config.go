@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
@@ -54,7 +53,7 @@ func (s *Service) rewriteJails(ctx context.Context, p *renamePlan, keep func(pro
 // refuseManagedRef refuses to rewrite an object that a repository or a hub defines: its next pass would write the
 // old name back.
 func refuseManagedRef(noun, name, managedBy string) error {
-	if managedBy == "" || managedBy == api.AppAccessManagedBy {
+	if managedBy == "" {
 		return nil
 	}
 	return api.Errorf(api.CodeForbidden, "%s %s refers to the name and is managed by %s", noun, name, managedBy).
@@ -385,7 +384,7 @@ func profileObject(project, name string) string {
 // ---- address sets ----
 
 // RenameAddressSet renames an address set of the request's project and rewrites the rules that name it (@name),
-// the sets that include it and the grants of app access made from it. The set's PF table is renamed with it, so
+// the sets that include it. The set's PF table is renamed with it, so
 // the connections that rules using it passed are cut once (their state labels change).
 func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOptions) (api.Operation, *api.RenameResult, error) {
 	pr, err := s.access(ctx)
@@ -448,39 +447,6 @@ func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOpt
 			}
 			p.add(st)
 		}
-		// app access grants made from the set
-		recs, err := s.accKind().p(proj).list()
-		if err != nil {
-			return nil, err
-		}
-		granted := map[string]bool{} // the managed policies whose rule names follow the source
-		for _, r := range recs {
-			spec := r.Spec
-			spec.Grants = slices.Clone(spec.Grants)
-			hit := false
-			for i := range spec.Grants {
-				g := &spec.Grants[i]
-				if g.Kind != api.AccessSourceSet || g.SourceName != name {
-					continue
-				}
-				hit = true
-				g.Source, g.SourceName, g.From = "set:"+to, to, replaceAll(g.From, "set:"+name, "set:"+to)
-			}
-			if !hit {
-				continue
-			}
-			ro, err := s.accKind().p(proj).getObj(r.Meta.Name)
-			if err != nil {
-				return nil, internal(err)
-			}
-			st, err := stateStep(api.KindAppAccess, ro, r.Meta.Name, proj, spec,
-				api.RenameChange{Kind: api.RenameReference, Object: "app access of jail " + r.Meta.Name, Detail: "source set:" + name + " -> set:" + to})
-			if err != nil {
-				return nil, err
-			}
-			p.add(st)
-			granted[apps.AccessPolicyName(r.Meta.Name)] = true
-		}
 		pols, err := s.polKind.p(proj).list()
 		if err != nil {
 			return nil, err
@@ -500,13 +466,6 @@ func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOpt
 					continue
 				}
 				r.From, r.To = nf, nt
-				if granted[pol.Meta.Name] {
-					for _, proto := range []string{"tcp", "udp"} {
-						if r.Name == apps.AccessRuleName("set:"+name, proto) {
-							r.Name = apps.AccessRuleName("set:"+to, proto)
-						}
-					}
-				}
 				d = append(d, fmt.Sprintf("rule %d: set:%s -> set:%s", i+1, name, to))
 			}
 			if len(d) == 0 {
@@ -560,13 +519,6 @@ func (s *Service) RenamePolicy(ctx context.Context, name string, o RenameOptions
 		}
 		if err := ks.notTaken(to); err != nil {
 			return nil, err
-		}
-		if j, ok := strings.CutPrefix(to, "app-"); ok {
-			if key, err := validate.QualifiedName(proj, j); err == nil {
-				if _, err := s.jailSnapshot(key); err == nil {
-					return nil, invalid("%q is the name app access gives the policy of jail %s", to, j).WithHint("choose another name")
-				}
-			}
 		}
 		// a host profile names a policy of whichever project its jail is in: one project's rename cannot rewrite it
 		if hp, err := s.profKind.p(api.HostProfileProject).list(); err == nil {

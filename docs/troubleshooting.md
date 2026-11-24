@@ -184,7 +184,7 @@ leaves a package changed:
 - `nothing to add: pkg finds P installed`: not an error; the package is there.
 
 **`jailops cp` or the Files tab answers `busy`.** An operation has the jail (an upgrade, a stop, a start) or a package
-update or app installation holds it; the message names it. Copy again when it has ended (`jailops op list`).
+update holds it; the message names it. Copy again when it has ended (`jailops op list`).
 
 **The daemon logs "the firewall anchor of a running jail is empty".** The daemon watches the anchor of one running
 jail (the field `anchor` of the line names it) to notice a flush; that anchor was found empty, and the daemon loads the

@@ -73,9 +73,7 @@ func classify(e Entry) Class {
 	switch {
 	case e.Public:
 		return ClassPublic
-	case p == "/api/v1/apps/{name}/install":
-		return ClassProject
-	case has("/api/v1/auth"), has("/api/v1/sessions"), p == "/api/v1/config-keys", has("/api/v1/apps"):
+	case has("/api/v1/auth"), has("/api/v1/sessions"), p == "/api/v1/config-keys", p == "/api/v1/recipes/validate":
 		return ClassSelf
 	case p == "/api/v1/events", p == "/api/v1/audit", p == "/api/v1/updates", p == "/api/v1/exposed", p == "/api/v1/logs", p == "/api/v1/boot", p == "/api/v1/top":
 		return ClassVisible
@@ -166,6 +164,8 @@ var Perms = classifyAll([]Entry{
 
 	// Configuration keys and profiles.
 	r("GET", "/api/v1/config-keys", ro),
+	// a recipe is checked as text: no jail, no file of the host is read or written
+	r("POST", "/api/v1/recipes/validate", op),
 	r("POST", "/api/v1/jails/{name}/config", op),
 	r("GET", "/api/v1/updates", ro),
 	r("POST", "/api/v1/updates/check", op),
@@ -189,13 +189,6 @@ var Perms = classifyAll([]Entry{
 	r("PATCH", "/api/v1/profiles/{name}", ad),
 	r("DELETE", "/api/v1/profiles/{name}", ad),
 	r("POST", "/api/v1/profiles/{name}/rename", ad),
-
-	// The application catalog: local definition files, readable by any authenticated identity. Installing one creates
-	// a jail in the project of the request and is its own entry: operator, because it creates nothing the definition
-	// does not say.
-	r("GET", "/api/v1/apps", ro),
-	r("GET", "/api/v1/apps/{name}", ro),
-	r("POST", "/api/v1/apps/{name}/install", op),
 
 	// Projects and storage.
 	r("GET", "/api/v1/projects", ro),
@@ -268,13 +261,6 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/logs/forward", ad),
 	r("DELETE", "/api/v1/logs/forward", ad),
 	r("POST", "/api/v1/logs/forward/test", ad),
-	// a definition drafted from a running jail: it runs read-only commands in the jail, like exec
-	r("GET", "/api/v1/jails/{name}/app-draft", op),
-	// who may connect to an installed app: reading it is readonly; allow and deny change the jail's firewall and,
-	// for a database, roles in it, as an installation does (operator)
-	r("GET", "/api/v1/jails/{name}/access", ro),
-	r("POST", "/api/v1/jails/{name}/access/allow", op),
-	r("POST", "/api/v1/jails/{name}/access/deny", op),
 	r("GET", "/api/v1/jails/{name}/files/{path...}", op),
 	r("PUT", "/api/v1/jails/{name}/files/{path...}", op),
 	r("POST", "/api/v1/jails/{name}/upgrade", ad),

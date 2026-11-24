@@ -127,7 +127,6 @@ should be new); nothing is removed from the jail's own root.
 | `jail snapshot`, `jail rollback`, `jail upgrade` | never touch a volume; a volume has snapshots of its own (below). What must outlive a rollback of the root belongs in a volume. |
 | `jail copy` | the copy attaches no volume, with the data or without it (see [Copying a jail](#copying-a-jail)). |
 | `jail backup` | a jail's backup holds the attachments; the volume is a backup of its own, taken once however many jails attach it (see [What is backed up](#what-is-backed-up)). |
-| `app install` | the app's `data` paths become volumes named `<jail>-<name>`, made before the jail by visible steps of the plan; `app` jails keep them when deleted. |
 
 **Snapshots of a volume.**
 

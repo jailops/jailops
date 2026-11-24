@@ -172,7 +172,7 @@ func (PkgBase) sets(s api.ImageSpec) []string {
 	if len(s.Source.Sets) > 0 {
 		return s.Source.Sets
 	}
-	// The smallest base of a working jail: the minimal jail set, as in the pkgbase jail recipe. The FreeBSD-base
+	// The smallest base of a working jail: the minimal jail set (and sysrc), as in the pkgbase jail recipe. The FreeBSD-base
 	// repository stays disabled inside a jail, as FreeBSD ships it, so pkg there sees the ports only and no
 	// FreeBSD-* package (clibs-lib32 for llvm, which cannot be installed in a jail, FreeBSD bug 293817) is ever pulled in.
 	// The base is updated from the host. No sshd: a jail that is entered with ssh names FreeBSD-ssh, and anything else a
@@ -182,7 +182,13 @@ func (PkgBase) sets(s api.ImageSpec) []string {
 	// the image builds software. Two libraries are added because ports packages link them and the base repository is
 	// disabled on a host that is not installed from packages (the ports repository cannot supply a FreeBSD-* package):
 	// FreeBSD-libexecinfo (PostgreSQL, Valkey) and FreeBSD-kerberos-lib (curl, so git over https in Forgejo).
-	return []string{"FreeBSD-set-minimal-jail", "FreeBSD-libexecinfo", "FreeBSD-kerberos-lib"}
+	// sysrc is the tool an administrator reaches for first (sysrc postgresql_enable=YES): it is in FreeBSD-rc on 16, which
+	// the minimal jail set holds, and in FreeBSD-bsdconfig (1 MiB, it needs only the runtime) on 15, which it does not.
+	sets := []string{"FreeBSD-set-minimal-jail", "FreeBSD-libexecinfo", "FreeBSD-kerberos-lib"}
+	if major, _ := strconv.Atoi(strings.SplitN(s.Release, ".", 2)[0]); major > 0 && major < 16 {
+		sets = append(sets, "FreeBSD-bsdconfig")
+	}
+	return sets
 }
 
 // pkgArgv builds a `pkg -r <root>` argv with a private repository

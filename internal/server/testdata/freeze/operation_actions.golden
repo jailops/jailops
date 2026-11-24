@@ -1,4 +1,3 @@
-app.install
 backup.delete
 backup.run
 backup.verify

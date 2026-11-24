@@ -21,7 +21,7 @@ type refPlace struct {
 	// flat offers the names at once (jail:web, host and the addresses of the jails) instead of the kinds first:
 	// worth it where there are two or three kinds and a short list of jails.
 	flat bool
-	// self is a name that is left out of its own kind: the address set being made, the app being allowed.
+	// self is a name that is left out of its own kind: the address set being made.
 	selfKind string
 	selfName func(args []string) string
 }
@@ -31,8 +31,6 @@ var (
 	placeRule = refPlace{tag: true, any: true}
 	// placeMember is a member of an address set.
 	placeMember = refPlace{selfKind: "set", selfName: firstArg}
-	// placeSource is the source of app allow and app deny.
-	placeSource = refPlace{host: true, selfKind: "jail", selfName: firstArg}
 	// placeEnd is one end of a firewall test: a jail, an address or the host, never an address set.
 	placeEnd = refPlace{host: true, noSet: true, flat: true}
 )
@@ -169,6 +167,10 @@ func noSpaceIfKind(words []string) cobra.ShellCompDirective {
 	}
 	return d
 }
+
+// completeMember completes a member of an address set, --address of address-set create: jail: and set:, then the
+// jails and the other address sets of the project (not the set being made).
+func (a *app) completeMember() completer { return a.refCompleter(placeMember) }
 
 // refCompleter completes one reference where a flag value or an argument is that reference.
 func (a *app) refCompleter(p refPlace) completer {

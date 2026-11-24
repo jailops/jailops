@@ -32,7 +32,7 @@ is written out in [automating-updates.md](automating-updates.md).
 | Generation | `freebsd-15-1#g3`: one immutable build of the image, a dataset with a `@ro` snapshot. Each `image upgrade` builds the next one with the release's current patch level, for the jails made from then on; JailOps records the FreeBSD version of its `FreeBSD-runtime` (`15.1-RELEASE-p6`). The number counts builds on this host and says nothing about FreeBSD. A new release is a new image, never a generation of the old one | `jailops image generation list freebsd-15-1` (column `FREEBSD`); `jailops list` writes `freebsd-15-1 (g3, p6)` |
 | Jail | An independent system with a root dataset of its own, made by copying a generation (with block cloning, ZFS 2.2 and later, the copy takes next to no space until a file changes). The image is only the seed. A FreeBSD jail's release is the one JailOps installed and recorded on its root (`jailops:freebsd_version`). It is upgraded in place while it runs: `jailops jail upgrade NAME` upgrades the base from the host and the ports packages through the running jail, with a snapshot for a manual rollback and a health check. Inside the jail `pkg install` and `pkg upgrade` handle the ports packages and never touch the base: `FreeBSD-base` stays disabled there, as FreeBSD ships it. What must outlive the root goes in a volume | `jailops jail info web`; `freebsd-version -j PROJECT_JAIL` |
 | Linux jail | Alpine or Debian under the Linuxulator, a jail like any other. It looks after its own packages: JailOps does not update them ([linux-jails.md](linux-jails.md#packages)); the base is replaced by a new jail, never upgraded | `os: linux` |
-| JailOps | The packages `jailops`, `jailops-client`, `jailops-apps` and, on a backup node, `jailops-backupd` from the repository `jailops` (`pkg.jailops.net/${ABI}`), built per package ABI. The daemon `jailopsd` and the helper `jailops-priv` are one service | `jailops version` |
+| JailOps | The packages `jailops`, `jailops-client` and, on a backup node, `jailops-backupd` from the repository `jailops` (`pkg.jailops.net/${ABI}`), built per package ABI. The daemon `jailopsd` and the helper `jailops-priv` are one service | `jailops version` |
 
 **Who does what.**
 
@@ -50,7 +50,7 @@ JailOps recorded on its root, and the preflight of every upgrade compares the ta
 | 15.1 | 15.1 | `FreeBSD:15` | works, supported |
 | 15.2 | 15.1 | `FreeBSD:15` | works: a jail stays on its release and keeps getting its patch levels until you move it; FreeBSD supports 15.1 until March 31, 2027 ([security page](https://www.freebsd.org/security/)) |
 | 15.2 | 15.2 | `FreeBSD:15` | works, supported from the release of 15.2 and after JailOps's test suites pass on it ([supported-versions.md](supported-versions.md)) |
-| 15.1 | 15.2 | | **refused**: `jailops jail upgrade --release 15.2-RELEASE` answers `version_skew`, "upgrade the host first"; `jailops app install` without `--image` never picks such an image; `jailops jail import` of a jail exported from a newer release names the host upgrade to make first |
+| 15.1 | 15.2 | | **refused**: `jailops jail upgrade --release 15.2-RELEASE` answers `version_skew`, "upgrade the host first"; `jailops create` without `--image` never picks such an image; `jailops jail import` of a jail exported from a newer release names the host upgrade to make first |
 | 16.0 | 15.x | `FreeBSD:15` | works for the jail's base (an older userland on a newer kernel); its packages were built for the old ABI and are reinstalled for `FreeBSD:16` when the jail moves to 16 |
 | 16.0 | 16.0 | `FreeBSD:16` | after FreeBSD 16.0 is released and `pkg.jailops.net` serves `FreeBSD:16` packages ([release-engineering.md](release-engineering.md)) |
 | 15.0 or older | any | | **not supported**: `jailops doctor` fails `host.release`; FreeBSD's support of 15.0 has ended (it is not in the supported table of [freebsd.org/security](https://www.freebsd.org/security/)) |
@@ -220,8 +220,8 @@ remove it.
        jailops doctor
        jailops list
 
-   `pkg upgrade -r jailops` takes `jailops`, `jailops-client`, `jailops-apps` and, on a backup node, `jailops-backupd`
-   together; naming only two of them leaves the others behind, and a bare `pkg upgrade` on a pkgbase host would mix the
+   `pkg upgrade -r jailops` takes `jailops`, `jailops-client` and, on a backup node, `jailops-backupd`
+   together; naming only two of them leaves the other behind, and a bare `pkg upgrade` on a pkgbase host would mix the
    base system in. Running jails are kernel jails: restarting the daemon and the helper stops none of them. The API and
    the reconcile loop are down for the seconds of the restart; the NDP proxy of a switched IPv6 network announces its
    addresses again when the daemon is back.
@@ -386,16 +386,7 @@ failed package update is **not** rolled back by JailOps: the record names the sn
 (`jail rollback --scope all --snapshot S`), which discards what the jail wrote since. By hand, the manual equivalent is
 `pkg -j shop_web upgrade` on the host or `pkg upgrade` in the jail, after `jailops jail snapshot create`.
 
-### 3.9 Apps of the catalog
-
-An installed app is an ordinary jail with the labels `jailops.app` and `jailops.app.version`. There is no app
-update: its packages follow the jail's update policy ([3.8](#38-packages-inside-a-jail)), its base is upgraded in place
-like any jail's ([3.5](#35-a-freebsd-jail)), and `jailops app installed` lists the
-jails with the version that was installed. The catalog itself is the package `jailops-apps`, which `pkg upgrade -r jailops`
-keeps current; a definition written for a newer JailOps is listed as invalid until JailOps is upgraded ([apps.md](apps.md)).
-The `app-installed` snapshot of the installation is the way back to the fresh state (`jail rollback --scope all`).
-
-### 3.10 A jail that stays behind
+### 3.9 A jail that stays behind
 
 A jail stays on its release until you run `jailops jail upgrade NAME --release`. After the host moved to a new release
 it keeps running and keeps getting the patch levels of its release until FreeBSD ends them
@@ -414,8 +405,8 @@ project and the jail.
 | The host checks | `jailops doctor` | every line `ok` or `info`. `host.release` fail: below 15.1. `host.release` warn: newer than the test matrix. `host.pkgbase` warn: distribution sets. `pf.anchors` fail: the anchor line is gone from the loaded ruleset. `pf.order`, `pf.state-policy`, `pf.inbound`: a rule of yours before the anchor. `zfs.compat` fail: do not replicate until the target can read the pool. `operations.journal` fail: an interrupted rollback. `jail.upgrade_state` fail: an upgrade of the jail that did not finish, the hint names the rollback. `jail.suspected_compromised` fail: the root holds what an attack on host-side pkg plants. `network.leftovers`: the old bridge layout, `jailops doctor --fix` lists the commands. The full list: [troubleshooting.md](troubleshooting.md) |
 | The jails run | `jailops list`; `jailops jail info web --project shop` | `running` for every jail that ran before; `image` and `gen` as expected. Conditions: `Ready=True` (`Stopped` is not a problem for a jail you stopped), `FirewallApplied=True` (`StatesPending` passes within seconds; `Unverified` means pf could not be asked), `InSync` with no `Drift`, `Healthy` without `Degraded` |
 | The health check | `jailops update history web --project shop`, `jailops image show freebsd-15-1` | the newest record is `success`; `update.healthcheck` of the jail is a command that fails when the service is wrong, and every upgrade runs it |
-| The services | `jailops exec web --project shop -- service -e`; `jailops exec web --project shop -- service nginx status` | the services the jail is for are enabled and running; `jailops app installed --project shop` shows the app's state and ports |
-| The logs | `jailops logs --project shop --jail web --since 15m --app-logs`; the console log of the jail on the host, `/var/log/jailops/jail_shop_web_console.log` | nothing new that was not there before: a service that fails to start, a missing library, a file the new release does not ship |
+| The services | `jailops exec web --project shop -- service -e`; `jailops exec web --project shop -- service nginx status` | the services the jail is for are enabled and running; `jailops info web --project shop` shows the jail's state and ports |
+| The logs | `jailops logs --project shop --jail web --since 15m`; the console log of the jail on the host, `/var/log/jailops/jail_shop_web_console.log` | nothing new that was not there before: a service that fails to start, a missing library, a file the new release does not ship |
 | The firewall | `jailops firewall show web --project shop`; `jailops firewall test --from internet --to jail:web --port 443 --project shop`; `pfctl -sr \| grep jailops` on the host | the rules you expect decide; exit status 0 for a connection that must pass, 9 for one that must not |
 | Network in and out | from the jail: `jailops exec web --project shop -- ping -c1 -4 pkg.freebsd.org` and `-6`, `jailops exec web --project shop -- drill pkg.freebsd.org`; from outside: the service's own address and port | the jail resolves names and reaches the Internet in every family it has; the port answers from where it should |
 | Volumes and data | `jailops volume list --project shop`; `jailops exec web --project shop -- df -h` | every volume attached and mounted where the jail expects it; the application's own check that it reads and writes its data |
@@ -439,7 +430,7 @@ project and the jail.
 - **Boot environments** hold the root file system only. The jails, the volumes and the state dataset are outside them,
   so `bectl activate` of an older environment takes the base system and JailOps back and leaves the jails as they are.
 - **The ABI** changes with the major release only. A package built for `FreeBSD:15` runs on 15.2; on 16 it is reinstalled.
-  A package that has no build for the new ABI yet is a reason to keep that jail on the old release (3.10).
+  A package that has no build for the new ABI yet is a reason to keep that jail on the old release (3.9).
 - **The jail's own package repository**: `pkg -j` reads the repositories configured **in the jail**. A jail with a
   repository file of its own (`/usr/local/etc/pkg/repos/*.conf`) keeps using it; the base packages never come through it: they are upgraded from the host.
 - **`pkg -j` answers "The package management tool is not yet installed on your system".** `/usr/sbin/pkg` is the program that
@@ -523,7 +514,7 @@ nightly upgrade) and `jailops op list` carry one of these results:
     # after every step
     jailops doctor && jailops list && jailops update history web --project shop
     jailops firewall test --from internet --to jail:web --port 443 --project shop
-    jailops logs --project shop --jail web --since 15m --app-logs
+    jailops logs --project shop --jail web --since 15m
 
     # back
     jailops jail rollback web --project shop                                   # the jail stopped: the root to its upgrade snapshot

@@ -86,14 +86,6 @@ jails:
   # prompt_color: 39     # 256-colour number of user@jail (39 light blue, 40 green, 196 red: one colour per kind of host)
   # max_states: 10000    # pf states each pass rule of a jail may create when its resources.states is 0 (0: no limit)
 
-# The application catalog (docs/apps.md): one YAML definition per file, installed by the jailops-apps package. The daemon
-# reads these local files only and never fetches anything; a missing directory is an empty catalog. local_dir holds the
-# host's own definitions (NAME.yaml and its icon), read with the catalog; one of the same name as a packaged one wins.
-# Both must be readable by the user jailops.
-apps:
-  # catalog_dir: /usr/local/share/jailops/apps
-  # local_dir: /usr/local/etc/jailops/apps
-
 # Host management (appliance mode, docs/appliance.md): the parts of the host JailOps itself changes. Empty (the
 # default): JailOps never changes the host, and GET /api/v1/host/identity only reads. "identity" is the host name, the
 # resolvers and NTP; "firewall" is /etc/pf.conf, written whole, and every change of it reverts unless confirmed.
@@ -131,7 +123,6 @@ logging:
   #     exclude_jails: [scratch]
   #     exclude_labels: {logs: "off"}
   #     files: [messages]               # below /var/log of every jail (default: messages)
-  #     no_app_logs: false              # true: leave out the logs installed apps declare
   #     no_jails: false                 # true: no jail logs (with audit: the audit log only)
   #     audit: false                    # true: add the daemon's audit log
   # - name: alerts

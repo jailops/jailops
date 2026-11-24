@@ -1,0 +1,750 @@
+[
+ {
+  "name": "no variables, nothing changes",
+  "recipe": "steps:\n  - package: [nginx]\n  - run: [echo, hello]\n",
+  "want": {
+   "steps": [
+    {
+     "package": [
+      "nginx"
+     ]
+    },
+    {
+     "run": [
+      "echo",
+      "hello"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "default is used",
+  "recipe": "vars:\n  site: {default: example.test}\nsteps:\n  - run: [echo, \"${site}\"]\n",
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "example.test"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a variable inside a word",
+  "recipe": "vars:\n  v: {default: \"17\"}\nsteps:\n  - package: [\"postgresql${v}-server\"]\n",
+  "want": {
+   "steps": [
+    {
+     "package": [
+      "postgresql17-server"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "typed default: number",
+  "recipe": "vars:\n  port: {default: 22}\nsteps:\n  - sysrc: {sshd_port: \"${port}\"}\n",
+  "want": {
+   "steps": [
+    {
+     "sysrc": {
+      "sshd_port": "22"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "name": "typed default: decimal keeps its text",
+  "recipe": "vars:\n  ratio: {default: 1.0}\nsteps:\n  - run: [echo, \"${ratio}\"]\n",
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "1.0"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "typed default: true",
+  "recipe": "vars:\n  flag: {default: true}\nsteps:\n  - run: [echo, \"${flag}\"]\n",
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "true"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "typed default: empty string is a default",
+  "recipe": "vars:\n  x: {default: \"\"}\nsteps:\n  - run: [echo, \"a${x}b\"]\n",
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "ab"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "typed default: null is no default and the value is empty",
+  "recipe": "vars:\n  x: {default: null}\nsteps:\n  - run: [echo, \"[${x}]\"]\n",
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "[]"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a declaration without a body",
+  "recipe": "vars:\n  x:\nsteps:\n  - run: [echo, \"[${x}]\"]\n",
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "[]"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a default may use the variables before it",
+  "recipe": "vars:\n  site: {default: a.test}\n  root: {default: \"/www/${site}\"}\nsteps:\n  - run: [echo, \"${root}\"]\n",
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "/www/a.test"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "precedence: a vars file beats the default",
+  "recipe": "vars:\n  site: {default: from-default}\nsteps:\n  - run: [echo, \"${site}\"]\n",
+  "vars": {
+   "site": "from-vars"
+  },
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "from-vars"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "precedence: set beats a vars file",
+  "recipe": "vars:\n  site: {default: from-default}\nsteps:\n  - run: [echo, \"${site}\"]\n",
+  "set": {
+   "site": "from-set"
+  },
+  "vars": {
+   "site": "from-vars"
+  },
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "from-set"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "precedence: set-file beats a vars file",
+  "recipe": "vars:\n  site: {default: from-default}\nsteps:\n  - run: [echo, \"${site}\"]\n",
+  "set_file": {
+   "site": "from-file"
+  },
+  "vars": {
+   "site": "from-vars"
+  },
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "from-file"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a name in a vars file that the recipe does not declare is ignored",
+  "recipe": "vars:\n  site: {default: a}\nsteps:\n  - run: [echo, \"${site}\"]\n",
+  "vars": {
+   "other_recipe_name": "x"
+  },
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "a"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "names are letters, digits and underscore, in both cases",
+  "recipe": "vars:\n  _a1: {default: x}\n  Site_Name: {default: y}\nsteps:\n  - run: [echo, \"${_a1}${Site_Name}\"]\n",
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "xy"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a literal dollar brace",
+  "recipe": "steps:\n  - run: [echo, \"$${HOME}\"]\n",
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "${HOME}"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "two dollars stay as they are",
+  "recipe": "steps:\n  - run: [sh, -c, \"echo $$; psql -c 'do $$ begin end $$'\"]\n",
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "sh",
+      "-c",
+      "echo $$; psql -c 'do $$ begin end $$'"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a variable in a file path and the mode",
+  "recipe": "vars:\n  site: {default: a.test}\n  mode: {default: \"0640\"}\nsteps:\n  - file:\n      path: /usr/local/etc/${site}.conf\n      content: x\n      mode: ${mode}\n",
+  "want": {
+   "steps": [
+    {
+     "file": {
+      "path": "/usr/local/etc/a.test.conf",
+      "content": "x",
+      "mode": "0640"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "name": "the body of a file is not a template unless it says so",
+  "recipe": "vars:\n  site: {default: a}\nsteps:\n  - run: [echo, \"${site}\"]\n  - file:\n      path: /usr/local/etc/a.conf\n      content: \"server ${site} ${nginx_var};\\n\"\n",
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "a"
+     ]
+    },
+    {
+     "file": {
+      "path": "/usr/local/etc/a.conf",
+      "content": "server ${site} ${nginx_var};\n"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "name": "a template body gets the variables, $${ and $$",
+  "recipe": "vars:\n  site: {default: a.test}\nsteps:\n  - file:\n      path: /usr/local/etc/a.conf\n      template: true\n      content: \"host ${site} $${not_a_var} $$\\n\"\n",
+  "want": {
+   "steps": [
+    {
+     "file": {
+      "path": "/usr/local/etc/a.conf",
+      "content": "host a.test ${not_a_var} $$\n"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "name": "a source file beside the recipe goes in as it is",
+  "recipe": "vars:\n  site: {default: a}\nsteps:\n  - run: [echo, \"${site}\"]\n  - file:\n      path: /usr/local/etc/a.conf\n      source: files/a.conf\n",
+  "files": {
+   "files/a.conf": "listen ${site};\n"
+  },
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "a"
+     ]
+    },
+    {
+     "file": {
+      "path": "/usr/local/etc/a.conf",
+      "content": "listen ${site};\n"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "name": "a source file with template: true gets the variables",
+  "recipe": "vars:\n  site: {default: a}\nsteps:\n  - file:\n      path: /usr/local/etc/a.conf\n      source: files/a.conf\n      template: true\n      mode: \"0600\"\n",
+  "files": {
+   "files/a.conf": "listen ${site};\n"
+  },
+  "want": {
+   "steps": [
+    {
+     "file": {
+      "path": "/usr/local/etc/a.conf",
+      "content": "listen a;\n",
+      "mode": "0600"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "name": "the name of a source may be a variable",
+  "recipe": "vars:\n  site: {default: a.test}\nsteps:\n  - file:\n      path: /usr/local/etc/a.conf\n      source: files/${site}.conf\n",
+  "files": {
+   "files/a.test.conf": "x\n"
+  },
+  "want": {
+   "steps": [
+    {
+     "file": {
+      "path": "/usr/local/etc/a.conf",
+      "content": "x\n"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "name": "split: a word of a list becomes several",
+  "recipe": "vars:\n  pkgs: {default: \"nginx git\", split: true}\nsteps:\n  - package: [curl, \"${pkgs}\"]\n  - run: [pkg, install, -y, \"${pkgs}\", \"--\", \"x ${pkgs}\"]\n",
+  "want": {
+   "steps": [
+    {
+     "package": [
+      "curl",
+      "nginx",
+      "git"
+     ]
+    },
+    {
+     "run": [
+      "pkg",
+      "install",
+      "-y",
+      "nginx",
+      "git",
+      "--",
+      "x nginx git"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "split: a package value that is the whole variable is the list",
+  "recipe": "vars:\n  pkgs: {split: true}\nsteps:\n  - package: ${pkgs}\n",
+  "set": {
+   "pkgs": "nginx   git"
+  },
+  "want": {
+   "steps": [
+    {
+     "package": [
+      "nginx",
+      "git"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a variable that is not split is one word with its spaces",
+  "recipe": "vars:\n  msg: {}\nsteps:\n  - run: [echo, \"${msg}\"]\n",
+  "set": {
+   "msg": "a b  c"
+  },
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "a b  c"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a required variable with an empty value is given",
+  "recipe": "vars:\n  x: {required: true}\nsteps:\n  - run: [echo, \"[${x}]\"]\n",
+  "set": {
+   "x": ""
+  },
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "[]"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a value of several lines from a file",
+  "recipe": "vars:\n  block: {required: true}\nsteps:\n  - file:\n      path: /usr/local/etc/a.conf\n      template: true\n      content: \"${block}\\n\"\n",
+  "set_file": {
+   "block": "one\ntwo"
+  },
+  "want": {
+   "steps": [
+    {
+     "file": {
+      "path": "/usr/local/etc/a.conf",
+      "content": "one\ntwo\n"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "name": "a value is not searched for variables again",
+  "recipe": "vars:\n  a: {}\nsteps:\n  - run: [echo, \"${a}\"]\n",
+  "set": {
+   "a": "${b}"
+  },
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "${b}"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a secret goes into a template file only, and marks the request",
+  "recipe": "vars:\n  pw: {secret: true, required: true}\n  user: {default: app}\nsteps:\n  - run: [echo, \"${user}\"]\n  - file:\n      path: /usr/local/etc/app.conf\n      template: true\n      mode: \"0600\"\n      content: \"password=${pw}\\n\"\n",
+  "set_file": {
+   "pw": "hunter2-value"
+  },
+  "want": {
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "app"
+     ]
+    },
+    {
+     "file": {
+      "path": "/usr/local/etc/app.conf",
+      "content": "password=hunter2-value\n",
+      "mode": "0600"
+     }
+    }
+   ]
+  },
+  "sensitive": true
+ },
+ {
+  "name": "a secret in a source file that is a template",
+  "recipe": "vars:\n  pw: {secret: true, required: true}\nsteps:\n  - file:\n      path: /usr/local/etc/app.conf\n      source: files/app.conf.in\n      template: true\n",
+  "files": {
+   "files/app.conf.in": "password=${pw}\n"
+  },
+  "set_file": {
+   "pw": "hunter2-value"
+  },
+  "want": {
+   "steps": [
+    {
+     "file": {
+      "path": "/usr/local/etc/app.conf",
+      "content": "password=hunter2-value\n"
+     }
+    }
+   ]
+  },
+  "sensitive": true
+ },
+ {
+  "name": "a dir step passes through",
+  "recipe": "vars:\n  d: {default: /var/db/x}\nsteps:\n  - dir: {path: \"${d}\", mode: \"0750\", owner: root}\n",
+  "want": {
+   "steps": [
+    {
+     "dir": {
+      "path": "/var/db/x",
+      "mode": "0750",
+      "owner": "root"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "name": "a required variable without a value",
+  "recipe": "vars:\n  site: {required: true}\nsteps:\n  - run: [echo, \"${site}\"]\n",
+  "error": "site is required"
+ },
+ {
+  "name": "a required secret says how to give it",
+  "recipe": "vars:\n  pw: {required: true, secret: true}\nsteps:\n  - file: {path: /usr/local/etc/a, template: true, content: \"${pw}\"}\n",
+  "error": "--set-file pw=FILE"
+ },
+ {
+  "name": "a variable that is never used",
+  "recipe": "vars:\n  site: {default: a}\nsteps:\n  - run: [echo, hi]\n",
+  "error": "vars.site: declared and never used"
+ },
+ {
+  "name": "a reference that is not declared",
+  "recipe": "steps:\n  - run: [echo, \"${nope}\"]\n",
+  "error": "steps[0].run[1]: ${nope} is not declared"
+ },
+ {
+  "name": "an undeclared reference in a template says the line",
+  "recipe": "steps:\n  - file:\n      path: /usr/local/etc/a.conf\n      template: true\n      content: \"a\\nb ${nope}\\n\"\n",
+  "error": "line 2"
+ },
+ {
+  "name": "a malformed reference",
+  "recipe": "steps:\n  - run: [sh, -c, \"echo ${HOME:-x}\"]\n",
+  "error": "$${ for a literal"
+ },
+ {
+  "name": "an unterminated reference",
+  "recipe": "steps:\n  - run: [echo, \"${abc\"]\n",
+  "error": "must hold a variable name"
+ },
+ {
+  "name": "set names a variable that is not declared",
+  "recipe": "vars:\n  site: {default: a}\nsteps:\n  - run: [echo, \"${site}\"]\n",
+  "set": {
+   "typo": "valueNotInError"
+  },
+  "error": "--set typo: the recipe declares no such variable"
+ },
+ {
+  "name": "set-file names a variable that is not declared",
+  "recipe": "steps:\n  - run: [echo, hi]\n",
+  "set_file": {
+   "typo": "valueNotInError"
+  },
+  "error": "--set-file typo"
+ },
+ {
+  "name": "set and set-file together",
+  "recipe": "vars:\n  site: {default: a}\nsteps:\n  - run: [echo, \"${site}\"]\n",
+  "set": {
+   "site": "valueOne"
+  },
+  "set_file": {
+   "site": "valueTwo"
+  },
+  "error": "given with --set and --set-file"
+ },
+ {
+  "name": "a secret is refused in set",
+  "recipe": "vars:\n  pw: {secret: true}\nsteps:\n  - file: {path: /usr/local/etc/a, template: true, content: \"${pw}\"}\n",
+  "set": {
+   "pw": "valueNotInError"
+  },
+  "error": "pw is secret"
+ },
+ {
+  "name": "a secret is refused in a vars file",
+  "recipe": "vars:\n  pw: {secret: true}\nsteps:\n  - file: {path: /usr/local/etc/a, template: true, content: \"${pw}\"}\n",
+  "vars": {
+   "pw": "valueNotInError"
+  },
+  "error": "pw is secret"
+ },
+ {
+  "name": "a secret has no default",
+  "recipe": "vars:\n  pw: {secret: true, default: x}\nsteps:\n  - run: [echo, hi]\n",
+  "error": "a secret has no default"
+ },
+ {
+  "name": "a secret is refused in an argument",
+  "recipe": "vars:\n  pw: {secret: true}\nsteps:\n  - run: [echo, \"${pw}\"]\n",
+  "set_file": {
+   "pw": "valueNotInError"
+  },
+  "error": "steps[0].run[1]: pw is secret and may be used only in the content of a file step with template: true"
+ },
+ {
+  "name": "a secret is refused in a path",
+  "recipe": "vars:\n  pw: {secret: true}\nsteps:\n  - file: {path: \"/usr/local/etc/${pw}\", content: x}\n",
+  "set_file": {
+   "pw": "valueNotInError"
+  },
+  "error": "steps[0].file.path: pw is secret"
+ },
+ {
+  "name": "a secret is refused in a source name",
+  "recipe": "vars:\n  pw: {secret: true}\nsteps:\n  - file: {path: /usr/local/etc/a, source: \"${pw}\"}\n",
+  "set_file": {
+   "pw": "valueNotInError"
+  },
+  "error": "steps[0].file.source: pw is secret"
+ },
+ {
+  "name": "a secret is refused in a default",
+  "recipe": "vars:\n  pw: {secret: true}\n  other: {default: \"${pw}\"}\nsteps:\n  - file: {path: /usr/local/etc/a, template: true, content: \"${other}\"}\n",
+  "set_file": {
+   "pw": "valueNotInError"
+  },
+  "error": "vars.other.default: pw is secret"
+ },
+ {
+  "name": "a secret in inline content that is not a template is never used",
+  "recipe": "vars:\n  pw: {secret: true}\nsteps:\n  - file: {path: /usr/local/etc/a, content: \"${pw}\"}\n",
+  "set_file": {
+   "pw": "valueNotInError"
+  },
+  "error": "vars.pw: declared and never used"
+ },
+ {
+  "name": "a secret is not split",
+  "recipe": "vars:\n  pw: {secret: true, split: true}\nsteps:\n  - run: [echo]\n",
+  "error": "a secret is not split"
+ },
+ {
+  "name": "required and a default",
+  "recipe": "vars:\n  x: {required: true, default: a}\nsteps:\n  - run: [echo, \"${x}\"]\n",
+  "error": "required or has a default"
+ },
+ {
+  "name": "a value of several lines with set",
+  "recipe": "vars:\n  x: {}\nsteps:\n  - run: [echo, \"${x}\"]\n",
+  "set": {
+   "x": "lineOne\nlineTwo"
+  },
+  "error": "several lines is given with --set-file"
+ },
+ {
+  "name": "a variable name with a digit first",
+  "recipe": "vars:\n  9x: {default: a}\nsteps:\n  - run: [echo, hi]\n",
+  "error": "is not a variable name"
+ },
+ {
+  "name": "a variable name with a dash",
+  "recipe": "vars:\n  a-b: {default: a}\nsteps:\n  - run: [echo, hi]\n",
+  "error": "is not a variable name"
+ },
+ {
+  "name": "an unknown key of a declaration",
+  "recipe": "vars:\n  x: {defualt: a}\nsteps:\n  - run: [echo, \"${x}\"]\n",
+  "error": "unknown key"
+ },
+ {
+  "name": "a default that is a list",
+  "recipe": "vars:\n  x: {default: [a, b]}\nsteps:\n  - run: [echo, \"${x}\"]\n",
+  "error": "vars.x.default: one value"
+ },
+ {
+  "name": "an unquoted false in a command",
+  "recipe": "steps:\n  - run: [false]\n",
+  "error": "steps[0].run[0]"
+ },
+ {
+  "name": "an unquoted false says to quote",
+  "recipe": "steps:\n  - run: [false]\n",
+  "error": "put quotes around it"
+ },
+ {
+  "name": "an unquoted number in a mode",
+  "recipe": "steps:\n  - file: {path: /usr/local/etc/a, content: x, mode: 0644}\n",
+  "error": "steps[0].file.mode"
+ },
+ {
+  "name": "a source that is not there",
+  "recipe": "steps:\n  - file: {path: /usr/local/etc/a, source: files/none.conf}\n",
+  "error": "steps[0].file.source: files/none.conf is not a regular file"
+ },
+ {
+  "name": "a source with a path that leaves the directory",
+  "recipe": "steps:\n  - file: {path: /usr/local/etc/a, source: ../x.conf}\n",
+  "error": "must be a path below the directory of the recipe"
+ },
+ {
+  "name": "source and content",
+  "recipe": "steps:\n  - file: {path: /usr/local/etc/a, source: files/a, content: x}\n",
+  "files": {
+   "files/a": "x"
+  },
+  "error": "give a source or content, not both"
+ },
+ {
+  "name": "template without a body",
+  "recipe": "steps:\n  - file: {path: /usr/local/etc/a, template: true}\n",
+  "error": "template: true needs a source or content"
+ },
+ {
+  "name": "an unknown field",
+  "recipe": "steps:\n  - run: [echo]\n    whenn: x\n",
+  "error": "unknown field"
+ },
+ {
+  "name": "two documents",
+  "recipe": "steps:\n  - run: [echo]\n---\nsteps:\n  - run: [echo]\n",
+  "error": "one document"
+ }
+]

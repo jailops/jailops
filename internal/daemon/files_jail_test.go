@@ -6,15 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/lifecycle"
 	"jailops.net/jailops/internal/priv"
 	"jailops.net/jailops/internal/sys/zfs"
 	"jailops.net/jailops/sdk/api"
 )
 
-// The daemon reads and writes files inside jails through privFiles: pg_hba.conf of app access (read, then written
-// as root with Parents) and /etc/rc.conf of an app draft, at the paths the service builds from the lifecycle
+// The daemon reads and writes files inside jails through privFiles: pg_hba.conf (read, then written
+// as root with Parents) and /etc/rc.conf, at the paths the service builds from the lifecycle
 // layout. Root in jail A replacing a directory of its tree with a relative symlink into jail B of another project
 // must not turn either into a read or a write of B's files.
 func TestJailFilesStayInTheJail(t *testing.T) {
@@ -73,8 +72,8 @@ func TestJailFilesStayInTheJail(t *testing.T) {
 	if err := f.WriteAtomic(ctx, a+hba, []byte("host all all 0.0.0.0/0 trust\n")); !api.IsCode(err, api.CodeForbidden) {
 		t.Errorf("writeHBA's write: %v", err)
 	}
-	if got, err := f.ReadFile(ctx, apps.RcConfPath(a)); !api.IsCode(err, api.CodeForbidden) {
-		t.Errorf("the draft's rc.conf read: %q %v", got, err)
+	if got, err := f.ReadFile(ctx, a+"/etc/rc.conf"); !api.IsCode(err, api.CodeForbidden) {
+		t.Errorf("the rc.conf read: %q %v", got, err)
 	}
 	if c, _ := os.ReadFile(b + hba); string(c) != "B hba\n" {
 		t.Errorf("jail B's pg_hba.conf changed: %q", c)
@@ -101,7 +100,7 @@ func TestJailFilesStayInTheJail(t *testing.T) {
 	}
 	// the same paths work in a jail that did not redirect them
 	write(b+"/etc/rc.conf", "B rc\n")
-	if got, err := f.ReadFile(ctx, apps.RcConfPath(b)); err != nil || string(got) != "B rc\n" {
+	if got, err := f.ReadFile(ctx, b+"/etc/rc.conf"); err != nil || string(got) != "B rc\n" {
 		t.Errorf("plain rc.conf: %q %v", got, err)
 	}
 	if err := f.WriteAtomic(ctx, b+hba, []byte("ok\n")); err != nil {

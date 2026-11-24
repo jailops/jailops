@@ -83,9 +83,14 @@ func TestNewJailGetsThePromptAndNoShellIsInstalled(t *testing.T) {
 	if installedBash(e, webRoot) != 0 || sj.ran("pkg install") {
 		t.Fatalf("a start installed a shell: %v %v", e.Installed, sj.cmds)
 	}
-	want := "PS1='" + api.DefaultPS1(39) + "'"
-	if !strings.Contains(e.File(webRoot+api.PromptFile), want) {
-		t.Fatalf("prompt file: %q", e.File(webRoot+api.PromptFile))
+	// the text is baked: the tag is built by lines of the file and put into PS1 as a value when the file is read
+	pf := e.File(webRoot + api.PromptFile)
+	want := `PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]'"${` + api.Tag + `}"':\w\$ '`
+	if !strings.Contains(pf, want) {
+		t.Fatalf("prompt file: %q", pf)
+	}
+	if !strings.Contains(pf, api.WhereLine()) || !strings.Contains(pf, api.TagLines()[1]) {
+		t.Fatalf("the prompt file does not build the tag: %q", pf)
 	}
 	// the variables script is the same text in every jail and the jail's own jail.conf says where it is; the prompt file
 	// only reads the variables
@@ -166,21 +171,6 @@ func TestNewJailGetsThePromptAndNoShellIsInstalled(t *testing.T) {
 	if !strings.Contains(e.File(webRoot+api.PromptFile), want) || !strings.HasPrefix(e.File(webRoot+api.BashrcPath), "# BEGIN jailops shell") ||
 		!strings.HasSuffix(e.File(webRoot+api.BashrcPath), "alias ll='ls -l'\n") {
 		t.Fatalf("after the start: %q %q", e.File(webRoot+api.PromptFile), e.File(webRoot+api.BashrcPath))
-	}
-	// the app draft of the jail does not take the shell for a part of the app
-	d, err := e.Client(api.PermOperator).Project("alpha").Jails().AppDraft(ctx, "web")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range d.Definition.Packages {
-		if p.Name == api.BashPackage {
-			t.Fatalf("the draft names the shell: %+v", d.Definition.Packages)
-		}
-	}
-	for _, c := range d.Definition.Config {
-		if strings.Contains(c.Path, "profile") || strings.Contains(c.Path, "bash") {
-			t.Fatalf("the draft names the prompt files: %+v", d.Definition.Config)
-		}
 	}
 	// deleting the jail forgets its record
 	mustOp(e.Admin.Jails().Stop(ctx, "web"))
@@ -388,7 +378,7 @@ func TestPromptSaysWhereTheJailIs(t *testing.T) {
 	}
 	// a prompt text with the words: written at once into the running jail, as references to the variables
 	mustOp(e.Admin.Jails().Config(ctx, "web", map[string]string{"prompt": `[{project}/{jail}@{host}] \$ `}, nil, false))
-	const text = `PS1='[${JAILOPS_PROJECT-}/${JAILOPS_JAIL-}@${JAILOPS_HOST-}] \$ '`
+	const text = `PS1='['"${JAILOPS_PROJECT-}"'/'"${JAILOPS_JAIL-}"'@'"${JAILOPS_HOST-}"'] \$ '`
 	if f := e.File(webRoot + api.PromptFile); !strings.Contains(f, text) {
 		t.Fatalf("the placeholders were not turned into references: %q", f)
 	}

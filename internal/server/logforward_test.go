@@ -86,7 +86,7 @@ func TestUnifiedLogsOverHTTP(t *testing.T) {
 		t.Fatalf("global: %v %+v", err, r)
 	}
 	tok := e.IdentityToken(api.PermOperator, true)
-	for _, q := range []string{"limit=0", "cursor=nope", "file=../x", "jail=Bad", "app_logs=maybe", "file=messages.1.gz"} {
+	for _, q := range []string{"limit=0", "cursor=nope", "file=../x", "jail=Bad", "file=messages.1.gz"} {
 		if code, body := e.Raw("GET", "/api/v1/logs?project=alpha&"+q, tok, ""); code != 400 {
 			t.Errorf("%s: %d %s", q, code, body)
 		}
@@ -193,7 +193,7 @@ func TestLogForwardOverHTTP(t *testing.T) {
 	mustJail(t, e, "web")
 	e.Files.Put(logRoot+"web/root/var/log/messages", []byte("Oct 29 11:00:00 web sshd[7]: hello from web\n"))
 	frame := a.await(t, "hello from web")
-	if !strings.HasPrefix(frame, "<158>1 ") || !strings.Contains(frame, `[jailops project="alpha" jail="web" app="" file="messages"]`) {
+	if !strings.HasPrefix(frame, "<158>1 ") || !strings.Contains(frame, `[jailops project="alpha" jail="web" file="messages"]`) {
 		t.Fatalf("%s", frame)
 	}
 	// store a list: it replaces the file's

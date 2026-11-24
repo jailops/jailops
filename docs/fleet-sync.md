@@ -12,7 +12,8 @@ declare and never deletes, and there is no scheduler: a jail is declared on a na
 
 ## The repository
 
-    fleet.yaml                      id: <fleet id>, the ownership marker
+    fleet.yaml                      id: <fleet id>, the ownership marker; drift_interval (see "Recipes")
+    recipes/<name>/recipe.yaml      a recipe and the files beside it (recipes/book/... may be a git submodule)
     .sops.yaml                      who can decrypt the SOPS files (age public keys) and which fields each rule encrypts
     hosts/<host>/host.yaml          kind Host: url, fingerprint, token_secret; labels select groups
     hosts/<host>/remote.sops.yaml   a client certificate for pinned mTLS (url and fingerprint readable, key encrypted)
@@ -43,14 +44,12 @@ Every declarative object a user can create with the CLI has a file kind. Nothing
 | `jailops wireguard create --mode server`, `peer add` | `hosts/<host>/wireguard/*.yaml` (WireGuard) | servers only, public parts only; see "WireGuard" below |
 | `jailops storage create` | `hosts/<host>/storage/*.yaml` (Storage) | a dataset on any pool, a big HDD pool included; `compression`. Datasets may not be equal or nested |
 | `jailops image create`, `image build` | `shared/images/*.yaml` (Image) | `build: true` builds the **first** generation when the host has none (a fresh host has none and a jail cannot be created from an image without one). Later generations are an operation, not a declaration: `jailops image build` or `jailops image upgrade` |
-| `jailops create` | `projects/<p>/jails/*.yaml` (Jail) | the whole spec: network and storage (explicit), `volumes`, `expose`, `devfs`, `resources`, `boot`, `update` schedule, `firewall` (`policies`, a list, and `tags`), `env` with `secret:` references, `labels`. `start: true` and `after:` hooks (start, restart, snapshot, exec) run once, after creation |
+| `jailops create` | `projects/<p>/jails/*.yaml` (Jail) | the whole spec: network and storage (explicit), `volumes`, `expose`, `devfs`, `resources`, `boot`, `update` schedule, `firewall` (`policies`, a list, and `tags`), `env` with `secret:` references, `labels`. `start: true` starts the jail once, when sync creates it. `recipes:`, `needs:` and `vars:` configure what runs inside it, see "Recipes" below |
 | `jailops firewall policy/address-set create` | `projects/<p>/firewall-policies/`, `address-sets/` | the project's mandatory policies are set in a second write once the policies exist |
 | `jailops backup target create` | `shared/backup-targets/*.yaml` (BackupTarget) | `kind: node` needs `address` and a pinned `fingerprint` |
 | `jailops backup policy create` | `projects/<p>/backup-policies/*.yaml` (BackupPolicy) | selector, targets, `schedule`, retention, `include_state`, `exclude_volumes`, `verify_schedule`, `verify_mode` |
 | `jailops profile create` | `profiles/` or `projects/<p>/profiles/` (Profile) | see "Profiles" below |
 | secrets in a jail's environment | `secret:<name>` and `secret:<dotted.path>` | age and SOPS, see "Secrets" |
-| `jailops app install` | `projects/<p>/apps/*.yaml` (App) | installed once, never changed or deleted; see "Apps and who may reach them" |
-| `jailops app allow`, `app deny` | `projects/<p>/app-access/*.yaml` (AppAccess) | the whole list of sources of one app; see "Apps and who may reach them" |
 
 Because the specs are the wire types of the API (decoded strictly: a misspelled key is an error), a field the daemon gains is
 declarable the day it exists: `notes` ([notes.md](notes.md)), the long text next to the comment, is a key of the spec of a
@@ -121,72 +120,8 @@ strict decoding refuses one:
   node (`jailops-backupd`) is configured by its own `backupd.yaml`. Targets and policies are declarable; see `examples/web-stack`.
 - `priv.conf` (`admin-host-mount`, ...) and `jailopsd.yaml`: they are the host operator's boundary, on purpose out of
   reach of the API. `examples/provisioning/bootstrap.sh` writes them when it installs a host.
-- Runtime actions and data: snapshots (use the `snapshot` hook), backups and restores, exec, updates, generations after the first.
-- What runs inside a jail: recipes (`jailops jail apply`, see `examples/recipes`).
+- Runtime actions and data: snapshots, backups and restores, exec, updates, generations after the first. Operations such as a backup, a restore or a major upgrade are never listed in a fleet: run them by hand.
 - Profile objects of the daemon (below).
-
-### Apps and who may reach them
-
-An **App** document installs an app of the host's catalog as a jail of the project, through the same request as
-`jailops app install` (docs/apps.md). The file name is the jail's name; the spec names the app and, optionally, what the
-command's flags name:
-
-    apiVersion: jailops/v1
-    kind: App
-    metadata: {name: db}                 # the jail
-    hosts: [db1]                         # exactly one host, like a jail
-    spec:
-      app: postgresql                    # the definition in the host's catalog
-      network: shop                      # default: the project's only network
-      storage: default                   # default: the project's only storage
-      image: freebsd-15-1                # default: the host's FreeBSD image of the newest release it can run
-      limits: {memory: 2G, disk: 20G, cpu: 2}   # replace the definition's resource hints
-
-`plan` shows `create` when the jail does not exist, and `sync --apply` installs it and waits for the installation. After
-that sync **never reinstalls, changes or deletes** it: the jail is the app's data, an installation is not repeatable as an
-update, and the API gives an installed jail no ownership marker, so `--prune` never applies to apps (remove one with
-`jailops delete`, which shows what it destroys and asks for the name). A jail of that name that was not installed from the catalog, or runs another app, is a refusal (the
-label `jailops.app` differs) and nothing is applied. An App and a Jail document of the same name are a `validate` error. The
-`limits`, `network` and the rest are read only at the installation; a later change of the document is not drift.
-
-An **AppAccess** document is the list of sources allowed to reach one installed app (metadata.name is the app's jail). An
-installed app is closed to everything else; each entry is what `jailops app allow APP --from SOURCE` is given:
-
-    apiVersion: jailops/v1
-    kind: AppAccess
-    metadata: {name: db}
-    hosts: [db1]
-    spec:
-      grants:
-        - {source: "jail:web", database: shop}           # a jail of the project; database and role shop
-        - {source: "set:office"}                        # an address set of the project
-        - {source: 192.0.2.0/24, ports: ["5432"]}    # an address or a prefix
-        - {source: host}                             # the host itself
-
-`ports` are `N` or `N/udp` (default: the ports of the definition), `database` names the database and role of a
-PostgreSQL grant (default: the source jail's name). Sources compare in the form the host stores them (`192.0.2.7/32` is `192.0.2.7`), so `validate` refuses a source listed twice. `plan` compares the list with
-`GET .../access`: a missing grant is `create`, changed ports or a grant the host reports drift for (a missing firewall rule
-or `pg_hba.conf` line) is `update`, both applied with `jailops app allow`. A changed `database` of an existing grant is a plan
-error: deny it first. A grant the host has and the document does not list is `delete`, applied only with `--prune`, as for
-every owned object: the document owns the whole access list of its app. Without an AppAccess document sync never touches the
-grants of an app. A deny never drops a role: it loses its login and keeps its database.
-
-**The password.** A PostgreSQL grant makes a role with a generated password. The host returns the connection string
-(`postgres://ROLE:PASSWORD@HOST:5432/DB?sslmode=disable`) once, in the answer of the allow, and keeps only the existence of
-the role. `sync --apply` prints it **once, in its own output**, under the change that made it:
-
-      ok       db1 AppAccess/shop/db from jail:web (create)
-        connection string for jail:web on shop/db (shown once, stored nowhere; ...):
-          postgres://shop:...@<address of db>:5432/shop?sslmode=disable
-
-It is not in the plan, not in the JSONL apply log, not in the state directory and never written into the repository. Copy
-it into the application's secret store at once; `watch --apply` prints it to wherever its output goes, so make the first
-apply of a new grant by hand. Re-applying never makes a new password (sync never asks for a rotation);
-`jailops app allow APP --from SOURCE --rotate` does, and prints the new string.
-
-**Order.** Apps come after every stored kind of the host (images, networks, storage, projects, policies, jails), and
-grants after the apps: a grant's app is installed and its source jails exist when it is allowed. `validate` warns about a
-grant whose app or `@` source the repository does not declare for that host (it may exist there already).
 
 ### Profiles
 
@@ -200,11 +135,11 @@ shows in `plan` as a change of each jail that lists it. `adopt` tells you when a
 
 | Command | Does |
 |---|---|
-| `validate` (alias `check`) | checks layout, names, references and values; offline |
+| `validate` (alias `check`) | checks layout, names, references and values, and renders and checks every recipe (the variables, the files beside it, the daemon's own check); offline, no daemon |
 | `render` | prints the resolved documents sync would send; offline, never decrypts |
-| `plan` | reads the hosts and shows what would change; writes nothing; needs no decryption key (a secret's change is detected from a digest of its stored ciphertext) |
+| `plan` | reads the hosts and shows what would change, and for every recipe of a running jail what a dry run found; writes nothing to a host; needs no decryption key to compare (a secret's change is detected from a digest of its stored ciphertext); `--json` |
 | `sync` | plans; with `--apply` makes the hosts match |
-| `drift` | exits non-zero when live hosts differ from the repository, for CI and cron |
+| `drift` | exits 1 when live hosts differ from the repository, for CI and cron; `--json`. See "Recipes" for what exit 0 means |
 | `watch` | pulls the repository on an interval, plans, optionally applies |
 | `rollout` | runs the staged upgrades declared as `Rollout` objects |
 | `adopt` | writes live objects into the repository as YAML (`--claim` also takes ownership) |
@@ -214,6 +149,92 @@ shows in `plan` as a change of each jail that lists it. `adopt` tells you when a
 
 Only the keys a document **declares** are compared: a key you did not write is not drift. A changed declared key is reported as
 drift and reverted by `sync --apply`.
+
+## Recipes
+
+A recipe is configuration **inside** a jail: packages, files, rc variables, services, commands. The recipe itself is the one of
+`jailops jail apply` ([provisioning.md](provisioning.md)); sync only decides when to apply it. Sync reads the recipe's directory and
+the files beside it, fills in the variables, and calls the same API as the command line and the console: there is no engine in sync
+and nothing to run in the daemon.
+
+    # projects/shop/jails/web.yaml
+    apiVersion: jailops/v1
+    kind: Jail
+    hosts: [h1]
+    metadata: {name: web}
+    start: true
+    needs: [db]                          # jails of the same project and host whose recipes settle first
+    vars: {site: shop.example.test}      # for every recipe of this jail that declares the name
+    recipes:
+      - path: recipes/nginx-site         # a directory of the repository, below recipes/
+        vars: {upstream: 10.70.0.10}     # per recipe; wins over the jail's vars
+      - path: recipes/book/nginx-tls-site    # a git submodule works the same: only files are read
+        secrets: {tls_key: tls.key}      # a secret variable: a reference into the secret store, never the value
+    spec: {...}
+
+`path` is relative to the repository root and stays below `recipes/`; the last element is the recipe's name in the jail. Files beside the recipe
+are read by sync and sent in the request. A link that leads out of the recipe's directory is refused. Only recipes listed under
+`recipes:` are kept: backups, restores and upgrades are never listed and are run by hand. A name that no recipe of the jail declares in
+`vars:`, a secret variable written under `vars:`, a missing file and everything `jailops jail apply --validate` refuses are `validate`
+errors, offline. A Recipe Book kept as a submodule is pinned by the commit of the gitlink; `watch` runs `git submodule update --init`
+after its pull.
+
+**What decides.** On each jail sync records, per recipe, the **hash** of what it applied: the rendered recipe, the files beside it
+and a fingerprint of each secret, never a value. It is the label `sync.jailops.net/recipe.<name>` of the jail. A recipe is
+**converged**, **drift** or **unknown**:
+
+- converged: every step a dry run *can read* is as the recipe says (package, file, dir, sysrc, service, a run with `creates`). A run
+  without guard and a run with `unless` are actions, not state: a dry run never executes them, so they are not part of the judgment.
+- drift: a readable step would change (a file edited by hand, a package removed, a directory with another mode).
+- unknown: the jail could not be read now (a stopped jail, a failed look, a secret that needs a key `plan` does not have). Never read as converged.
+
+| Hash on the jail | Dry run | Sync |
+|---|---|---|
+| differs from the recipe | any | applies |
+| missing (never applied, or the last apply did not finish) | any | applies |
+| same | drift | applies |
+| same | converged | nothing |
+| same | unknown | nothing, shown as `unknown` |
+
+An unguarded `run` (a reload at the end of a recipe) never starts an apply by itself; it runs when an apply happens. Sync **removes the
+label before it applies and writes it only after the last step succeeded**: a run that fails halfway, a reload that failed after the file was
+written, leaves no record, so the next run applies again, also when the file is by then as it should be. Nothing a recipe did is
+undone, and what a recipe no longer mentions stays in the jail. A label of a recipe you removed from the file is cleaned up (`forgotten`);
+the jail is not touched.
+
+**When sync looks inside a jail.** Comparing hashes costs nothing and happens on every run. A dry run reads the jail and happens when the hash
+changed, when you ask (`plan` and `drift` always do), and otherwise at most once per `drift_interval` of `fleet.yaml` (default `1h`) for each recipe
+of a running jail, so a change made by hand is found and put back within that time. Every dry run is an operation of the daemon (`jail.apply` with `dry_run`), pruned by age like all
+operations, which is why a run that is not asked for does not look more than once per interval. The time of the last converged look is a memory in the state directory of sync, not on the jail: if it is lost, the next run looks.
+
+**Order and `needs`.** Sync first makes every object of a host (images, networks, policies, volumes, jails), then the recipes, jails in
+the order of `needs` and recipes in list order. A policy rule that names `jail:db` is fine before the jail exists: the API only warns, and it matches
+nobody until then. A jail that is not running **waits** (`waiting: not running`): sync never starts or restarts a jail that exists, `start: true` is
+only the first start at creation, in the same run. A recipe of a jail that `needs` another goes on when that jail runs and each of its recipes has the
+current hash and was found converged, or its look is not due yet (the earlier result is trusted). It **waits** (`waiting: needs db`) when the other jail does not run, when a recipe
+of it has no record or a changed hash and is not applied, when drift is found and not repaired, or when its last look **failed**; `plan` says which: a
+look that is skipped until `drift_interval` passes is a trusted result, a look that failed now is not. A dependency applied earlier in the same run counts as met.
+
+**Failures stay small.** A recipe that fails stops the later recipes of its jail and the recipes of the jails that need it (`skipped: needs db`); every other
+jail goes on, the jails themselves are never stopped, and the run exits 1.
+
+**Exit codes.** `sync --apply` exits 1 when anything failed. `drift` exits 0 when no drift was *confirmed* and 1 when a recipe would be applied (a changed
+hash, a missing record or drift) or an object differs. **Exit 0 does not say everything was verified:** a recipe that is `unknown` or `waiting` is printed, with its reason,
+in the text and in the JSON (`--json`: `recipes[].action` is `apply`, `match`, `wait`, `forget`; `status` is `converged`, `drift` or `unknown`), and exits 0. Read the
+output when that matters.
+
+**Secrets.** A secret variable (`secret: true` in the recipe) is given under `secrets:` as a reference into the store described below
+(`secrets/<name>.age`, or a dotted path of the SOPS file), never as a value in a fleet file. Sync decrypts it in memory when it applies or looks, puts it only into the
+file the recipe names, and marks the request sensitive: the daemon then keeps no file content and shows no command output of that request. The hash holds a fingerprint of the
+**stored ciphertext**, so a label cannot reveal a weak secret. Two consequences: re-encrypting a secret with `secrets set` (the same text, a new ciphertext) or after
+`vault` re-wraps a SOPS file changes the fingerprint and runs the recipes that use it once more; and `plan` without a key compares by hash and says `unknown` for the look inside the jail.
+
+**Shared values.** `vars:` at the top of a jail file is the shared `--vars` file of its recipes: every recipe that declares the name takes it, the entry's own `vars:` wins,
+and a name that no recipe of the jail declares is an error.
+
+**Hand-made jails.** A jail that existed before sync (taken over with `adopt --claim`) has no record for a recipe. The first sync applies the whole recipe, so a file the recipe names is
+**overwritten as a whole** with what the repository says. Read `plan` first. If you change a jail with `jailops jail apply` that sync keeps, the command warns
+(`the jail is managed by sync, the next sync may revert this`).
 
 ## Secrets
 

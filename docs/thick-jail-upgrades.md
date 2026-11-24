@@ -95,7 +95,7 @@ its data before routing traffic back; the full list is
 jailops exec web --project shop -- freebsd-version -u
 jailops exec web --project shop -- find /etc /usr/local/etc -name '*.pkgnew'
 jailops update history web --project shop
-jailops logs --project shop --jail web --since 15m --app-logs
+jailops logs --project shop --jail web --since 15m
 ```
 
 A `FILE.pkgnew` is a configuration file pkg could not merge; compare it with the file and merge it by hand. The upgrade

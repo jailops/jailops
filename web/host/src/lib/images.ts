@@ -145,20 +145,13 @@ export function autoUpgradeSpec(enabled: boolean, at: string): ImageAutoUpgrade 
   return { enabled, ...(at && at !== DEFAULT_AUTO_AT ? { at } : {}) }
 }
 
-/** Whether apps have their default image: 'none' when there is no FreeBSD image at all (the base image is
- *  missing), 'ok' otherwise. */
-export function baseImageState(images: Image[]): 'none' | 'ok' {
-  return images.some((i) => i.spec.os === 'freebsd') ? 'ok' : 'none'
-}
-
-/** The FreeBSD images, newest release first, then by name: the order the install dialog and the jail form offer
- *  them in. */
+/** The FreeBSD images, newest release first, then by name: the order the jail form offers them in. */
 export function freebsdImages(images: Image[]): Image[] {
   const rel = (i: Image) => releaseNumbers(i.spec.release) ?? [0, 0]
   return images.filter((i) => i.spec.os === 'freebsd').sort((a, b) => compareRelease(rel(b), rel(a)) || (a.metadata.name < b.metadata.name ? -1 : a.metadata.name > b.metadata.name ? 1 : 0))
 }
 
-/** The image an app installs from when none is named, as the server picks it (service.defaultAppImage): the
+/** The image a new jail starts from when none is named: the
  *  FreeBSD image of the newest release this host's kernel runs, the first by name among equals; '' when there is
  *  none. An unknown host release limits nothing. */
 export function defaultImage(images: Image[], host: string): string {

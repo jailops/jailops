@@ -152,21 +152,15 @@ func TestSymlinksAreRefused(t *testing.T) {
 	}
 }
 
-func TestTemplateMergeOrderAndHooks(t *testing.T) {
+func TestTemplateMergeOrder(t *testing.T) {
 	d := base(t)
 	project(t, d, "w", "[a]", "")
-	write(t, d, "templates/one/manifest.yaml", "apiVersion: jailops/v1\nkind: JailTemplate\nmetadata:\n  name: one\nspec:\n  jail:\n    image: img\n    resources: {memory: 1G, cpu: 1}\n    env: {A: one, B: one}\n  after: [{action: start}]\n")
-	write(t, d, "templates/two/manifest.yaml", "apiVersion: jailops/v1\nkind: JailTemplate\nmetadata:\n  name: two\nspec:\n  jail:\n    resources: {memory: 2G}\n    env: {B: two}\n  after: [{action: snapshot, name: s1}]\n")
-	write(t, d, "projects/w/jails/j.yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: [a]\nmetadata:\n  name: j\ntemplates: [one, two]\nafter: [{action: restart}]\nspec:\n  env: {C: own, A: null}\n")
+	write(t, d, "templates/one/manifest.yaml", "apiVersion: jailops/v1\nkind: JailTemplate\nmetadata:\n  name: one\nspec:\n  jail:\n    image: img\n    resources: {memory: 1G, cpu: 1}\n    env: {A: one, B: one}\n")
+	write(t, d, "templates/two/manifest.yaml", "apiVersion: jailops/v1\nkind: JailTemplate\nmetadata:\n  name: two\nspec:\n  jail:\n    resources: {memory: 2G}\n    env: {B: two}\n")
+	write(t, d, "projects/w/jails/j.yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: [a]\nmetadata:\n  name: j\ntemplates: [one, two]\nspec:\n  env: {C: own, A: null}\n")
 	f, err := Load(d)
 	if err != nil {
 		t.Fatal(err)
-	}
-	var j *Object
-	for _, o := range f.Objects {
-		if o.Name == "j" {
-			j = o
-		}
 	}
 	out, _ := f.Render("a")
 	s := string(out)
@@ -177,31 +171,6 @@ func TestTemplateMergeOrderAndHooks(t *testing.T) {
 	}
 	if strings.Contains(s, "A: one") {
 		t.Fatal("null did not delete the key")
-	}
-	var acts []string
-	for _, h := range j.After {
-		acts = append(acts, h.Action)
-	}
-	if strings.Join(acts, ",") != "start,snapshot,restart" {
-		t.Fatalf("hook order: %v", acts)
-	}
-}
-
-func TestHooksAreTypedData(t *testing.T) {
-	for name, tc := range map[string]struct{ hook, want string }{
-		"unknown action": {"{action: sh}", "unknown hook action"},
-		"exec no argv":   {"{action: exec}", "non-empty argv"},
-		"start with arg": {"{action: start, argv: [x]}", "takes no name or argv"},
-		"shell string":   {"{action: exec, command: ls}", "field command"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			d := base(t)
-			project(t, d, "w", "[a]", "")
-			write(t, d, "projects/w/jails/j.yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: [a]\nmetadata:\n  name: j\nafter: ["+tc.hook+"]\nspec: {image: i}\n")
-			if _, err := Load(d); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("got %v, want %q", err, tc.want)
-			}
-		})
 	}
 }
 
@@ -460,62 +429,6 @@ func TestARolloutNamesItsProject(t *testing.T) {
 	}
 	if err := f.Check(); err == nil || !strings.Contains(err.Error(), "names the project") {
 		t.Fatalf("got %v", err)
-	}
-}
-
-// Apps and their grants belong to a project and one host, and an app is its
-// own jail: a Jail of the same name is an error.
-func TestAppDocuments(t *testing.T) {
-	appDoc := func(kind, name, hosts, spec string) string {
-		return "apiVersion: jailops/v1\nkind: " + kind + "\nmetadata:\n  name: " + name + "\nhosts: " + hosts + "\nspec:\n" + spec
-	}
-	d := base(t)
-	project(t, d, "shop", "[a, b]", "  networks: [{network: lan}]\n  storage: [{storage: default}]\n")
-	write(t, d, "shared/networks/lan.yaml", "apiVersion: jailops/v1\nkind: Network\nmetadata:\n  name: lan\nspec:\n  ipv4: {subnet: 10.70.0.0/24, gateway: 10.70.0.1, range: 10.70.0.10-10.70.0.250}\n")
-	write(t, d, "projects/shop/apps/db.yaml", appDoc("App", "db", "[a]", "  app: postgresql\n  network: lan\n"))
-	write(t, d, "projects/shop/app-access/db.yaml", appDoc("AppAccess", "db", "[a]", "  grants:\n    - {source: \"jail:web\", database: shop}\n"))
-	f, err := Load(d)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Check(); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(strings.Join(f.Warnings, "\n"), "source jail:web is neither a jail") {
-		t.Fatalf("warnings %v", f.Warnings)
-	}
-	if objs := f.ObjectsFor("a"); objs[len(objs)-1].Kind != "AppAccess" {
-		t.Fatalf("an AppAccess is not ordered last: %v", objs[len(objs)-1].Kind)
-	}
-
-	for name, c := range map[string]struct{ rel, doc, want string }{
-		"two hosts":   {"projects/shop/apps/db.yaml", appDoc("App", "db", "[a, b]", "  app: postgresql\n"), "exactly one named host"},
-		"bad source":  {"projects/shop/app-access/db.yaml", appDoc("AppAccess", "db", "[a]", "  grants:\n    - {source: everyone}\n"), "is not an address"},
-		"unknown key": {"projects/shop/apps/db.yaml", appDoc("App", "db", "[a]", "  app: postgresql\n  rotate: true\n"), "unknown field"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			d := base(t)
-			project(t, d, "shop", "[a, b]", "")
-			write(t, d, c.rel, c.doc)
-			if _, err := Load(d); err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("%v, want %q", err, c.want)
-			}
-		})
-	}
-	// outside a project
-	d2 := base(t)
-	write(t, d2, "hosts/a/apps/db.yaml", appDoc("App", "db", "[a]", "  app: postgresql\n"))
-	if _, err := Load(d2); err == nil || !strings.Contains(err.Error(), "belongs to a project") {
-		t.Fatalf("%v", err)
-	}
-	// an App and a Jail of the same name
-	write(t, d, "projects/shop/jails/db.yaml", "apiVersion: jailops/v1\nkind: Jail\nmetadata:\n  name: db\nhosts: [a]\nspec:\n  image: x\n  storage: default\n  network: [{network: lan}]\n")
-	f, err = Load(d)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Check(); err == nil || !strings.Contains(err.Error(), "an app is installed as its own jail") {
-		t.Fatalf("%v", err)
 	}
 }
 

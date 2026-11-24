@@ -13,7 +13,7 @@ import (
 
 func seedUnified(h *harness) {
 	h.seed()
-	for _, j := range [][]string{{"web", "tier=front"}, {"db", "jailops.app=postgresql"}, {"cache", "tier=back"}} {
+	for _, j := range [][]string{{"web", "tier=front"}, {"db", "tier=data"}, {"cache", "tier=back"}} {
 		h.run("", "jail", "create", j[0], "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--label", j[1])
 	}
 	h.srv.SeedJailLog("main", "web", "messages", []byte("Mar  1 08:50:00 web sshd[1]: Accepted publickey\nMar  1 08:55:00 web nginx[3]: upstream timed out\n"))
@@ -31,7 +31,7 @@ func TestUnifiedLogs(t *testing.T) {
 	tr.do("", "logs")
 	tr.ok("logs", "--jail", "web", "--jail", "db", "--since", "7m")
 	tr.ok("logs", "-l", "tier=front", "--grep", "UPSTREAM")
-	tr.ok("logs", "--app", "postgresql", "--limit", "1")
+	tr.ok("logs", "--jail", "db", "--limit", "1")
 	tr.ok("logs", "--jail", "db", "-o", "json")
 	tr.ok("logs", "--all-projects", "--jail", "web")
 	tr.ok("logs", "web", "messages", "--limit", "1")

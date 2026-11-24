@@ -428,8 +428,6 @@ func byText(o render.Origin) string {
 		}
 		kind := ""
 		switch {
-		case o.Managed:
-			kind = " (app access)"
 		case o.ProjectPolicy:
 			kind = " (project policy)"
 		}

@@ -69,7 +69,7 @@ binaries from the GitHub releases page. The client package ships bash, zsh and f
 | Alpine and Debian jails | [docs/linux-jails.md](docs/linux-jails.md) |
 | Fleets from git | [docs/fleet-sync.md](docs/fleet-sync.md) |
 | Running commands on many jails and copying files | [docs/operations.md](docs/operations.md#one-command-on-many-jails) |
-| The application catalog and installing an app with one command | [docs/apps.md](docs/apps.md) |
+| Running software in a jail: recipes of packages, files and services | [docs/provisioning.md](docs/provisioning.md#2-applying-a-recipe-to-a-jail) |
 | How a new FreeBSD release is handled (for maintainers) | [docs/release-engineering.md](docs/release-engineering.md) |
 | The design contract | [docs/design.md](docs/design.md) |
 | The wire protocol | [sdk/PROTOCOL.md](sdk/PROTOCOL.md) |

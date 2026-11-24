@@ -6,7 +6,7 @@ import type { EventStream, RawRequest, RawResponse, StreamHandlers, Transport } 
 import type { ApiEvent, ApiErrorBody, Operation, RestorePreflight, FirewallPolicy, AddressSet, AddressSetSpec, FirewallRule, FirewallTestRequest, Token, Backup, Jail, JailRollback, Volume, JailUpgrade, PowerState, ImageAutoUpgrade } from '@jailops/shared/api/types'
 import * as d from './data'
 import * as d2 from './data2'
-import * as da from './apps'
+import * as da from './jaillogs'
 import * as dh from './host'
 import { validDNSName } from '@/lib/host'
 import * as dw from './wireguard'
@@ -14,9 +14,6 @@ import * as dc from './cert'
 import { DEMO_SETUP_TOKEN, DEMO_CLIENT_ADDRESS } from './setupToken'
 import { passwordProblem, validUserName, cleanToken } from '@/lib/setup'
 import { demoForward, unifiedRead, type DemoReply } from './logs'
-import { demoAccess } from './access'
-import { volumeName } from '@/lib/apps'
-import { defaultImage } from '@/lib/images'
 import { releaseOlder } from '@/lib/upgrade'
 import { lookupKey, setValue, expandedSources, flatten } from '@/lib/configKeys'
 import { loadChoice, saveChoice } from '@/lib/projectScope'
@@ -30,6 +27,7 @@ import { readManifest, scanFile, ExportFileError } from '@/lib/exportfile'
 import { demoExposed, demoReach } from './reach'
 import { demoExpose, demoUnexpose } from './expose'
 import { demoTop } from './top'
+import { DemoRecipes, recipeProblem } from './recipe'
 
 interface DemoOp extends Operation {
   startedAt: number
@@ -89,7 +87,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     db.volumes = []; db.storage = []; db.profiles = { project: [], host: [] } as typeof db.profiles; db.updates = []; db.policies = []; db.sets = []
     db.targets = []; db.bpol = []; db.backups = []; db.remotes = []; db.wireguard = []
   }
-  // `?demo=noimage`: a host with projects, networks and jails but no image yet (the install and create forms offer
+  // `?demo=noimage`: a host with projects, networks and jails but no image yet (the create form offers
   // to create the base image)
   if (typeof location !== 'undefined' && location.search.includes('noimage')) db.images = []
   // `?demo=newrelease`: the host was upgraded to 15.2 and only the image of 15.1 exists (the new release notice);
@@ -134,8 +132,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     v === 'default' || v === 'none' ? '' : /['`\x00-\x1f\x7f]/.test(v) ? 'the prompt may not contain a quote, a backquote or a control character' : /\$/.test(v.replace(/\\\$/g, '')) || /\\\\/.test(v) ? 'the prompt may contain $ only as \\$ (variables and commands in the prompt are not accepted)' : /[{}]/.test(v.replace(/\\D\{[^}]*\}/g, '').replace(/\{(jail|project|host)\}/g, '')) ? 'a { or } in the prompt must be one of {jail}, {project}, {host}' : ''
   const freebsdImage = (ref: string) => (db.images.find((i) => i.metadata.name === String(ref).split(/[@#]/)[0])?.spec.os ?? 'freebsd') === 'freebsd'
   const logs = da.demoLogs()
+  const recipes = new DemoRecipes()
   const forward = demoForward('bsd01.example.net')
-  const access = demoAccess(() => db.jails, () => db.sets, (app) => { const x = da.detail(app); return x && x !== 'invalid' ? x.definition : undefined })
   for (const o of d.operations()) db.ops.push({ ...o, startedAt: Date.parse(o.created_at), duration: o.status === 'running' ? 600_000 : 0, done: o.status !== 'running' })
   // encrypted volumes: the passphrase of each, and the wrong ones counted as the daemon counts them
   const volPass: Record<string, string> = { secrets: d.demoVaultPassphrase }
@@ -320,6 +318,11 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     }
     if (!authed) return fail(401, { code: 'unauthorized', message: 'Authentication is required.', hint: 'Sign in with a token or a user.' })
     if (m === 'GET' && seg[0] === 'resources') return ok(d.pool())
+    // a rendered recipe is checked with no jail: the answer names the step and the field, never a value
+    if (m === 'POST' && seg[0] === 'recipes' && seg[1] === 'validate') {
+      const bad = recipeProblem(body.recipe)
+      return bad ? fail(400, { code: 'invalid', message: bad, detail: { field: bad.split(':')[0].split(' ')[0] } }) : ok({ valid: true, steps: body.recipe.steps.length })
+    }
     // the running jails of the project it names, or of every project
     if (m === 'GET' && seg[0] === 'top') return ok(demoTop(db.jails, url.searchParams.get('project') ?? ''))
     // There is no default project: what works inside one needs it named, like the real server.
@@ -435,7 +438,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         { name: 'pf.anchor.mail', status: 'fail', message: 'anchor jailops/mail is not loaded', hint: 'Fix the syntax error at line 14 of the policy mail-edge, then run jailops reconcile.', detail: { policy: 'mail-edge', line: '14' } },
         { name: 'linuxulator', status: 'warn', message: 'linprocfs is not mounted', hint: 'Add linprocfs to /etc/fstab.' },
         { name: 'jail.kernel.vimage', status: 'unknown', message: 'could not be determined on this platform' },
-        { name: 'apps.access', status: 'ok', message: '2 grants; every firewall rule and pg_hba.conf line is in place' },
       ] })
       case 'restores': return restore(body)
       case 'remotes': return ok(db.remotes)
@@ -764,10 +766,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       if (locked.length && j.status.power !== 'running') j.status.power = 'locked'
       if (!locked.length && j.status.power === 'locked') j.status.power = 'stopped'
     }
-  }
-
-  function newAppVolume(name: string, mount: string, project: string, app: string, jail: string): Volume {
-    return { metadata: { name, scope: 'host', generation: 1, created_at: new Date().toISOString(), project, labels: { [da.LABEL]: app } }, spec: { storage: 'default', uid: 0, gid: 0, mode: '0755', comment: `data of ${jail} (${app}): ${mount}` }, status: { dataset: `tank/jailops/projects/${project}/volumes/${name}`, mountpoint: `/jailops/projects/${project}/volumes/${name}`, used_bytes: 0 } }
   }
 
   function volumesRoute(seg: string[], m: string, body: Record<string, any>, project: string): RawResponse {
@@ -1260,7 +1258,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   function extraRoutes(seg: string[], m: string, body: Record<string, any>, url: URL, req: RawRequest, project: string): RawResponse | undefined {
     const name = seg[1]
     switch (seg[0]) {
-      case 'apps': return appsRoute(seg, m, body, project)
       case 'host': return hostRoute(seg, m, body)
       case 'wireguard': return wireguardRoute(seg, m, body)
       case 'logs': return logsRoute(seg, m, body, url, req)
@@ -1422,24 +1419,26 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           const r = seg[2] === 'expose' ? demoExpose(j, body as never) : demoUnexpose(j, body as never)
           return 'ok' in r ? ok(r.ok) : fail(r.status, { code: r.code, message: r.message, hint: r.hint } as ApiErrorBody)
         }
-        if (seg[2] === 'access') {
-          if (!j.metadata.labels?.[da.LABEL]) return fail(400, { code: 'invalid', message: `jail "${name}" was not installed from the catalog (it has no label jailops.app)` })
-          if (seg.length === 3 && m === 'GET') return ok(access.get(j))
-          const r = seg[3] === 'allow' && m === 'POST' ? access.allow(j, body as never) : seg[3] === 'deny' && m === 'POST' ? access.deny(j, body as never) : undefined
-          if (!r) return undefined
-          if ('ok' in r) return ok(r.ok)
-          return fail(r.status, { code: r.code, message: r.message, hint: r.hint } as ApiErrorBody)
-        }
         if (seg[2] === 'logs' && m === 'GET') {
-          const app = j.metadata.labels?.[da.LABEL] ?? ''
           // A stopped jail's root is not mounted: the server answers busy and says how to mount it.
           if (j.status.power === 'stopped') return fail(409, { code: 'busy', message: `jail "${name}" is not mounted`, hint: `start the jail, or mount its root dataset on the host: zfs mount tank/jailops/${project}/${name}/root` })
-          if (seg.length === 3) return ok(logs.list(name, app))
+          if (seg.length === 3) return ok(logs.list(name))
           const file = seg.slice(3).join('/')
-          const r = logs.read(name, app, file, url.searchParams)
+          const r = logs.read(name, file, url.searchParams)
           if (r === 'missing') return fail(404, { code: 'not_found', message: `jail "${name}" has no log file "${file}"`, hint: `list them with GET /api/v1/jails/${name}/logs` })
           if (r === 'compressed') return fail(400, { code: 'invalid', message: `${file} is not readable (compressed)`, hint: 'read the plain rotated copies, or the file from inside the jail' })
           return ok(r)
+        }
+        if (seg[2] === 'apply' && m === 'POST') {
+          if (j.spec.os === 'linux') return fail(501, { code: 'unsupported', message: `jail "${name}" is a Linux jail: a recipe is for FreeBSD jails`, hint: 'use jailops exec and jailops cp' })
+          const bad = recipeProblem(body.recipe)
+          if (bad) return fail(400, { code: 'invalid', message: bad })
+          const apply = !body.dry_run
+          if (j.status.power !== 'running') return startOp(`Apply a recipe to jail ${name}`, { jails: [src] }, 300, () => undefined, undefined, false, { code: 'busy', message: `jail "${name}" is not running; a recipe runs inside it`, hint: 'start it first' })
+          const out = recipes.run(name, body.recipe, !apply, !!body.sensitive)
+          return 'failure' in out
+            ? startOp(`Apply a recipe to jail ${name}`, { jails: [src] }, 900, () => undefined, undefined, false, { code: 'step_failed', message: out.failure.message, hint: out.failure.hint })
+            : startOp(`${apply ? 'Apply' : 'Dry run of'} a recipe${apply ? ' to' : ' in'} jail ${name}`, { jails: [src] }, apply ? 1500 : 700, () => undefined, out.result, false)
         }
         if (seg[2] === 'shell-setup' && m === 'POST') {
           if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `jail "${name}" is not running; the prompt is written inside it`, hint: 'start it first' })
@@ -1491,79 +1490,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     }
     void req
     return undefined
-  }
-
-  function appsRoute(seg: string[], m: string, body: Record<string, any>, project: string): RawResponse {
-    const name = seg[1]
-    if (seg.length === 1 && m === 'GET') return ok(da.catalog())
-    const det = name ? da.detail(name) : undefined
-    if (det === 'invalid') return fail(400, { code: 'invalid', message: `app ${name} is invalid: ${da.invalidApp.error}`, hint: 'fix the file in the catalog directory, or reinstall the jailops-apps package', detail: { file: `/usr/local/share/jailops/apps/${name}.yaml` } })
-    if (!det) return fail(404, { code: 'not_found', message: `app ${name} is not in the catalog`, hint: 'jailops app list shows the catalog' })
-    if (seg.length === 2 && m === 'GET') return ok(det)
-    if (seg[2] !== 'install' || m !== 'POST') return fail(404, { code: 'not_found', message: 'No such route' })
-    if (!project) return fail(400, { code: 'invalid', message: 'a project is required', hint: "name one with --project NAME (list them with 'jailops project list')" })
-    const p = db.projects.find((x) => x.metadata.name === project)
-    if (!p) return fail(404, { code: 'not_found', message: `project ${project} not found` })
-    if (body.project && body.project !== project) return fail(400, { code: 'invalid', message: `the body names project ${body.project}, the request ${project}` })
-    const jail = String(body.jail || name)
-    if (nameProblem(jail, 'jail')) return fail(400, { code: 'invalid', message: `jail name "${jail}" is not a name: ${nameProblem(jail, 'jail')}`, hint: 'lower-case letters, digits and dashes, starting with a letter, at most 32 characters' })
-    if (db.jails.some((x) => x.metadata.name === jail && (x.metadata.project ?? '') === project)) return fail(409, { code: 'already_exists', message: `jail ${jail} exists in project ${project}`, hint: 'name the jail with --name, or delete the jail first' })
-    const nets = (p.spec.networks ?? []).map((g) => g.network)
-    const net = String(body.network || (nets.length === 1 ? nets[0] : ''))
-    if (!net) return fail(400, { code: 'invalid', message: `no network named and project ${project} is granted ${nets.length ? 'several' : 'none'}`, hint: `jailops project show ${project} lists the grants` })
-    if (!nets.includes(net)) return fail(403, { code: 'forbidden', message: `network ${net} is not granted to project ${project}`, hint: `jailops project show ${project} lists the grants` })
-    const stoGrants = (p.spec.storage ?? []).map((g) => g.storage)
-    const stos = stoGrants.includes('*') ? db.storage.map((x) => x.metadata.name) : stoGrants
-    const sto = String(body.storage || (stos.length === 1 ? stos[0] : ''))
-    if (!sto) return fail(400, { code: 'invalid', message: `no storage named and project ${project} is granted ${stos.length ? 'several' : 'none'}`, hint: `jailops project show ${project} lists the grants` })
-    if (!stos.includes(sto)) return fail(403, { code: 'forbidden', message: `storage ${sto} is not granted to project ${project}`, hint: `jailops project show ${project} lists the grants` })
-    const a = det.definition
-    // without a name: the FreeBSD image of the newest release the host runs, as the server picks it
-    const image = String(body.image || defaultImage(db.images, newRelease ? '15.2-RELEASE' : '15.1-RELEASE'))
-    if (!image) return fail(400, { code: 'invalid', message: 'no image named, and there is no FreeBSD image yet', hint: "create the base image with 'jailops image create freebsd-15-1 --release 15.1-RELEASE', then build it with 'jailops image build freebsd-15-1' (the console's Images page does both with Create image)" })
-    const steps = da.installSteps(a, jail, project, image)
-    const subnet = db.networks.find((x) => x.metadata.name === net)?.spec.ipv4?.subnet ?? '10.20.0.0/24'
-    const addr = subnet.replace(/\.\d+\/\d+$/, '') + '.' + (40 + db.jails.length)
-    const limits = { memory: body.limits?.memory ?? a.resources?.memory, disk: body.limits?.disk ?? a.resources?.disk, cpu: Number(body.limits?.cpu ?? a.resources?.cpu ?? 1) }
-    const version = a.packages[0]?.version ?? ''
-    const src = `/api/v1/jails/${jail}`
-    // the data are volumes of the project, <jail>-<name>, made before the jail and kept when it is deleted
-    const appVolumes = (a.data ?? []).map((x) => ({ name: `${jail}-${volumeName(x.path)}`.slice(0, 32).replace(/-+$/, ''), mount: x.path }))
-    const taken = appVolumes.find((x) => db.volumes.some((v) => v.metadata.name === x.name && (v.metadata.project ?? '') === project))
-    if (taken) return fail(409, { code: 'already_exists', message: `volume "${taken.name}" already exists`, hint: `an earlier jail of this name left it: delete it with jailops volume delete ${taken.name}` })
-    const j: Jail = {
-      metadata: { name: jail, scope: 'host', project, generation: 1, created_at: new Date().toISOString(), labels: { [da.LABEL]: a.name, [`${da.LABEL}.hash`]: det.hash, [`${da.LABEL}.version`]: version } },
-      spec: { image, storage: sto, network: [{ network: net, ipv4: addr }], volumes: appVolumes.map((x) => ({ volume: x.name, mount: x.mount })), resources: limits, boot: { autostart: true }, prompt: 'default' },
-      status: { power: 'running', jid: 120 + db.jails.length, image_generation: 'freebsd-15-1#g4', addresses: [`${addr}/${subnet.split('/')[1] ?? '24'}`], started_at: new Date().toISOString(), conditions: [d.readyCond('running')] },
-    }
-    const result = {
-      app: a.name, hash: det.hash, version, jail: j, addresses: j.status.addresses, ports: (a.ports ?? []).map((x) => ({ ...x, endpoint: `${addr}:${x.port}` })),
-      data: a.data, config: a.config, logs: a.logs, notes: a.notes, snapshot: 'app-installed', steps,
-    }
-    if (body.dry_run) return startOp(`Install app ${a.name} as jail ${jail} (dry run)`, {}, 300, () => undefined, { ...result, jail: { metadata: { name: jail }, spec: { image }, status: { power: 'stopped' } }, version: undefined, addresses: undefined, ports: undefined, snapshot: undefined, dry_run: true }, false)
-    // A jail name that starts with "fail" makes the demo fail at the health check and keep the jail, stopped.
-    if (jail.startsWith('fail')) {
-      const r = startOp(`Install app ${a.name} as jail ${jail}`, { jails: [src] }, 3500, () => {
-        j.status = { power: 'stopped', addresses: [], conditions: [d.readyCond('stopped')] }
-        for (const x of appVolumes) db.volumes.push(newAppVolume(x.name, x.mount, project, a.name, jail))
-        db.jails.push(j)
-        emit('app.install.failed', src)
-      }, undefined, false)
-      const op = db.ops[0]
-      op.failure = {
-        code: 'internal', message: `installing app ${a.name} as jail ${jail} failed at step health-check: no answer within ${a.health?.wait_seconds ?? 60} attempts`,
-        hint: `the jail was left stopped for inspection: look inside it with \`jailops shell ${jail}\` after \`jailops start ${jail}\`, and delete it with \`jailops delete ${jail}\` before trying again`,
-        detail: { jail, step: 'health-check', jail_kept: 'true' },
-      } as ApiErrorBody
-      return r
-    }
-    return startOp(`Install app ${a.name} as jail ${jail}`, { jails: [src] }, 5000, () => {
-      for (const x of appVolumes) db.volumes.push(newAppVolume(x.name, x.mount, project, a.name, jail))
-      db.jails.push(j)
-      access.install(jail)
-      db.snaps[jail] = [{ metadata: { name: 'app-installed', scope: 'host', created_at: new Date().toISOString() }, spec: { jail, comment: `installation of ${a.name}` }, status: { written_bytes: 0 } }]
-      for (const ev of ['jail-created', 'jail-started', 'jail-snapshot-created', 'app.installed']) emit(ev, src)
-    }, result, false)
   }
 
   const PLAIN = '\x1b[32mroot@jail\x1b[0m:\x1b[34m~\x1b[0m# '

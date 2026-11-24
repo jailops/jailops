@@ -26,8 +26,6 @@ DELETE /api/v1/volumes/{name}/snapshots/{snapshot} async
 DELETE /api/v1/wireguard/{name} sync
 DELETE /api/v1/wireguard/{name}/peers/{peer} sync
 GET /api/v1 sync
-GET /api/v1/apps sync
-GET /api/v1/apps/{name} sync
 GET /api/v1/audit sync
 GET /api/v1/auth/session sync
 GET /api/v1/backup-policies sync
@@ -59,8 +57,6 @@ GET /api/v1/images/{name}/generations sync
 GET /api/v1/images/{name}/generations/{gen} sync
 GET /api/v1/jails sync
 GET /api/v1/jails/{name} sync
-GET /api/v1/jails/{name}/access sync
-GET /api/v1/jails/{name}/app-draft sync
 GET /api/v1/jails/{name}/audit sync
 GET /api/v1/jails/{name}/base sync
 GET /api/v1/jails/{name}/console/{id}/output stream
@@ -124,7 +120,6 @@ PATCH /api/v1/storage/{name} sync
 PATCH /api/v1/users/{name} sync
 PATCH /api/v1/volumes/{name} sync
 PATCH /api/v1/wireguard/{name} sync
-POST /api/v1/apps/{name}/install async
 POST /api/v1/auth/login sync
 POST /api/v1/auth/logout sync
 POST /api/v1/auth/password sync
@@ -158,8 +153,6 @@ POST /api/v1/images/{name}/rename either
 POST /api/v1/images/{name}/upgrade async
 POST /api/v1/jail-imports either
 POST /api/v1/jails async
-POST /api/v1/jails/{name}/access/allow sync
-POST /api/v1/jails/{name}/access/deny sync
 POST /api/v1/jails/{name}/apply async
 POST /api/v1/jails/{name}/config async
 POST /api/v1/jails/{name}/console stream
@@ -182,6 +175,7 @@ POST /api/v1/profiles sync
 POST /api/v1/profiles/{name}/rename either
 POST /api/v1/projects sync
 POST /api/v1/projects/{name}/rename either
+POST /api/v1/recipes/validate sync
 POST /api/v1/remotes sync
 POST /api/v1/restores either
 POST /api/v1/setup sync

@@ -4,7 +4,7 @@ import { reactive } from 'vue'
  * Confirmation tiers, one rule for both consoles:
  *  1. a safe, undoable action runs at once (start, take a snapshot, preview);
  *  2. a disruptive one asks first and names what it touches (stop or restart a running jail, upgrade an image and
- *     its jails, uninstall an app);
+ *     its jails);
  *  3. data loss needs the name typed (delete a jail, roll data back, delete a project, a volume, a network with
  *     jails, a firewall policy in use).
  * A view calls confirmAction(); ConfirmHost (in the shell) shows ConfirmDialog. Escape and focus follow Modal.

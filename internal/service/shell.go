@@ -33,11 +33,19 @@ import (
 // written at once into a running jail (under the jail's lock, by the update), or at the next start of a stopped one.
 // Linux jails are left alone: the prompt key is refused for them.
 
+// promptFormat numbers what the files of the prompt say, apart from the PS1 text: bump it when render writes different
+// files for the same text, so every jail whose record has an older number gets them rewritten at its next start. 2: the
+// values baked into PS1, the checks of the variables, and root's .shrc block that sources the variables script.
+const promptFormat = 2
+
 // shellMark is the per-jail record of the prompt, in <StateDir>/shell/<key>.json. Older records may hold the fields
 // pending and started of the bash installation JailOps no longer does; they are ignored.
 type shellMark struct {
 	// Applied is what the prompt file last said (promptState): the PS1 text, or "none".
 	Applied string `json:"applied,omitempty"`
+	// Format is the promptFormat of the files Applied was written with; a record without one (or an older one) says the
+	// files came from a release whose prompt file or hook blocks differ, and the next start writes them again.
+	Format int `json:"format,omitempty"`
 	// Error is the latest failure of writing the prompt (empty after a success), At its time.
 	Error string    `json:"error,omitempty"`
 	At    time.Time `json:"at,omitzero"`
@@ -293,7 +301,7 @@ func (s *Service) shellAtStart(ctx context.Context, key string) {
 		return
 	}
 	eff := s.effective(j)
-	if st := s.promptState(key, eff); st == "" || st == s.shellMark(key).Applied {
+	if st, m := s.promptState(key, eff), s.shellMark(key); st == "" || (st == m.Applied && m.Format == promptFormat) {
 		return
 	}
 	if err := s.writePromptMark(ctx, key, eff); err != nil {
@@ -328,7 +336,7 @@ func (s *Service) setUpPrompt(ctx context.Context, key string, eff api.JailSpec)
 		s.log.Warn("writing the prompt failed", "jail", key, "err", err)
 		m.Error = "writing the prompt failed (the output is in the daemon log)"
 	} else {
-		m.Applied = st
+		m.Applied, m.Format = st, promptFormat
 	}
 	s.setShellMark(key, m)
 	return steps, err

@@ -44,7 +44,7 @@ func TestRegisteredScopesAreTheDocumentedAuthority(t *testing.T) {
 			}
 		}
 	}
-	if seen < 15 {
+	if seen < 10 {
 		t.Fatalf("found only %d registrations of kinds: the scan is broken", seen)
 	}
 }

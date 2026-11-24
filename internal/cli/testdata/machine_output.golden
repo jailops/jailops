@@ -1080,7 +1080,7 @@ $ jailops doctor -o json
   {
     "name": "extensions",
     "status": "ok",
-    "message": "all 66 known extensions present"
+    "message": "all 63 known extensions present"
   },
   {
     "name": "zfs",
@@ -1119,7 +1119,7 @@ $ jailops doctor -o yaml
   message: "1.0"
 - name: extensions
   status: ok
-  message: all 66 known extensions present
+  message: all 63 known extensions present
 - name: zfs
   status: ok
   message: pool tank

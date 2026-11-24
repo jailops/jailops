@@ -134,7 +134,7 @@ type ReachOut struct {
 // (empty: it states none).
 type ReachPolicy struct {
 	Name string `json:"name"`
-	// Source is "project" (a mandatory policy of the project), "managed" (kept by app access) or "jail" (named in the
+	// Source is "project" (a mandatory policy of the project) or "jail" (named in the
 	// jail's firewall.policies).
 	Source     string `json:"source"`
 	Rules      int    `json:"rules"`
@@ -147,8 +147,7 @@ type ReachPolicy struct {
 type JailReach struct {
 	Project string `json:"project"`
 	Jail    string `json:"jail"`
-	// Policies are the policies of the jail in the order they are rendered: the project's, the managed one of app
-	// access, then the jail's own.
+	// Policies are the policies of the jail in the order they are rendered: the project's, then the jail's own.
 	Policies []ReachPolicy `json:"policies,omitempty"`
 	// Rows are what each kind of source reaches (inbound).
 	Rows []ReachRow `json:"rows"`
@@ -160,8 +159,8 @@ type JailReach struct {
 	// any policy of the jail states deny, else allow.
 	DefaultIn  string `json:"default_in"`
 	DefaultOut string `json:"default_out"`
-	// DefaultInBy and DefaultOutBy are the policies that state deny for the direction ("name", with " [project]" or
-	// " [managed]" after the project's and the app's); empty when none does and the default is allow.
+	// DefaultInBy and DefaultOutBy are the policies that state deny for the direction ("name", with " [project]"
+	// after the project's); empty when none does and the default is allow.
 	DefaultInBy  []string `json:"default_in_by,omitempty"`
 	DefaultOutBy []string `json:"default_out_by,omitempty"`
 	// Rules are the rules of the anchor in evaluation order.

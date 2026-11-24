@@ -81,7 +81,6 @@ const (
 	OpJailApply             OperationAction = "jail.apply"
 	OpJailShellSetup        OperationAction = "jail.shell_setup"
 	OpJailRestore           OperationAction = "jail.restore"
-	OpAppInstall            OperationAction = "app.install"
 	OpRename                OperationAction = "rename"
 	OpVolumeCreate          OperationAction = "volume.create"
 	OpVolumeDelete          OperationAction = "volume.delete"
@@ -110,7 +109,7 @@ const (
 var OperationActions = []OperationAction{
 	OpJailCreate, OpJailDelete, OpJailStart, OpJailStop, OpJailRestart, OpJailConfigure, OpJailCopy,
 	OpJailUpgrade, OpJailRollback, OpJailSnapshot, OpJailSnapshotDelete, OpJailImport, OpJailApply, OpJailShellSetup,
-	OpJailRestore, OpAppInstall, OpRename, OpVolumeCreate, OpVolumeDelete, OpVolumeSnapshot, OpVolumeSnapshotDelete,
+	OpJailRestore, OpRename, OpVolumeCreate, OpVolumeDelete, OpVolumeSnapshot, OpVolumeSnapshotDelete,
 	OpVolumeRollback, OpVolumeAttach, OpVolumeDetach, OpVolumeLock, OpVolumeUnlock, OpVolumePassphrase, OpVolumeRestore,
 	OpImageBuild, OpImageUpgrade, OpImageGenerationDelete, OpImageAutoUpgrade, OpBackupRun, OpBackupVerify,
 	OpBackupDelete, OpUpdateCheck, OpUpdateApply, OpUpdateScheduled,
@@ -246,16 +245,12 @@ var Extensions = []string{
 	"sealed_secrets",
 	"image_upgrade",
 	"jail_usage",
-	"apps",
 	"jail_logs",
-	"app_install",
-	"app_draft",
 	"host_identity",
 	"host_firewall",
 	"host_pending",
 	"wireguard",
 	"interface_descriptions",
-	"app_access",
 	"logs_unified",
 	"log_forward",
 	"volumes",
@@ -274,4 +269,5 @@ var Extensions = []string{
 	"top",
 	"jail_audit",
 	"jail_base",
+	"recipe_validate",
 }

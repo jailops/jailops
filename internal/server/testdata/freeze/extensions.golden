@@ -36,16 +36,12 @@ jail_apply
 sealed_secrets
 image_upgrade
 jail_usage
-apps
 jail_logs
-app_install
-app_draft
 host_identity
 host_firewall
 host_pending
 wireguard
 interface_descriptions
-app_access
 logs_unified
 log_forward
 volumes
@@ -64,3 +60,4 @@ volume_from_dir
 top
 jail_audit
 jail_base
+recipe_validate

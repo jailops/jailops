@@ -72,8 +72,8 @@ func TestSyslogUDP(t *testing.T) {
 		t.Fatal(err)
 	}
 	buf := make([]byte, 65536)
-	for i, want := range []string{`<190>1 2026-11-01T09:30:00.000000Z host1 jailops - log [jailops project="web" jail="a" app="" file="messages"] first`,
-		`[jailops project="web" jail="b" app="" file="messages"] second\nline`} {
+	for i, want := range []string{`<190>1 2026-11-01T09:30:00.000000Z host1 jailops - log [jailops project="web" jail="a" file="messages"] first`,
+		`[jailops project="web" jail="b" file="messages"] second\nline`} {
 		_ = pc.SetReadDeadline(time.Now().Add(10 * time.Second))
 		n, _, err := pc.ReadFrom(buf)
 		if err != nil {

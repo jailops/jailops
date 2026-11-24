@@ -15,6 +15,8 @@ type Session struct {
 	Fleet *config.Fleet
 	Conn  Connector
 	Store *secrets.Store
+	// Checks is the memory of the looks inside jails; nil means none (every run looks).
+	Checks *Checks
 
 	mu      sync.Mutex
 	clients map[string]*sdk.Client

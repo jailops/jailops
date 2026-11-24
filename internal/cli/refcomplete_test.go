@@ -18,8 +18,8 @@ func TestRuleCompletion(t *testing.T) {
 		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}})
 	h.srv.SeedGeneration("freebsd-151")
 	for _, args := range [][]string{
-		{"app", "install", "postgresql", "db", "--image", "freebsd-151"},
-		{"app", "install", "nginx", "web", "--image", "freebsd-151"},
+		{"jail", "create", "db", "--image", "freebsd-151", "--network", "lan", "--storage", "default"},
+		{"jail", "create", "web", "--image", "freebsd-151", "--network", "lan", "--storage", "default"},
 		{"firewall", "address-set", "create", "office", "--address", "198.51.100.0/24"},
 		{"firewall", "address-set", "create", "vpn", "--address", "203.0.113.0/24"},
 		{"firewall", "policy", "create", "p"},

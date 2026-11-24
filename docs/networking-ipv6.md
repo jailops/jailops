@@ -385,12 +385,12 @@ stops when its rule goes.
 
   | Endpoint | Stands for | Where it is accepted |
   |---|---|---|
-  | `192.0.2.7`, `192.0.2.0/24`, `2001:db8::/48` | an address or a prefix | rules, address-set members, `app allow` |
-  | `jail:name` | a jail of the project: its addresses, read at every render, so the rule follows the jail; a jail that does not exist matches nobody and `jailops doctor` says so (`firewall.refs`) | rules, address-set members, `app allow`, `firewall test` |
-  | `set:name` | an address set of the project | rules, address-set members, `app allow` |
+  | `192.0.2.7`, `192.0.2.0/24`, `2001:db8::/48` | an address or a prefix | rules, address-set members |
+  | `jail:name` | a jail of the project: its addresses, read at every render, so the rule follows the jail; a jail that does not exist matches nobody and `jailops doctor` says so (`firewall.refs`) | rules, address-set members, `firewall test` |
+  | `set:name` | an address set of the project | rules, address-set members |
   | `tag:name` | every jail of the project with that tag | rules only |
   | `any` | every address | rules only |
-  | `host` | the host itself: the gateway addresses of the app jail's networks | `app allow`, `firewall test` |
+  | `host` | the host itself: the gateway addresses of the jail's networks | `firewall test` |
 
   A reference is always `kind:name`; `@` is not used (`@web` is refused with the words to write instead). The kinds are
   separate namespaces, so a jail and an address set of one project may have the same name; a jail name and an address set name have
@@ -401,7 +401,7 @@ stops when its rule goes.
   **A policy states a default only when you tell it to.** `default_in` and `default_out` are `deny`, `allow` or unset, and
   `policy create` writes none unless you give `--default-in` or `--default-out`: a policy is what it allows and denies, and
   `deny` closes the direction for every jail that uses it. A default is deny when any policy of the jail states deny
-  (the project's mandatory ones, the app's managed policy, the jail's own), whatever the order, and allow when none does.
+  (the project's mandatory ones, the jail's own), whatever the order, and allow when none does.
   Nothing is closed by default inside a project. To close a project or a jail, put a policy with `default_in: deny` in the
   project's mandatory list (`firewall_policies`) or on the jail, and open what is needed with `allow` rules:
 
@@ -421,12 +421,11 @@ stops when its rule goes.
   Firewall tab does the same, one policy at a time). `jailops config set DB firewall.policies postgres,ssh-office` and `--firewall-policy` (more than once) at `jailops create` write the whole list. The mandatory list of a project
   changes the same way with `--mandatory` (`jailops firewall policy attach default --mandatory --project shop`, global admins), and `jailops project set --firewall-policy` writes all of it. A jail cannot name a
   mandatory policy of the project, which is rendered for every jail already, nor a policy that something else manages
-  (`app-JAIL`), and it names none twice. A policy that no jail names is applied nowhere: `policy show` says `Used by: none` and `policy list` has the column USED BY (the jails by name, or `every jail (project)` for a mandatory policy).
+  (a hub), and it names none twice. A policy that no jail names is applied nowhere: `policy show` says `Used by: none` and `policy list` has the column USED BY (the jails by name, or `every jail (project)` for a mandatory policy).
 
   **Several policies.** A project has a list of mandatory policies (`jailops project set PROJECT --firewall-policy default
   --firewall-policy monitoring`, `firewall_policies` in a file; an empty value clears the list) and a jail has a list of its
-  own. The anchor of a jail holds them in this order: the project's policies in the order of their list, the managed policy
-  `app-JAIL` when the jail has one, then the jail's own policies in the order of theirs. Each policy is a section of the anchor with
+  own. The anchor of a jail holds them in this order: the project's policies in the order of their list, then the jail's own policies in the order of theirs. Each policy is a section of the anchor with
   its own heading (`# project policy NAME` or `# policy NAME`, then its comment) and its own rule numbers, so `policy show NAME`
   and the anchor read the same. A default is deny when any policy in play states deny, in each
   direction, and a policy of a jail can open ports but never turn a default deny of the project into allow. A policy that a list
@@ -518,7 +517,7 @@ arrives on the host, its own link (`in`); what reaches the destination jail is j
 jail, its own link (`out`). A connection from an address outside every network of JailOps to a jail's routed address meets
 the jail's anchor on the **uplink** first (`in`): no rule of the jail that admits it there is a block, because the host's own
 pf.conf decides then and blocks inbound traffic by default. All hops must pass; each
-prints the decision (`policy postgres rule 1 "who may reach PostgreSQL"`, a project policy, the managed policy of an app,
+prints the decision (`policy postgres rule 1 "who may reach PostgreSQL"`, a project policy,
 the isolation of projects, or the default of the anchor) and the rendered pf line. An address that belongs to no jail of
 the project is an external host: only the project's own end is evaluated. A global administrator who names the address of a
 jail of another project gets both anchors: the source's own rules and defaults, then the destination's `allow in` rules.
@@ -562,8 +561,7 @@ the extension `firewall_test`, operator in the project). From and To take a jail
 jails), one address or `host`; Protocol and Port (or an ICMP type) follow the command; the IP family can be chosen when
 both ends have both. **Run the test** (or Enter) asks; nothing runs while you type. The answer is drawn as a flow, From,
 what the source sends, what reaches the destination, To, each step with an icon and the word PASS, BLOCK or CANNOT SAY,
-the anchor, what decided in words (the policy and the number of the rule with its comment, a project policy, the managed
-policy of an app, the isolation of projects, the default of the anchor), and Details with the rendered pf line and the
+the anchor, what decided in words (the policy and the number of the rule with its comment, a project policy, the isolation of projects, the default of the anchor), and Details with the rendered pf line and the
 rules passed over (a disabled rule, the allow rules a deny rule won over). The question is kept in the address of the
 page (`from`, `to`, `proto`, `port`, `type`, `family`), so a link asks it again, and the equivalent
 `jailops firewall test` line is under the form with a Copy button. The answer is the server's: the console evaluates

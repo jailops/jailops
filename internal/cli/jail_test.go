@@ -516,6 +516,19 @@ func TestJailBase(t *testing.T) {
 	if strings.Join(up.AddPackages, " ") != "FreeBSD-ssh FreeBSD-ee" {
 		t.Fatalf("request: %+v", up)
 	}
+	// --all: every argument is a package, each FreeBSD jail of the project gets them; naming a jail as well is refused
+	tr.ok("jail", "create", "db", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
+	tr.ok("jail", "base", "add", "--all", "FreeBSD-bsdconfig")
+	var all api.JailUpgrade
+	if err := json.Unmarshal(h.lastBody("POST", "/api/v1/jails/db/upgrade"), &all); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(all.AddPackages, " ") != "FreeBSD-bsdconfig" {
+		t.Fatalf("--all request: %+v", all)
+	}
+	if _, errs, code := tr.do("", "jail", "base", "add", "--all"); code != 2 || !strings.Contains(errs, "base packages") {
+		t.Fatalf("--all without a package: %d %s", code, errs)
+	}
 	if out := tr.ok("jail", "base", "list", "web"); !strings.Contains(out, "FreeBSD-runtime") {
 		t.Fatalf("list: %s", out)
 	}

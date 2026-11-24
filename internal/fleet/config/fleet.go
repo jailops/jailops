@@ -149,10 +149,15 @@ type Object struct {
 	Hosts []string
 	// Build only applies to images: build the first generation when the host has none.
 	Build bool
-	// Start, After and Templates only apply to jails.
+	// Start, Templates, Recipes and Needs only apply to jails.
 	Start     bool
-	After     []model.Hook
 	Templates []string
+	// Recipes are the recipes of the jail, in the order they run, read from the repository and checked.
+	Recipes []RecipeSource
+	// Needs are jails of the same host and project whose recipes settle first.
+	Needs []string
+	// JailVars are the values every recipe of the jail receives for the variables it declares.
+	JailVars map[string]string
 	// SecretRefs are the secrets the object refers to.
 	SecretRefs []string
 
@@ -318,6 +323,9 @@ func (f *Fleet) loadMeta() error {
 	if err := model.CheckSimpleName(f.Meta.ID); err != nil {
 		return fmt.Errorf("%s: id: %w", FleetFile, err)
 	}
+	if _, err := f.DriftInterval(); err != nil {
+		return fmt.Errorf("%s: drift_interval: %w", FleetFile, err)
+	}
 	if h := f.Meta.Hub; h != nil {
 		if err := checkEndpoint(*h); err != nil {
 			return fmt.Errorf("%s: hub: %w", FleetFile, err)
@@ -361,7 +369,7 @@ func checkEndpoint(e model.Endpoint) error {
 	return nil
 }
 
-var topLevelDirs = map[string]bool{"hosts": true, "shared": true, "groups": true, "templates": true, "rollouts": true, "secrets": true, "projects": true, "profiles": true}
+var topLevelDirs = map[string]bool{"hosts": true, "shared": true, "groups": true, "templates": true, "rollouts": true, "secrets": true, "projects": true, "profiles": true, "recipes": true}
 
 func (f *Fleet) checkTopLevel() error {
 	ents, err := os.ReadDir(f.Path)
@@ -376,7 +384,7 @@ func (f *Fleet) checkTopLevel() error {
 		if e.IsDir() && topLevelDirs[n] {
 			continue
 		}
-		return fmt.Errorf("%s: unexpected entry at the top of the fleet repository (allowed: %s, hosts/, shared/, projects/, profiles/, groups/, templates/, rollouts/, secrets/)", n, FleetFile)
+		return fmt.Errorf("%s: unexpected entry at the top of the fleet repository (allowed: %s, hosts/, shared/, projects/, profiles/, groups/, templates/, rollouts/, recipes/, secrets/)", n, FleetFile)
 	}
 	return nil
 }
@@ -536,7 +544,7 @@ func (f *Fleet) loadHosts() error {
 		if spec.ViaHub && f.Meta.Hub == nil {
 			return fmt.Errorf("%s: via_hub needs a hub in %s", f.rel(p), FleetFile)
 		}
-		if len(doc.Hosts)+len(doc.Templates)+len(doc.After) > 0 || doc.Start {
+		if len(doc.Hosts)+len(doc.Templates)+len(doc.Recipes)+len(doc.Needs)+len(doc.Vars) > 0 || doc.Start {
 			return fmt.Errorf("%s: a Host document has only metadata and spec", f.rel(p))
 		}
 		if err := f.loadRemote(name, spec); err != nil {
@@ -595,11 +603,6 @@ func (f *Fleet) loadTemplates() error {
 		}
 		if _, has := spec.Jail["profiles"]; has {
 			return fmt.Errorf("%s: spec.jail.profiles: a template cannot list profiles; list them in the jail", f.rel(p))
-		}
-		for i, h := range spec.After {
-			if err := h.Validate(); err != nil {
-				return fmt.Errorf("%s: spec.after[%d]: %w", f.rel(p), i, err)
-			}
 		}
 		f.Templates[e.Name()] = &Template{Name: e.Name(), Spec: spec, Origin: f.rel(p)}
 	}
@@ -663,7 +666,7 @@ func (f *Fleet) loadShared() error {
 }
 
 func dirKind(dir string) (model.KindInfo, bool) {
-	for _, ki := range append(slices.Clone(model.Kinds), model.AppKinds...) {
+	for _, ki := range model.Kinds {
 		if ki.Dir == dir && !ki.NoDir {
 			return ki, true
 		}
@@ -850,14 +853,11 @@ func (f *Fleet) loadObjectDir(dir string, ki model.KindInfo, scope, project stri
 		if ki.Kind == api.KindJail && !isProjectDir {
 			return fmt.Errorf("%s: a jail belongs to a project: put it under projects/<project>/jails/ and name its host with `hosts: [<host>]`", f.rel(p))
 		}
-		if (ki.Kind == model.KindApp || ki.Kind == api.KindAppAccess) && !isProjectDir {
-			return fmt.Errorf("%s: an %s belongs to a project: put it under projects/<project>/%s/ and name its host with `hosts: [<host>]`", f.rel(p), ki.Kind, ki.Dir)
-		}
 		if !isProjectDir && scope != "shared" && len(doc.Hosts) > 0 {
 			return fmt.Errorf("%s: hosts: is only allowed under shared/ and projects/ (this file already belongs to host %s)", f.rel(p), scope)
 		}
-		if ki.Kind != api.KindJail && (len(doc.Templates) > 0 || doc.Start || len(doc.After) > 0) {
-			return fmt.Errorf("%s: templates, start and after apply to jails only", f.rel(p))
+		if ki.Kind != api.KindJail && (len(doc.Templates) > 0 || doc.Start || len(doc.Recipes) > 0 || len(doc.Needs) > 0 || len(doc.Vars) > 0) {
+			return fmt.Errorf("%s: templates, start, recipes, needs and vars apply to jails only", f.rel(p))
 		}
 		if doc.Build && ki.Kind != api.KindImage {
 			return fmt.Errorf("%s: build applies to images only", f.rel(p))
@@ -886,9 +886,13 @@ func (f *Fleet) loadObjectDir(dir string, ki model.KindInfo, scope, project stri
 		}
 		raw := doc.Spec
 		if ki.Kind == api.KindJail {
-			raw, o.After, o.Profiles, o.Provenance, err = f.expandJail(p, doc, proj)
+			raw, o.Profiles, o.Provenance, err = f.expandJail(p, doc, proj)
 			if err != nil {
 				return err
+			}
+			o.Needs, o.JailVars = doc.Needs, doc.Vars
+			if o.Recipes, err = f.loadRecipes(doc); err != nil {
+				return fmt.Errorf("%s: %w", f.rel(p), err)
 			}
 		}
 		spec, upgraded, err := model.DecodeSpecNotes(ki.Kind, raw)
@@ -896,11 +900,6 @@ func (f *Fleet) loadObjectDir(dir string, ki model.KindInfo, scope, project stri
 			return fmt.Errorf("%s: spec: %w", f.rel(p), err)
 		}
 		o.Upgraded = upgraded
-		if as, ok := spec.(model.AppAccessSpec); ok {
-			if err := as.Validate(); err != nil {
-				return fmt.Errorf("%s: spec: %w", f.rel(p), err)
-			}
-		}
 		o.Spec = spec
 		if js, ok := spec.(api.JailSpec); ok {
 			o.SecretRefs = secretRefs(js)
@@ -934,9 +933,9 @@ func (f *Fleet) profileFor(project, name string) *Profile {
 // expandJail builds the jail's raw spec: templates in order, then profiles in
 // order (later overrides earlier, device by device), then the jail's own keys.
 // The profiles key is removed from the result; sync sends the expanded spec.
-// Hooks are the templates' then the jail's own. Provenance records, per
+// Provenance records, per
 // top-level key, the last source that set it.
-func (f *Fleet) expandJail(p string, doc *model.File, project string) (map[string]any, []model.Hook, []string, map[string]string, error) {
+func (f *Fleet) expandJail(p string, doc *model.File, project string) (map[string]any, []string, map[string]string, error) {
 	merged := map[string]any{}
 	prov := map[string]string{}
 	apply := func(src map[string]any, label string) {
@@ -945,14 +944,12 @@ func (f *Fleet) expandJail(p string, doc *model.File, project string) (map[strin
 			prov[k] = label
 		}
 	}
-	var hooks []model.Hook
 	for _, tn := range doc.Templates {
 		t, ok := f.Templates[tn]
 		if !ok {
-			return nil, nil, nil, nil, fmt.Errorf("%s: unknown template %q", f.rel(p), tn)
+			return nil, nil, nil, fmt.Errorf("%s: unknown template %q", f.rel(p), tn)
 		}
 		apply(t.Spec.Jail, "template "+tn)
-		hooks = append(hooks, t.Spec.After...)
 	}
 	own := model.CloneMap(doc.Spec)
 	var profiles []string
@@ -961,7 +958,7 @@ func (f *Fleet) expandJail(p string, doc *model.File, project string) (map[strin
 		for _, e := range list {
 			n, _ := e.(string)
 			if n == "" {
-				return nil, nil, nil, nil, fmt.Errorf("%s: spec.profiles must be a list of profile names", f.rel(p))
+				return nil, nil, nil, fmt.Errorf("%s: spec.profiles must be a list of profile names", f.rel(p))
 			}
 			profiles = append(profiles, n)
 		}
@@ -970,18 +967,13 @@ func (f *Fleet) expandJail(p string, doc *model.File, project string) (map[strin
 	for _, pn := range profiles {
 		pr := f.profileFor(project, pn)
 		if pr == nil {
-			return nil, nil, nil, nil, fmt.Errorf("%s: unknown profile %q (not in profiles/ or projects/%s/profiles/)", f.rel(p), pn, project)
+			return nil, nil, nil, fmt.Errorf("%s: unknown profile %q (not in profiles/ or projects/%s/profiles/)", f.rel(p), pn, project)
 		}
 		apply(pr.Spec, "profile "+pn)
 	}
 	apply(own, "the jail")
 	model.StripAutoNames(merged)
-	for i, h := range doc.After {
-		if err := h.Validate(); err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("%s: after[%d]: %w", f.rel(p), i, err)
-		}
-	}
-	return merged, append(hooks, doc.After...), profiles, prov, nil
+	return merged, profiles, prov, nil
 }
 
 // resolveTargets expands host references and detects duplicate declarations.
@@ -1019,9 +1011,6 @@ func (f *Fleet) resolveTargets() error {
 			}
 			if o.Kind == api.KindJail && len(o.Hosts) != 1 {
 				return fmt.Errorf("%s: a jail is declared on exactly one named host (got %d); give `hosts:` one host", o.Origin, len(o.Hosts))
-			}
-			if (o.Kind == model.KindApp || o.Kind == api.KindAppAccess) && len(o.Hosts) != 1 {
-				return fmt.Errorf("%s: an %s is declared on exactly one named host (got %d); give `hosts:` one host", o.Origin, o.Kind, len(o.Hosts))
 			}
 			if o.Project != "" {
 				pdef := f.Projects[o.Project]

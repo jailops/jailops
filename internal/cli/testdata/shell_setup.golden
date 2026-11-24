@@ -28,7 +28,7 @@ jail/web configuration updated
 
 $ jailops jail shell-setup web
 jail/web: shell /usr/local/bin/bash, prompt default
-  PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '
+  PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_tag}:\w\$ '
   wrote /usr/local/etc/profile.d/jailops-prompt.sh
   the shell /usr/local/bin/bash is not installed in jail web; install it with: jailops pkg install web -- bash, or use sh: jailops shell web --shell /bin/sh
 
@@ -37,7 +37,7 @@ $ jailops jail shell-setup web -o json
   "jail": "web",
   "shell": "/usr/local/bin/bash",
   "prompt": "default",
-  "ps1": "\\[\\e[38;5;39m\\]\\u@\\h\\[\\e[0m\\]${_jailops_where:+ \\[\\e[38;5;245m\\][${_jailops_where}]\\[\\e[0m\\]}:\\w\\$ ",
+  "ps1": "\\[\\e[38;5;39m\\]\\u@\\h\\[\\e[0m\\]${_jailops_tag}:\\w\\$ ",
   "steps": [
     "wrote /usr/local/etc/profile.d/jailops-prompt.sh",
     "the shell /usr/local/bin/bash is not installed in jail web; install it with: jailops pkg install web -- bash, or use sh: jailops shell web --shell /bin/sh"

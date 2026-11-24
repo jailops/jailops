@@ -18,7 +18,7 @@ import (
 )
 
 // RenameProject renames a project whose jails are stopped: the project and every object of it (firewall policies,
-// address sets, backup policies, profiles, app access), its datasets on every storage with the mountpoints of its
+// address sets, backup policies, profiles), its datasets on every storage with the mountpoints of its
 // jails, the records and state files of its jails, its PF anchor, its provisioning files, the project lists of
 // users, tokens, trust tokens and certificates, and the log sinks that select it.
 func (s *Service) RenameProject(ctx context.Context, name string, o RenameOptions) (api.Operation, *api.RenameResult, error) {
@@ -186,7 +186,7 @@ func (s *Service) projectObjectSteps(p *renamePlan, from, to string) error {
 		kind api.Kind
 		noun string
 	}{{api.KindFirewallPolicy, "firewall policy"}, {api.KindAddressSet, "address set"}, {api.KindBackupPolicy, "backup policy"},
-		{api.KindProfile, "profile"}, {api.KindVolume, "volume"}, {api.KindAppAccess, "app access of jail"}} {
+		{api.KindProfile, "profile"}, {api.KindVolume, "volume"}} {
 		objs, err := s.d.State.ListIn(k.kind, from, "")
 		if err != nil {
 			return internal(err)

@@ -2,15 +2,13 @@
 // follows the server: every source keeps its own order, the newest 2000 lines are kept, and every source reports
 // where it continues; a stopped jail answers as one that is not mounted.
 import type { ApiErrorBody, Jail, LogEntry, LogForward, LogForwardSpec, LogForwardTestResult, LogSink, LogSinkStatus, LogSource, LogsRead } from '@jailops/shared/api/types'
-import type { DemoRead } from './apps'
-import { LABEL } from './apps'
+import type { DemoRead } from './jaillogs'
 
 const MAX_SOURCES = 50
 const MAX_LINES = 2000
 
 interface Reader {
-  list(jail: string, app: string): Array<{ name: string; kind: string; compressed?: boolean }>
-  entries(jail: string, app: string, file: string, q: URLSearchParams): DemoRead | 'missing' | 'compressed'
+  entries(jail: string, file: string, q: URLSearchParams): DemoRead | 'missing' | 'compressed'
 }
 
 export type DemoReply = { ok: unknown; etag?: string } | { status: number; error: ApiErrorBody }
@@ -22,7 +20,6 @@ export function unifiedRead(jails: Jail[], logs: Reader, q: URLSearchParams): De
   if (!all && !project) return { status: 400, error: { code: 'invalid', message: 'a project is required', hint: 'name one with ?project=, or ask for all_projects=true' } }
   const names = q.getAll('jail')
   const labels = q.getAll('label').map((l) => l.split('='))
-  const app = q.get('app') ?? ''
   const file = q.get('file') || 'messages'
   let cursor: Record<string, number> = {}
   try { cursor = JSON.parse(q.get('cursor') || '{}') } catch { return { status: 400, error: { code: 'invalid', message: 'cursor is the next map of a previous reply, as JSON' } } }
@@ -30,15 +27,9 @@ export function unifiedRead(jails: Jail[], logs: Reader, q: URLSearchParams): De
     .filter((j) => all || (j.metadata.project ?? '') === project)
     .filter((j) => !names.length || names.includes(j.metadata.name))
     .filter((j) => labels.every(([k, v]) => j.metadata.labels?.[k] === v))
-    .filter((j) => !app || j.metadata.labels?.[LABEL] === app)
     .sort((a, b) => `${a.metadata.project}/${a.metadata.name}`.localeCompare(`${b.metadata.project}/${b.metadata.name}`))
-  const pairs: Array<{ j: Jail; app: string; file: string }> = []
-  for (const j of chosen) {
-    const a = j.metadata.labels?.[LABEL] ?? ''
-    pairs.push({ j, app: a, file })
-    // the logs an installed app declares below /var/log: the demo's apps keep them in a directory of their own
-    if (q.get('app_logs') === 'true' && a && j.status.power !== 'stopped') for (const f of logs.list(j.metadata.name, a)) if (f.kind === 'active' && f.name.includes('/') && f.name !== file) pairs.push({ j, app: a, file: f.name })
-  }
+  const pairs: Array<{ j: Jail; file: string }> = []
+  for (const j of chosen) pairs.push({ j, file })
   const truncatedSources = pairs.length > MAX_SOURCES
   const sources: LogSource[] = []
   const next: Record<string, number> = {}
@@ -47,7 +38,7 @@ export function unifiedRead(jails: Jail[], logs: Reader, q: URLSearchParams): De
     const name = p.j.metadata.name
     const proj = p.j.metadata.project ?? ''
     const key = `${proj}/${name}/${p.file}`
-    const src: LogSource = { key, project: proj, jail: name, file: p.file, next_offset: 0, ...(p.app ? { app: p.app } : {}) }
+    const src: LogSource = { key, project: proj, jail: name, file: p.file, next_offset: 0 }
     sources.push(src)
     if (p.j.status.power === 'stopped') {
       src.error = { code: 'busy', message: `jail "${name}" is not mounted`, hint: `start the jail, or mount its root dataset on the host: zfs mount tank/jailops/${proj}/${name}/root` }
@@ -56,7 +47,7 @@ export function unifiedRead(jails: Jail[], logs: Reader, q: URLSearchParams): De
     const rq = new URLSearchParams()
     for (const k of ['since', 'grep', 'limit']) if (q.get(k)) rq.set(k, q.get(k)!)
     if (cursor[key] !== undefined) rq.set('offset', String(cursor[key]))
-    const r = logs.entries(name, p.app, p.file, rq)
+    const r = logs.entries(name, p.file, rq)
     if (r === 'missing') { src.error = { code: 'not_found', message: `jail "${name}" has no log file "${p.file}"` }; continue }
     if (r === 'compressed') { src.error = { code: 'invalid', message: `${p.file} is not readable (compressed)` }; continue }
     src.next_offset = next[key] = r.next_offset
@@ -65,7 +56,7 @@ export function unifiedRead(jails: Jail[], logs: Reader, q: URLSearchParams): De
     r.entries.forEach((l, i) => {
       // a line that starts with blanks carries no time of its own, as the server reads it
       const own = !/^\s/.test(l.text)
-      merged.push({ ts: l.ts, src: idx, i, e: { project: proj, jail: name, file: p.file, line: l.text, ...(p.app ? { app: p.app } : {}), ...(own ? { time: new Date(l.ts).toISOString() } : {}) } })
+      merged.push({ ts: l.ts, src: idx, i, e: { project: proj, jail: name, file: p.file, line: l.text, ...(own ? { time: new Date(l.ts).toISOString() } : {}) } })
     })
   }
   merged.sort((a, b) => a.ts - b.ts || a.src - b.src || a.i - b.i)
@@ -82,7 +73,7 @@ const ago = (s: number) => new Date(Date.now() - s * 1000).toISOString()
 function fileSinks(): LogSink[] {
   return [
     { name: 'central', type: 'syslog', to: 'tls://logs.example.com:6514', facility: 'local3', ca_file: '/usr/local/etc/jailops/sinks/logs-ca.pem', sources: { audit: true } },
-    { name: 'alerts', type: 'webhook', to: 'https://hooks.example.com/jailops/logs', token_file: '/usr/local/etc/jailops/sinks/hook.token', queue: 2000, sources: { labels: { role: 'web' }, no_app_logs: true } },
+    { name: 'alerts', type: 'webhook', to: 'https://hooks.example.com/jailops/logs', token_file: '/usr/local/etc/jailops/sinks/hook.token', queue: 2000, sources: { labels: { role: 'web' } } },
   ]
 }
 

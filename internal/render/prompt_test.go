@@ -160,6 +160,15 @@ var trickyPrompts = []string{
 	`→ \W ✓ `,
 }
 
+// bakedPS1 is the PS1 a prompt file leaves when none of the variables of the jail is set: the references are values taken
+// when the file is read, so with none set they are empty (FreeBSD's sh on 15.1 expands nothing in PS1 when it shows it).
+func bakedPS1(ps1 string) string {
+	for _, ref := range append(api.PromptRefs(), api.TagRef()) {
+		ps1 = strings.ReplaceAll(ps1, ref, "")
+	}
+	return ps1
+}
+
 func TestPromptFileIsInertInTheShells(t *testing.T) {
 	dir := t.TempDir()
 	mark := filepath.Join(dir, "MARK")
@@ -182,7 +191,7 @@ func TestPromptFileIsInertInTheShells(t *testing.T) {
 		}
 		// an interactive sh assigns the text as it is (FreeBSD's sh reads the same prompt file)
 		out, err = exec.Command("sh", "-i", "-c", `PS1=x; . "$1"; printf %s "$PS1"`, "sh", f).Output()
-		if err != nil || string(out) != ps1 {
+		if err != nil || string(out) != bakedPS1(ps1) {
 			t.Fatalf("sh -i with %q: %q %v", ps1, out, err)
 		}
 		// bash assigns the text exactly and expanding it as a prompt runs nothing.
@@ -193,7 +202,7 @@ func TestPromptFileIsInertInTheShells(t *testing.T) {
 		cmd := bashI(t, bash, `PS1=x; . "$1"; printf '%s\n' "$PS1"; printf '%s' "${PS1@P}" >/dev/null`, "bash", f)
 		cmd.Dir = dir
 		out, err = cmd.Output()
-		if err != nil || string(out) != ps1+"\n" {
+		if err != nil || string(out) != bakedPS1(ps1)+"\n" {
 			t.Fatalf("bash with %q: %q %v", ps1, out, err)
 		}
 		if _, err := os.Stat(mark); err == nil {
@@ -356,5 +365,86 @@ func TestShrcHookSetAppendsTheBlockAfterTheFilesOwnLines(t *testing.T) {
 	}
 	if _, err := ShrcHookSet(promptBegin+"\nx\n", true); err == nil {
 		t.Fatal("a block without an end is an error")
+	}
+}
+
+// With the variables of a jail set, the tag and the values are in the PS1 text the file leaves: FreeBSD's sh expands
+// nothing when it shows the prompt, so no reference may be left in it, in sh or in bash.
+func TestPromptFileBakesTheValues(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "prompt.sh")
+	for _, ps1 := range []string{api.DefaultPS1(40), api.EffectivePS1(`\u@{jail} {project}/{host}:\w\$ `, 40)} {
+		body, err := PromptFile(ps1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(f, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("sh", "-i", "-c", `PS1=x; . "$1"; printf %s "$PS1"`, "sh", f)
+		cmd.Env = append(os.Environ(), "JAILOPS_PROJECT=shop", "JAILOPS_HOST=babel", "JAILOPS_JAIL=db")
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := string(out)
+		if strings.Contains(got, "${") || !strings.Contains(got, "shop") || !strings.Contains(got, "babel") {
+			t.Fatalf("sh -i with %q: %q", ps1, got)
+		}
+	}
+}
+
+// An environment value the shell inherited never becomes code or text of the prompt: the variables script unsets
+// the three variables, the prompt file makes anything but a lower-case word empty (when it is read alone too), and
+// bash, which expands the baked PS1 at every prompt, runs nothing.
+func TestPromptIgnoresHostileInheritedValues(t *testing.T) {
+	dir := t.TempDir()
+	mark := filepath.Join(dir, "MARK")
+	envFile := filepath.Join(dir, "env.sh")
+	if err := os.WriteFile(envFile, []byte(EnvScript()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// a sysctl that says nothing, so only the inherited values are in play
+	if err := os.WriteFile(filepath.Join(dir, "sysctl"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bash, bashErr := exec.LookPath("bash")
+	for _, hostile := range []string{"$(touch MARK)", "`touch MARK`", "it'\"s", "web\nx", "a b", "WEB", `\$(touch MARK)`, "*"} {
+		for _, withEnv := range []bool{true, false} {
+			for _, ps1 := range []string{api.DefaultPS1(40), api.EffectivePS1(`{jail} {project}/{host}\$ `, 40)} {
+				body, err := PromptFile(ps1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pf := filepath.Join(dir, "prompt.sh")
+				if err := os.WriteFile(pf, []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				script := `. "$1"; `
+				if !withEnv {
+					script = ""
+				}
+				script += `. "$2"; printf '%s' "$PS1"; `
+				env := []string{"PATH=" + dir + ":/usr/bin:/bin", "JAILOPS_JAIL=" + hostile, "JAILOPS_PROJECT=" + hostile, "JAILOPS_HOST=" + hostile}
+				cmd := exec.Command("sh", "-i", "-c", script, "sh", envFile, pf)
+				cmd.Dir, cmd.Env = dir, env
+				out, err := cmd.Output()
+				if err != nil || string(out) != bakedPS1(ps1) {
+					t.Errorf("sh -i, %q, env=%v: %q %v", hostile, withEnv, out, err)
+				}
+				if bashErr != nil {
+					continue
+				}
+				cmd = bashI(t, bash, script+`printf '%s' "${PS1@P}" >/dev/null`, "bash", envFile, pf)
+				cmd.Dir, cmd.Env = dir, env
+				out, err = cmd.Output()
+				if err != nil || string(out) != bakedPS1(ps1) {
+					t.Errorf("bash, %q, env=%v: %q %v", hostile, withEnv, out, err)
+				}
+				if _, err := os.Stat(mark); err == nil {
+					t.Fatalf("a value %q ran a command (env=%v)", hostile, withEnv)
+				}
+			}
+		}
 	}
 }

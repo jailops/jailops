@@ -6,7 +6,7 @@ the build tooling, the architecture tests and the Go embed tests are all driven 
 
 | App | Binary | Embed package | Dist directory | API role | URL prefixes it may call (under `/api/v1`) |
 |---|---|---|---|---|---|
-| `host` | `jailopsd` | `internal/webui` | `internal/webui/dist` | host (also hub) | jails, projects, storage, trust, sessions, profiles, updates, images, apps, networks, firewall, backup-targets, backup-policies, backups, restores, remotes, operations, events, audit, users, certificates, resources, logs, plus the shared set |
+| `host` | `jailopsd` | `internal/webui` | `internal/webui/dist` | host (also hub) | jails, projects, storage, trust, sessions, profiles, updates, images, networks, firewall, backup-targets, backup-policies, backups, restores, remotes, operations, events, audit, users, certificates, resources, logs, plus the shared set |
 | `backup` | `jailops-backupd` | `internal/backupui` | `internal/backupui/dist` | backup | repo, hosts, enrolment, snapshots, retention, gc, verify, quarantine, maintenance, deletions, operations, events, audit, plus the shared set |
 
 The shared set (`shared/src/api/core.ts`) is the server info at `/api/v1`, `auth`, `doctor` and `tokens`.
@@ -75,16 +75,11 @@ In the demo, an image whose name starts with `fail` fails to build, one that sta
 `freebsd-15-1` has the nightly upgrade on with an ok run and two unchanged ones; `?demo=nightlyfail` adds a failed night on
 top. The demo accepts the PATCH and checks the time as the server does.
 
-## Apps and logs (host console)
+## Logs (host console)
 
-`/apps` is the app catalog and its Installed tab, `/apps/:name` one definition with the install dialog
-(`src/views/AppsView.vue`, `AppDetailView.vue`, `src/components/AppInstallDialog.vue`). The install follows the
-operation like every other dialog (`runOp`), with a poll that also reads the operation's progress: the server sets it
-after each step, so `lib/apps.ts` maps it onto the step list of the dry run. The jail's Logs tab
-(`src/components/JailLogsTab.vue`) reads `/jails/{name}/logs`; following polls once a second from `next_offset`.
+The jail's Logs tab (`src/components/JailLogsTab.vue`) reads `/jails/{name}/logs`; following polls once a second from `next_offset`.
 `lib/logs.ts` holds the follow state and strips terminal control characters; log lines are only ever rendered as
-text. The demo serves a catalog, installations and growing log files (`src/demo/apps.ts`); `?demo` jail names that
-start with `fail` show a failed installation.
+text. The demo serves growing log files (`src/demo/jaillogs.ts`).
 
 `/logs` (`src/views/LogsView.vue`) reads `GET /logs`: the ends of many jails' files merged by time, filtered from the
 address (`?jail=web&since=1h`, `project=*` for every project) and followed every two seconds with the reply's `next` map as
@@ -96,7 +91,7 @@ the cursor (`lib/logs.ts`). Its Forwarding tab, for a global admin, edits the si
 **Quick switcher** (`src/components/QuickSwitcher.vue`, the index in `composables/search.ts`, the ranking in
 `lib/search.ts`): `Ctrl+K` (`Cmd+K`) anywhere except inside the terminal, `/` where no text is typed, or the Search
 button at the top of the side bar (the top bar on a phone). It searches the jails of the current project (name, image,
-addresses, labels as `key=value`, the app of an installed jail), the app catalog, images, networks, projects, storage
+addresses, labels as `key=value`), images, networks, projects, storage
 and the console's pages, with the label terms of the jail filter (`env=prod`, `team:`, `-tier=edge`). **Every project**
 searches the jails of all the projects the identity may use (choosing one switches to its project, as the project
 switcher does); the choice is remembered. Matches rank whole name, prefix, start of a part, anywhere, then letters in
@@ -193,7 +188,7 @@ new name that starts with `fail` fails the operation and changes nothing.
 ## Interface conventions (shared by every console)
 
 - **Confirmations** (`shared/src/composables/confirm.ts`, `ConfirmDialog.vue`): tier 1 runs at once (start, snapshot,
-  preview); tier 2 asks and names what is affected (stop or restart a running jail, image upgrade, uninstall an app);
+  preview); tier 2 asks and names what is affected (stop or restart a running jail, image upgrade);
   tier 3 needs the name typed (delete a jail, data rollback, delete a project, a volume, a network with jails, a
   firewall policy in use). The button label alone is never the warning.
 - **Names**: `shared/src/lib/names.ts` holds the server's name rules and their hints; a form never writes its own regex.
@@ -208,6 +203,5 @@ new name that starts with `fail` fails the operation and changes nothing.
   `bytes()` (binary units, a decimal only when it is not zero), `plural()` for counts, `sentence()` for words that come
   from the server. API paths and error codes are never shown as such: `lib/describe.ts` turns them into links and words.
 - **Verbs**: Create and Delete for objects (jail, network, project, policy, token, user), Add and Remove for members
-  of a list (a peer, a rule, a sink, a nameserver), Revoke for access (a token, a session, a certificate), Install and
-  Uninstall for apps. A button says the verb and the object ("Create network"), a dialog title says it with the name
-  ("Delete jail web"). Spelling is British, as in the documentation (neighbour, enrol, utilisation).
+  of a list (a peer, a rule, a sink, a nameserver), Revoke for access (a token, a session, a certificate). A button says the verb and the object ("Create network"), a dialog title says
+  it with the name ("Delete jail web"). Spelling is British, as in the documentation (neighbour, enrol, utilisation).

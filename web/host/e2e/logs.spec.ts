@@ -27,16 +27,17 @@ test('the Logs page merges the jails of the project by time, with a chip per jai
   expect([...times].sort()).toEqual(times)
 })
 
-test('filters travel in the address, and the app logs bring lines without a time of their own', async ({ page }) => {
+test('filters travel in the address, and a file of a service brings lines without a time of their own', async ({ page }) => {
   await open(page, '/logs?jail=db&since=1d')
   const view = page.getByTestId('ul-view')
   await expect(view.locator('.ulog-line').first()).toBeVisible()
   await expect(view.locator('.ulog-line:not([data-jail="db"])')).toHaveCount(0)
   await expect(page.locator('[data-jail="db"][aria-pressed="true"]')).toBeVisible()
-  await page.getByTestId('ul-app-logs').check()
+  await page.getByTestId('ul-file').fill('postgresql/postgresql.log')
+  await page.getByTestId('ul-apply').click()
+  await expect(page).toHaveURL(/file=postgresql/)
   await expect(view).toContainText('db/postgresql/postgresql.log')
   await expect(view).toContainText('DETAIL:')
-  expect(page.url()).toContain('app_logs=true')
   // text filter, applied by the server
   await page.getByTestId('ul-grep').fill('checkpoint')
   await page.getByTestId('ul-apply').click()

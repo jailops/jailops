@@ -31,6 +31,10 @@ type kindDesc[T any] struct {
 	parse func(meta api.ObjectMeta, doc map[string]any, name string) (T, error)
 	// setSpec copies the editable parts of src into dst.
 	setSpec func(dst *T, src T)
+	// existing is set for a kind that 'apply -f' never changes in everything: given the object that exists and the
+	// document, it returns the object to compare and update, or refuses a document that asks for what apply never
+	// changes. nil means setSpec.
+	existing func(cur, want T) (T, error)
 
 	list   func(ctx context.Context, c *sdk.Client, opts ...sdk.ListOption) iter.Seq2[T, error]
 	get    func(ctx context.Context, c *sdk.Client, name string) (T, string, error)

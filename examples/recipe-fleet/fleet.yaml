@@ -1,0 +1,5 @@
+# The fleet id is the ownership marker "managed_by: sync:recipes" on every object jailops-sync creates.
+id: recipes
+# How often sync looks inside a running jail again to see whether a recipe still holds (default 1h).
+# plan and drift always look.
+drift_interval: 30m

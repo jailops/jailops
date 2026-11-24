@@ -128,7 +128,6 @@ describe('the flow of a result', () => {
   })
   it('says which kind of rule decided', () => {
     expect(decisionOf({ stage: 'policy', policy: 'p', project_policy: true, rule: 1, pf: '' }).kind).toBe('projectPolicy')
-    expect(decisionOf({ stage: 'policy', policy: 'app-db', managed: true, rule: 1, pf: '' }).kind).toBe('managedPolicy')
     expect(decisionOf({ stage: 'default', pf: '' }).kind).toBe('default')
     expect(decisionOf({ stage: 'isolation', pf: '' }).kind).toBe('isolation')
     expect(decisionOf({ stage: 'antispoof', pf: '' }).kind).toBe('fixed')

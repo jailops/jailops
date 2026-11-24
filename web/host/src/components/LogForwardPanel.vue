@@ -40,7 +40,6 @@ function scope(k: LogSink): string {
   if (x.labels && Object.keys(x.labels).length) parts.push(Object.entries(x.labels).map(([a, b]) => `${a}=${b}`).join(', '))
   if (x.exclude_jails?.length || (x.exclude_labels && Object.keys(x.exclude_labels).length)) parts.push(`${s.forward.excludeJails.toLowerCase()} ${[...(x.exclude_jails ?? []), ...Object.entries(x.exclude_labels ?? {}).map(([a, b]) => `${a}=${b}`)].join(', ')}`)
   const out = [parts.length ? parts.join('; ') : s.forward.scopeAll, s.forward.filesOf((x.files?.length ? x.files : ['messages']).join(', '))]
-  if (!x.no_app_logs) out.push(s.forward.withAppLogs)
   if (x.audit) out.push(s.forward.withAudit)
   return out.join(', ')
 }

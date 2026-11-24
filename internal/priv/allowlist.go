@@ -416,8 +416,7 @@ var CommandRules = []Rule{
 		Flags:      []flagRule{{Flag: "-r", Path: pathJailTree}, {Flag: "-j", Check: checkPkgJail}, {Flag: "-o", Check: checkPkgOption, Many: true}},
 		OneOfFlags: []string{"-r", "-j"},
 		Exact:      [][]string{{"config", "abi"}},
-		// the packages installed on purpose, for an app draft (internal/apps.PkgLeavesArgv)
-		RestExact: [][]string{{"query", "-e", "%a = 0", "%n %v %R %w"},
+		RestExact: [][]string{
 			// the catalogue of the private repository, read into a scratch root: what a jail's upgrade compares with
 			{"rquery", "-r", "jailops", "%n %v %sb"},
 			// the audit of a jail: the packages of a copy of its database against the host's vulnerability database,

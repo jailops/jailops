@@ -29,7 +29,7 @@ func (a *app) ruleCmd() *cobra.Command {
 		`Add, list, change, move, switch on and off and remove the rules of a policy, one at a time. A rule is
 addressed by its number (the # column of 'jailops firewall rule list' and of 'policy show') or by its name. A rule that
 sits earlier in the list has a lower number; a deny rule wins over every allow rule whatever the order. The rules
-of a policy that app access manages, and of a mandatory policy of the project (unless you are a global administrator),
+of a mandatory policy of the project (unless you are a global administrator),
 are not changed here.`,
 		`jailops firewall rule list web
 jailops firewall rule add web in --action allow --proto tcp --port 22 --from set:office --comment "ssh from the office"

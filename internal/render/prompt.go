@@ -18,12 +18,14 @@ import (
 // JAILOPS_HOST in the shell that sources it. Any tool may write that buffer, so only a line whose key is one of the
 // three names is used, and only when its
 // value is made of lower-case letters, digits and hyphens (the letters are spelled out, so no locale widens the
-// range): nothing a value holds can be run or end an assignment. It is POSIX sh and runs one sysctl when a shell
-// starts.
+// range): nothing a value holds can be run or end an assignment. The three variables (and the tag of the prompt) are
+// unset first, so a value the shell inherited never stays when the sysctl does not carry the key. It is POSIX sh and
+// runs one sysctl when a shell starts.
 func EnvScript() string {
 	return `# Managed by JailOps: where this jail is. The same text in every jail (jailops jail shell-setup JAIL writes it).
 # The host starts the jail with the parameters env.jailops_jail, env.jailops_project and env.jailops_host; here they
 # are lines key=value of the sysctl security.jail.env (sysctl -n security.jail.env), and this file exports those three.
+unset JAILOPS_JAIL JAILOPS_PROJECT JAILOPS_HOST _jailops_tag
 while IFS='=' read -r _jailops_k _jailops_v; do
 	case "$_jailops_v" in '' | *[!abcdefghijklmnopqrstuvwxyz0123456789-]*) continue ;; esac
 	case "$_jailops_k" in
@@ -61,12 +63,32 @@ func PromptFile(ps1 string) (string, error) {
 	b.WriteString("# the end of ~/.shrc, after ~/.profile: set a PS1 of your own below the JailOps block of ~/.shrc.\n")
 	b.WriteString("# Only an interactive shell (sh or bash) sets the prompt; scripts, sh -c and bash -c are not affected.\n")
 	b.WriteString("case \"$-\" in\n*i*)\n")
+	for _, l := range api.VarCheckLines() {
+		b.WriteString("\t" + l + "\n")
+	}
 	if api.PromptUsesWhere(ps1) {
 		b.WriteString("\t" + api.WhereLine() + "\n")
+		for _, l := range api.TagLines() {
+			b.WriteString("\t" + l + "\n")
+		}
 	}
-	b.WriteString("\tPS1='" + ps1 + "'\n")
+	b.WriteString("\tPS1='" + bakePS1(ps1) + "'\n")
 	b.WriteString("\t;;\nesac\n")
 	return b.String(), nil
+}
+
+// bakePS1 turns the references of a PS1 text (the variables of EnvFile and the tag) into values taken when the prompt file
+// is read: '..'"${_jailops_tag}"'..'. FreeBSD's sh on 15.1 expands nothing in PS1 when it shows the prompt (a reference
+// stays as the text ${name}; the 16.0 test VM expands a plain ${name} only), bash expands everything, so the one way
+// that works in both is to put the values in the text at once. The text then holds nothing the shell could run later
+// because a value is only a word of lower-case letters, digits and hyphens (api.VarCheckLines, which the prompt file
+// runs first, makes any other inherited value empty, and EnvScript unsets the variables before it reads them) or the tag
+// the prompt file built itself from such words and fixed text: no backslash, no quote, no dollar sign.
+func bakePS1(ps1 string) string {
+	for _, ref := range append(api.PromptRefs(), api.TagRef()) {
+		ps1 = strings.ReplaceAll(ps1, ref, `'"`+ref+`"'`)
+	}
+	return ps1
 }
 
 // The marked block at the top of the two start-up files of bash (api.ProfilePath, read by a login bash, and api.BashrcPath,
@@ -141,5 +163,9 @@ func ShrcHookSet(existing string, withPrompt bool) (string, error) {
 	if rest != "" && !strings.HasSuffix(rest, "\n") {
 		rest += "\n"
 	}
-	return rest + promptBegin + "\n" + "if [ -r " + api.PromptFile + " ]; then . " + api.PromptFile + "; fi\n" + promptEnd + "\n", nil
+	// a non-login sh (jailops shell, jexec) reads only $ENV, not /etc/profile and so not the directory profile.d: the
+	// block sources the file that derives the variables of the jail as well, before the prompt file that uses them
+	return rest + promptBegin + "\n" +
+		"if [ -r " + api.EnvFile + " ]; then . " + api.EnvFile + "; fi\n" +
+		"if [ -r " + api.PromptFile + " ]; then . " + api.PromptFile + "; fi\n" + promptEnd + "\n", nil
 }

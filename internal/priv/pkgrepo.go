@@ -291,7 +291,7 @@ func (l *Local) scriptsAllowed(ctx context.Context, root string) bool {
 
 // NeverStartedFile is the file in the container of a jail that says no jail has run in its root yet: the daemon writes it
 // when it makes the jail and removes it at the first start. Its root is then the copy of the image and nothing a tenant
-// could have prepared, so the package scripts of an installation from the host (an app's packages) may run.
+// could have prepared, so the package scripts of an installation from the host may run.
 const NeverStartedFile = "never-started"
 
 // neverStarted says whether the container of the jail root holds NeverStartedFile (a regular file, not a link).

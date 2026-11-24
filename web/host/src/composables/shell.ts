@@ -78,3 +78,9 @@ export function saveJailTab(project: string, name: string, tab: string, scope = 
     /* storage blocked: every jail opens on its overview */
   }
 }
+
+/** A recipe is validated and applied with the role of the shell (operator in the project, extension jail_apply). */
+export function canApply(project?: string): boolean {
+  const r = session.role
+  return hasExt('jail_apply') && (!r || r === 'operator' || r === 'admin') && inScope(project)
+}

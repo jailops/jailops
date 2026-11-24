@@ -173,11 +173,11 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 						Verdict: string(r.Verdict), Why: r.Why, LoadedMatchesRendered: loaded[jailKey(*j)]}
 					if r.Rule != nil {
 						hop.DecidedBy = &api.FirewallTestRule{Stage: r.Rule.Origin.Stage, Policy: r.Rule.Origin.Policy, ProjectPolicy: r.Rule.Origin.ProjectPolicy,
-							Managed: r.Rule.Origin.Managed, Rule: r.Rule.Origin.RuleNo, Name: r.Rule.Origin.RuleName, Comment: r.Rule.Origin.Comment, SetBy: splitSetBy(r.Rule.Origin.SetBy), PF: r.Text}
+							Rule: r.Rule.Origin.RuleNo, Name: r.Rule.Origin.RuleName, Comment: r.Rule.Origin.Comment, SetBy: splitSetBy(r.Rule.Origin.SetBy), PF: r.Text}
 					}
 					for _, sk := range r.Skipped {
 						hop.Skipped = append(hop.Skipped, api.FirewallTestSkipped{Why: sk.Why, Rule: api.FirewallTestRule{Stage: sk.Rule.Origin.Stage,
-							Policy: sk.Rule.Origin.Policy, ProjectPolicy: sk.Rule.Origin.ProjectPolicy, Managed: sk.Rule.Origin.Managed, Rule: sk.Rule.Origin.RuleNo,
+							Policy: sk.Rule.Origin.Policy, ProjectPolicy: sk.Rule.Origin.ProjectPolicy, Rule: sk.Rule.Origin.RuleNo,
 							Name: sk.Rule.Origin.RuleName, Comment: sk.Rule.Origin.Comment, PF: an.Lines[sk.Rule.Line]}})
 					}
 					c.Hops = append(c.Hops, hop)
@@ -215,7 +215,7 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 							h := api.FirewallTestHop{Side: "forward", Jail: dst.jail.Metadata.Name, Anchor: an.Name, Direction: "in", Verdict: string(v), Why: why,
 								LoadedMatchesRendered: loaded[jailKey(*dst.jail)]}
 							if f != nil {
-								h.DecidedBy = &api.FirewallTestRule{Stage: f.Origin.Stage, Policy: f.Origin.Policy, ProjectPolicy: f.Origin.ProjectPolicy, Managed: f.Origin.Managed,
+								h.DecidedBy = &api.FirewallTestRule{Stage: f.Origin.Stage, Policy: f.Origin.Policy, ProjectPolicy: f.Origin.ProjectPolicy,
 									Rule: f.Origin.RuleNo, Name: f.Origin.RuleName, Comment: f.Origin.Comment}
 							}
 							return h

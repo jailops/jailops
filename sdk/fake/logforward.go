@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"slices"
 	"sort"
-	"strings"
 
 	"jailops.net/jailops/sdk/api"
 )
@@ -65,7 +64,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	type src struct {
-		key, project, jail, app, file string
+		key, project, jail, file string
 	}
 	var srcs []src
 	keys := make([]string, 0, len(s.jails.items))
@@ -79,21 +78,10 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		if (project != "" && p != project) || !rc.canProject(p) {
 			continue
 		}
-		app := j.Metadata.Labels[api.LabelApp]
-		if (len(q.Jails) > 0 && !slices.Contains(q.Jails, name)) || (q.App != "" && app != q.App) || !matchLabels(j.Metadata.Labels, q.Labels) {
+		if (len(q.Jails) > 0 && !slices.Contains(q.Jails, name)) || !matchLabels(j.Metadata.Labels, q.Labels) {
 			continue
 		}
-		files := []string{q.File}
-		if q.AppLogs && app != "" && s.apps[app] != nil {
-			for _, l := range s.apps[app].detail.Definition.Logs {
-				if rel, ok := strings.CutPrefix(l.Path, "/var/log/"); ok && api.ValidLogFileName(rel) == nil && !slices.Contains(files, rel) {
-					files = append(files, rel)
-				}
-			}
-		}
-		for _, f := range files {
-			srcs = append(srcs, src{p + "/" + name, p, name, app, f})
-		}
+		srcs = append(srcs, src{p + "/" + name, p, name, q.File})
 	}
 	out := api.LogsRead{Lines: []api.LogEntry{}, Sources: []api.LogSource{}, Next: map[string]int64{}}
 	if len(srcs) > api.MaxLogSources {
@@ -103,7 +91,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	var merged []api.LogSourceLines
 	for _, sr := range srcs {
 		key := api.LogSourceKey(sr.project, sr.jail, sr.file)
-		ls := api.LogSource{Key: key, Project: sr.project, Jail: sr.jail, App: sr.app, File: sr.file}
+		ls := api.LogSource{Key: key, Project: sr.project, Jail: sr.jail, File: sr.file}
 		offset := q.Cursor[key]
 		data, ok := s.logs[sr.key][sr.file]
 		switch {
@@ -127,7 +115,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		for i, l := range rd.Lines {
 			lines[i] = l.Text
 		}
-		merged = append(merged, api.LogSourceLines{Project: sr.project, Jail: sr.jail, App: sr.app, File: sr.file, Lines: lines})
+		merged = append(merged, api.LogSourceLines{Project: sr.project, Jail: sr.jail, File: sr.file, Lines: lines})
 	}
 	s.logReads++
 	s.mu.Unlock()

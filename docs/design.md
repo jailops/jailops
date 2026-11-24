@@ -82,7 +82,7 @@ supported. `jailops doctor` fails on anything older than 15.1.
 ## 2. Components
 
 ```
-jailops          CLI (cobra). Uses only sdk/api and sdk, plus internal/apps (the pure catalog validator) for `app validate`.
+jailops          CLI (cobra). Uses only sdk/api and sdk.
 jailopsd         API daemon. Unprivileged. API, auth, state, reconcile, operations.
 jailops-priv     Root helper. Typed RPC over a unix socket. No shell, no free-form commands.
 jailops-sync     Fleet sync. Uses only sdk/api and sdk.
@@ -159,7 +159,7 @@ unit only, and a stored quota then compares equal to the one observed. The helpe
 
 ## 4. Jails and image generations
 
-An image is the seed of a jail, never its base afterwards. Every jail (FreeBSD, Linux, an app) is one independent system
+An image is the seed of a jail, never its base afterwards. Every jail (FreeBSD or Linux) is one independent system
 on one ZFS dataset of its own, copied from an immutable generation. A shared base that changes every jail at once cannot
 roll one jail back and ties every jail to the next build; an own root per jail upgrades and rolls back one jail at a time.
 
@@ -415,11 +415,7 @@ one, the jail's own policies (a list, each under its own heading with its own ru
 **Deny wins over allow:** when any of these policies has an enabled deny rule, the anchor writes the deny rules of all the policies first and
 then the allow rules (each group in the order of the policies and of the rules, with the headings and rule numbers of the policies), so that,
 every rule being `quick`, the order of the policies does not decide between an allow and a deny; the same two groups stand on the gateway
-interface. A rule with `disabled` is a comment line of the anchor (`# rule N (disabled): name`), not a rule. The managed policy `app-<jail>` (`managed_by:
-app-access`) is written only by `jailops app allow` and `deny` (8.7, apps.md "Who may connect"); the firewall routes
-refuse to change or delete it. An app's jail gets it, denying by default, when the installation ends: the default of the
-anchor is then deny whatever the jail's own policies say, and each grant is a `quick` allow rule for one source. The policy says
-`default_in: deny` and `default_out: allow`; a source is always in the app's own project, or an address.
+interface. A rule with `disabled` is a comment line of the anchor (`# rule N (disabled): name`), not a rule.
 
 ### 5.4 Bandwidth limits
 
@@ -458,8 +454,7 @@ leftover process still held its output as a success (the output after its exit i
 dataset `<pool>/jailops/logs`, mounted at `/var/log/jailops` (the setup makes it; the rc script makes the
 directory when the dataset does not exist yet), and newsyslog(8) rotates them
 (`/usr/local/etc/newsyslog.conf.d/jailops.conf`: 7 files of at most 1 MB, compressed). A file stays when the jail is
-deleted. A jail with `sysvipc` (a key of the jail spec, set by an app definition that asks for
-it) gets `sysvmsg = new; sysvsem = new; sysvshm = new;`: System V message queues, semaphores and shared memory of its
+deleted. A jail with `sysvipc` (a key of the jail spec, for software that asks for it, such as PostgreSQL) gets `sysvmsg = new; sysvsem = new; sysvshm = new;`: System V message queues, semaphores and shared memory of its
 own, separate from the host's and every other jail's (never `inherit`, which would share the host's; `allow.sysvipc`,
 which means the same, stays an admin allow-list flag and is refused together with `sysvipc`). The helper accepts
 exactly these lines and nothing else for those parameters. **[UNVERIFIED on FreeBSD: both, see section 16]**
@@ -536,7 +531,6 @@ equal to the code and fails for a kind without an entry.
 | Kind | Scope | Owner | Who may write | Where it lives |
 |---|---|---|---|---|
 | `AddressSet` | `fleet` | a project of this host | project administrator | state files of the host |
-| `AppAccess` | `host` | a project of this host | project administrator | state files of the host |
 | `Backup` | `host` | a project of this host | the daemon (no API write) | the backup node |
 | `BackupPolicy` | `fleet` | a project of this host | project administrator | state files of the host |
 | `BackupTarget` | `fleet` | this host | global administrator | state files of the host |
@@ -585,8 +579,7 @@ daemon refuse to start.
 
 Resources: server, projects, storage, images and generations, jails, snapshots, volumes, networks, firewall
 policies and address sets, backup targets, policies and backups, operations, events, remotes,
-tokens, trust tokens, certificates, users, storage, groups, rollouts and the application catalog (read-only;
-section 8.7).
+tokens, trust tokens, certificates, users, storage, groups, rollouts.
 
 ### 8.1 Projects, networks and storage
 
@@ -788,7 +781,7 @@ jailops apply -f site.yaml          # create or update every document of a file
   jail's lock without waiting): an in-place upgrade checks the root's links before pkg runs on it. The routes stream, so they are exempt from the body limit and deadlines.
 - **All logs at once, and forwarding.** `GET /api/v1/logs` (extension `logs_unified`, operator in every project read)
   takes the same per-jail reads for up to 50 files (default `messages` of every jail of the project, or of every
-  project the caller may use; the logs installed apps declare on request) and merges them by the timestamp each line
+  project the caller may use) and merges them by the timestamp each line
   starts with; a line without one keeps its place in its file; per-file offsets (`next`, sent back as `cursor`) let a
   client follow; at most 2000 lines. `jailops logs` and the console's Logs page are the clients. The daemon forwards the
   same files, and its audit log on request, to sinks (`internal/logfwd`): RFC 5424 syslog over udp, tcp or tls
@@ -871,53 +864,7 @@ CARP; it may offer CARP as an optional networking feature later. Failure recover
 health, placement and fencing rules, and no automatic promotion of stateful workloads happens without fencing. This
 is a direction under discussion, not a capability.
 
-### 8.7 The application catalog
-
-An **app** is a definition of a jail that runs packages: which packages (FreeBSD repository or `pkg.jailops.net`),
-which rc.d services and knobs, which ports, where the data, the configuration and the logs live, how to check that it
-runs, what to tell the person afterwards. The catalog is a directory of strict YAML files installed by the signed
-`jailops-apps` package (`apps.catalog_dir`, default `/usr/local/share/jailops/apps`); **the daemon reads local files and
-never fetches a catalog.** An invalid definition is listed with its reason and is never installable; that includes a
-definition written for a newer daemon (an unknown key, format version or category). The definitions are not in this
-repository: they live in the packages repository (`main/jailops-apps/apps/`), and `jailops-apps` has a version of its own,
-released by a pull request there without a JailOps release; `jailops` depends on it by name, any version. That CI checks
-them with `jailops app validate`, the daemon's validator run offline by the client. A reference copy for the tests is in
-`internal/apps/testdata/catalog/`. `GET /api/v1/apps`
-and `/api/v1/apps/<name>` are readable by any authenticated identity (route class `self`). The format, the rules and the
-installation (`POST /api/v1/apps/<name>/install`, operator in the project, extension `app_install`: one operation,
-a jail from the FreeBSD image of the highest release the host can run unless one is named, with the data paths as volumes, `pkg -r` from the host through the helper while the jail has never run, rc.conf
-written through the helper's file operations, setup commands and services through the in-jail exec, health check,
-snapshot `app-installed`, labels `jailops.app`, `jailops.app.hash`, `jailops.app.version`; a failure after the first
-start keeps the jail stopped for inspection) are in [apps.md](apps.md). A definition may ask for System V IPC
-(`sysvipc: true`, carried onto the jail spec, section 6); a service is started through a fixed `/bin/sh -c` wrapper
-that sends the rc script's output to a temporary file in the jail, so a daemon the script leaves behind does not hold
-the in-jail exec's pipes. UNVERIFIED on FreeBSD: the installation of the apps other than nginx; the end-to-end test
-installs nginx, and the others when `JAILOPS_E2E_APPS` names them.
-
-The host's own definitions live in a second directory, `apps.local_dir` (default `/usr/local/etc/jailops/apps`),
-read with the catalog on each request: a local definition is listed with `source: local` and wins over a packaged one
-of the same name (`overrides: catalog`), so an author tries an app on a host without a package. Two tools help write
-one (apps.md, "Write your own app"): `jailops app new` writes a commented starter offline, and `jailops app export`
-reads `GET /api/v1/jails/<name>/app-draft` (operator, extension `app_draft`, audited), a draft made from a running
-jail: the packages installed on purpose (`pkg -j <jail> query -e "%a = 0" "%n %v %R %w"` on the host, one exact form
-on the helper's allow-list, `RestExact` of the `pkg` rule), the services and knobs of its `rc.conf`, and, through the
-in-jail exec, `sockstat`, the names of files below `/usr/local/etc` and `/var/log` newer than pkg's database (`find`)
-and the owners of the app's directories (`stat`). It never reads a configuration file and leaves a secret-looking
-rc.conf knob out. Both write files that validate, with `TODO` markers that `jailops app validate` reports per line.
-
-**Who may connect** (apps.md, extension `app_access`). An installed app is closed: its installation ends by creating the
-managed firewall policy `app-<jail>` (5.2), denying by default. `jailops app allow APP --from SOURCE` (`POST
-/api/v1/jails/<n>/access/allow`, operator in the project, audited, answered at once and never kept as an operation result)
-adds an allow rule for one source (`jail:NAME`, `set:NAME`, an address or prefix, `host`) and, for a
-definition with the optional `access:` block (`type: postgresql`), makes a role and a database with `psql` run as
-`postgres` in the jail with the statements on stdin, sends the server only a SCRAM-SHA-256 verifier of a generated
-password, writes a managed block of `pg_hba.conf` through the helper's file operations, sets `listen_addresses` once and
-returns the connection string once. `deny` takes it back; a role is never changed or dropped unless the registry (state
-kind `AppAccess`) says JailOps made it, and no password is stored anywhere. `GET .../access` and doctor's `apps.access`
-show each grant with its rules, rendered anchor lines and `pg_hba.conf` lines, and what is missing on the host.
-UNVERIFIED on FreeBSD until the `postgresql-access` block of the end-to-end test has run.
-
-### 8.8 Renames
+### 8.7 Renames
 
 A name is chosen once and often wrong: a network called `lan` that should be `office`, a jail with a typo. An update
 keeps the name (it answers `invalid` and names the rename); a rename is its own action, `POST <object>/rename` with
@@ -928,7 +875,7 @@ the project's administrator for the rest), an audit entry and the event `<kind>-
 One planner per kind reads the state and lists every change as data: the object itself (a put by UUID with the new
 name; a project rename moves the objects of the project with it), every reference in other objects (project grants and
 image lists, jail specs in `spec.json` and `bundle.json`, policy rules `set:NAME`, set members `set:NAME`, profile keys, tunnel
-networks, app access grants made from a set, certificate and token scopes, stored log sinks), datasets (renamed, with
+networks, certificate and token scopes, stored log sinks), datasets (renamed, with
 their local mountpoints taken away deepest first and set again parents first, and the `jailops:` properties that hold
 the name), PF anchors named after the object (loaded under the new name, the old one flushed), the descriptions of
 interfaces, and files of the state directory keyed by the name. The list is a dry run's answer and, recorded in the
@@ -946,8 +893,8 @@ inside running jails too, so the ownership test of 5 still holds. Running jails 
 (`<project>_<name>`), and its mounts, epairs and anchor `jailops/<project>/<name>` are set up under it; renaming them
 under a running jail would leave the jail with mounts of datasets that moved and a poststop hook that cleans up the wrong
 names. A stopped jail has none of that; its next start renders everything under the new name. A jail with locked
-volumes, an interrupted run in the journal, an installation or an exec session in progress, or app access grants is
-refused too (deny, rename, allow again). The hostname of a jail is a key of its own and does not follow the name.
+volumes, an interrupted run in the journal, or an exec session in progress is
+refused too. The hostname of a jail is a key of its own and does not follow the name.
 
 What keeps the old name: the audit log, the operations, backups already taken (a restore of one asks for the image
 and project of that time) and the empty mountpoint directories of the old name. Storage, users, certificates, tunnels,
@@ -1122,6 +1069,8 @@ snapshot, send, stop, incremental send, start, verify. There is no live migratio
 never assumes shared storage.
 
 ## 11. Cluster mode (Raft)
+
+> **Not planned.** The owner decided that JailOps provides the primitives, not the orchestration (centralized management, independent hosts): see [roadmap.md](roadmap.md#not-planned). This section records the analysis that led to that decision and is not a plan.
 
 Cluster mode is not part of 1.0. 1.0 is standalone, the hub and the Git fleet; the data model is cluster-aware from the first
 milestone (UUIDs, `scope`, `generation`, versioned commands) so that cluster mode can arrive as an additive mode afterwards,
@@ -1312,10 +1261,10 @@ Open:
 | Replication between hosts | The primitives work (`internal/replicate` is a library); no API route or CLI command exists, so nothing a user can type replicates a jail |
 | Size of the SOPS dependency | `internal/fleet/vault` opens SOPS files with the `getsops/sops/v3` module, which brings about 200 packages of cloud key services (AWS, GCP, Azure, Vault and others) into `jailops-sync`, though JailOps uses age keys only; `jailops`, `jailopsd`, `jailops-priv` and `jailops-backupd` link none of them. Open: reading the SOPS file format with `filippo.io/age` alone (the age recipients, the MAC and the per-value AES-GCM of the format), which would drop them; not started |
 | Upgrades between JailOps versions | Tested: `go test ./internal/upgradecheck` opens the stored state of every release from 0.8.0 on with the current code, and the nightly `upgrade-e2e` workflow installs the newest released packages on a FreeBSD VM and replaces them with master's ([upgrade-guarantee.md](upgrade-guarantee.md)); the runbook is [lifecycle.md](lifecycle.md) |
-| Hardening after the review of the appliance release | Tested on Linux against the real allow-lists and stand-ins; UNVERIFIED on FreeBSD: file operations below a jail's tree opened at the tree (a ZFS mount) one directory at a time (the app access and log blocks of `scripts/ci-freebsd-e2e.sh`), the pid files in `/var/run` with the real `rc.subr` and `daemon(8)` (the services block checks them), `sysrc -x` when a host restore removes a variable it did not find set (the host blocks), `route -n get -inet default` read for the gateway of the WireGuard route checks (the WireGuard block) |
+| Hardening after the review of the appliance release | Tested on Linux against the real allow-lists and stand-ins; UNVERIFIED on FreeBSD: file operations below a jail's tree opened at the tree (a ZFS mount) one directory at a time (the log blocks of `scripts/ci-freebsd-e2e.sh`), the pid files in `/var/run` with the real `rc.subr` and `daemon(8)` (the services block checks them), `sysrc -x` when a host restore removes a variable it did not find set (the host blocks), `route -n get -inet default` read for the gateway of the WireGuard route checks (the WireGuard block) |
 | Hardening after the external audit of November 2026 | Tested on Linux through the helper's real guards, its socket and a stand-in for `zfs`: no dataset mounted on a storage root's directory, the root's directory set to root 0700 at start, reload and registration, root mountpoints refused on, above or inside system directories and the helper's own, `devices=off` on every root and never on through a request, `zfs receive` with `-x` for `mountpoint`, `sharenfs`, `sharesmb`, `jailed`, `keylocation`, `devices`, `setuid` and `exec`, write agents that make device nodes and setuid files only in a jail's root, the helper's socket in `/var/run/jailops-priv` (root, 0710). UNVERIFIED on FreeBSD: that `zfs set devices=off` and `zfs receive -x devices -x setuid -x exec` are accepted by the FreeBSD 15.1 ZFS (an unknown name would make every receive fail; `shareiscsi` is not on the list for that reason), what `devices=off` changes there (FreeBSD makes device nodes in devfs only), and the steps of `scripts/ci-freebsd-e2e.sh` that check the socket directory, the root's mode and `devices` |
-| Bash and the prompt of a jail ([shell.md](shell.md)) | Verified on FreeBSD 15.2-PRERELEASE amd64 (18.15, the shell block of `scripts/ci-freebsd-e2e.sh`): bash installed at the first start, the files, the prompt in an interactive and a login bash and in `jailops shell`, `~/.bashrc` winning, scripts and `sh` unaffected, `config set prompt` at once and `none`, `shell-setup`, bash and the prompt after an OS upgrade, an app installation's `set-up-shell` step (nginx). UNVERIFIED on FreeBSD: the first start by autostart and by `jailops jail unlock --start`, a failure without a package repository (the `ShellSetup` condition), the console's terminal against a real jail (the demo only) |
-| Renames (8.8) | Verified on FreeBSD 15.2-PRERELEASE amd64 (18.16, the renames block and the encrypted-volume block of `scripts/ci-freebsd-e2e.sh`): a network renamed under a running jail (descriptions on the host and inside the jail, the anchor, traffic through the NAT), a stopped jail with its datasets, mountpoints, kernel name and anchor, a stopped jail with an encrypted volume (its key stays loaded), a project with its jails, objects and token scopes. UNVERIFIED on FreeBSD: the recovery of a rename interrupted by a crash (tested with the fakes), a project or image on a second storage, a host profile rename. The empty mountpoint directories of the old names are left |
+| Bash and the prompt of a jail ([shell.md](shell.md)) | Verified on FreeBSD 15.2-PRERELEASE amd64 (18.15, the shell block of `scripts/ci-freebsd-e2e.sh`): bash installed at the first start, the files, the prompt in an interactive and a login bash and in `jailops shell`, `~/.bashrc` winning, scripts and `sh` unaffected, `config set prompt` at once and `none`, `shell-setup`, bash and the prompt after an OS upgrade. UNVERIFIED on FreeBSD: the first start by autostart and by `jailops jail unlock --start`, a failure without a package repository (the `ShellSetup` condition), the console's terminal against a real jail (the demo only) |
+| Renames (8.7) | Verified on FreeBSD 15.2-PRERELEASE amd64 (18.16, the renames block and the encrypted-volume block of `scripts/ci-freebsd-e2e.sh`): a network renamed under a running jail (descriptions on the host and inside the jail, the anchor, traffic through the NAT), a stopped jail with its datasets, mountpoints, kernel name and anchor, a stopped jail with an encrypted volume (its key stays loaded), a project with its jails, objects and token scopes. UNVERIFIED on FreeBSD: the recovery of a rename interrupted by a crash (tested with the fakes), a project or image on a second storage, a host profile rename. The empty mountpoint directories of the old names are left |
 | Exec with a terminal loses output | **Fixed.** A short command run through `jailops exec` with a pseudo-terminal (`jailops exec -t JAIL -- echo hi` under `script`) printed nothing in 5 of 12 runs on FreeBSD 15.2-PRERELEASE. Cause: the kernel hangs a terminal up when its session leader exits and drops the output the reader of the master has not taken yet (3 to 30% of 300 runs of `echo hi` in a Go test, all of them with a delayed reader). Fix: the helper starts itself as a small leader (`internal/priv/session_leader.go`) that owns the terminal, runs the command in a process group of its own in the foreground, reports the group and the exit status on a pipe, and stays until the helper has read the master empty; the terminal ends only then. Signals go to the command's group; the end-to-end flow runs 40 short commands with a terminal and every one prints its output (0 of 1500 runs of the Go test lost any). |
 | Bandwidth limits | `network.<name>.egress` is enforced with a dummynet pipe; traffic into the jail has no limit (design 5.4) |
 | Devfs ruleset loading by the helper | Rendered; the load through the helper is not verified |
@@ -1324,11 +1273,7 @@ Open:
 | Jail usage (`rctl -u`) | The parser follows the `resource=amount` format of rctl(8) (`maxproc`, `cputime`, `memoryuse`) and the helper rule is tested with fakes; neither has run against a host with `kern.racct.enable=1`. Interface counters are not reported: FreeBSD's `ifconfig` prints none, and `netstat -I` would need a rule of its own |
 | Port forwards of an exposure on the uplink | Rendered, and covered by phase 11 of `scripts/ci-freebsd-pf.sh`: a network's uplink is one end of an epair whose other end sits in a plain VNET jail that stands for a client on the uplink's network; its connection to the uplink address on the forwarded port reaches the jail through `rdr-anchor "jailops/*"`, the project anchor and the jail anchor, and a port that is not forwarded stays closed. The host cannot test a forward against itself (what it sends to its own address never arrives on an interface). Not covered: a physical uplink with a real remote machine. UNVERIFIED until the phase has run on a FreeBSD host |
 | `zfs_delegation` | The dataset `<container>/delegated` gets `jailed=on` (the helper sets it on that dataset only, for an admin, with `admin-zfs-delegation`), `jail.conf` names it with `zfs.dataset`, and the jail refuses to start when the property is missing. How `zfs.dataset` behaves with a delegated dataset on a running host is in the end-to-end block of `scripts/ci-freebsd-e2e.sh` |
-| Access to installed apps (`jailops app allow`, `deny`) | Built and tested against fakes of the jail runtime, pf and the file system, the helper's real checks for the psql, chown, chmod and restart vectors and the `pg_hba.conf` write, and the SCRAM verifier against RFC 7677. Not run on a host: an app closed by its managed policy (and the host's own connections refused), the rule of a grant in the loaded anchor, psql as postgres with the statements on stdin in a jail, the restart for `listen_addresses`, a client connecting with the printed string (the `postgresql-access` block of `scripts/ci-freebsd-e2e.sh`); cross-project grants and IPv6 sources are not in that block |
 | `sysvipc` and the console log | `sysvmsg/sysvsem/sysvshm = new` and `exec.consolelog` are rendered, accepted by the helper and tested against fakes; PostgreSQL's `initdb` in a jail with them, and a forgejo start (daemon(8) without `-f`) no longer holding `jail -c`, have not been run on a host |
-| App service start wrapper and package ownership | The `/bin/sh -c` start wrapper is tested with a real `sh` on the development host, not in a jail; the `chown` setup lines of the catalog (`pkg -r` leaves the directories of a package's user root-owned) are written from the ports' layout and not yet run |
-| App drafts (`jailops app export`) | The parsers of `sockstat -4 -6 -l -q`, `find ... -newer /var/db/pkg/local.sqlite`, `stat -f "%Su:%Sg %N"` and `pkg query -e "%a = 0" "%n %v %R %w"` (that `%R` is the repository a `pkg -r` installation recorded) are tested on written samples and the helper rule against the real allow-list; none of them has run in a jail on a host. The worked example of apps.md (memcached: the `memcached_flags` knob and the pid directory `/var/run/memcached` given to `nobody`) has not been installed on a host |
-| Catalog apps `isms`, `nsd`, `mail` | Validated by the catalog test (on the reference copy) and dry-run against the daemon with fakes; never installed on a host. isms: port 8080 and its answer, and an install from the `jailops` repository with `pkg -r`; nsd: package paths, rc.d name and the starter configuration; mail: package paths, Dovecot 2.4 syntax, PAM logins, Postfix's `set-permissions` after `pkg -r` (docs/apps.md, the catalog) |
 | Helper audit pid | The helper's audit lines do not carry the daemon's pid (`pid: 0`) |
 | Generic `zfs send`/`receive` through the helper socket | About 0.4 MB/s; cause not found, bypassed by `zfs.replicate` |
 | `pkg.jailops.net` | The repository host is not live; packages were installed from a local repository |

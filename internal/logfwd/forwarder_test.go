@@ -134,7 +134,7 @@ func newRig() *rig {
 		clock: &fakeClock{now: t0}, snd: &recSender{}}
 	r.jails = []Jail{
 		{Project: "web", Name: "a", LogDir: "/j/web_a/var/log", Labels: map[string]string{"tier": "front"}},
-		{Project: "web", Name: "b", LogDir: "/j/web_b/var/log", App: "nginx", AppFiles: []string{"nginx/error.log"}},
+		{Project: "web", Name: "b", LogDir: "/j/web_b/var/log"},
 		{Project: "db", Name: "c", LogDir: "/j/db_c/var/log"},
 	}
 	r.env = &Env{Hostname: "host1", Reader: r.rd, Offsets: r.off, Clock: r.clock, Jitter: func() float64 { return 0 },
@@ -166,11 +166,10 @@ func TestSelect(t *testing.T) {
 		sel  api.LogSinkSource
 		want string
 	}{
-		{api.LogSinkSource{}, "db/c/messages web/a/messages web/b/messages web/b/nginx/error.log"},
-		{api.LogSinkSource{NoAppLogs: true}, "db/c/messages web/a/messages web/b/messages"},
-		{api.LogSinkSource{Projects: []string{"web"}, Files: []string{"auth.log"}}, "web/a/auth.log web/b/auth.log web/b/nginx/error.log"},
+		{api.LogSinkSource{}, "db/c/messages web/a/messages web/b/messages"},
+		{api.LogSinkSource{Projects: []string{"web"}, Files: []string{"auth.log"}}, "web/a/auth.log web/b/auth.log"},
 		{api.LogSinkSource{Labels: map[string]string{"tier": "front"}}, "web/a/messages"},
-		{api.LogSinkSource{ExcludeLabels: map[string]string{"tier": "front"}, ExcludeJails: []string{"c"}}, "web/b/messages web/b/nginx/error.log"},
+		{api.LogSinkSource{ExcludeLabels: map[string]string{"tier": "front"}, ExcludeJails: []string{"c"}}, "web/b/messages"},
 		{api.LogSinkSource{Jails: []string{"c"}, Audit: true}, "db/c/messages audit"},
 		{api.LogSinkSource{NoJails: true, Audit: true}, "audit"},
 	} {
@@ -188,7 +187,7 @@ func TestSinkOffsetsAndRestart(t *testing.T) {
 	r.rd.set("/j/web_a/var/log/messages", "old 1\nold 2\n")
 	r.rd.set("/j/web_b/var/log/messages", "Nov  1 09:00:00 b old\n")
 	ctx := context.Background()
-	k := api.LogSink{Name: "s", Sources: api.LogSinkSource{NoAppLogs: true}}
+	k := api.LogSink{Name: "s", Sources: api.LogSinkSource{}}
 	s := r.sink(k)
 	s.cycle(ctx) // resolves the ends
 	if got := r.snd.take(); len(got) != 0 {
@@ -420,7 +419,7 @@ func TestSinkFirstJailAfterStart(t *testing.T) {
 	jails := r.jails
 	r.jails = nil
 	ctx := context.Background()
-	s := r.sink(api.LogSink{Name: "s", Sources: api.LogSinkSource{NoAppLogs: true}})
+	s := r.sink(api.LogSink{Name: "s", Sources: api.LogSinkSource{}})
 	s.cycle(ctx)
 	r.jails = jails[:1]
 	r.rd.set("/j/web_a/var/log/messages", "booted\n")
@@ -437,7 +436,7 @@ func TestSinkForgetsADeletedJail(t *testing.T) {
 	r.rd.set("/j/web_a/var/log/messages", "old\n")
 	r.rd.set("/j/web_b/var/log/messages", "old\n")
 	ctx := context.Background()
-	s := r.sink(api.LogSink{Name: "s", Sources: api.LogSinkSource{NoAppLogs: true}})
+	s := r.sink(api.LogSink{Name: "s", Sources: api.LogSinkSource{}})
 	s.cycle(ctx)
 	r.rd.add("/j/web_a/var/log/messages", "new a\n")
 	r.rd.add("/j/web_b/var/log/messages", "new b\n")

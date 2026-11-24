@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { autoAtProblem, autoUpgradeSpec, baseImageState, baseRelease, defaultImage, freebsdImages, freebsdReleaseProblem, hostRelease, imageBody, imageLabel, imageNameFor, imageProblems, initialImageForm, newHostRelease, patchLevel, releaseProblem } from './images'
+import { autoAtProblem, autoUpgradeSpec, baseRelease, defaultImage, freebsdImages, freebsdReleaseProblem, hostRelease, imageBody, imageLabel, imageNameFor, imageProblems, initialImageForm, newHostRelease, patchLevel, releaseProblem } from './images'
 import type { Image, ServerInfo } from '@jailops/shared/api/types'
 
 const info = (kernel: string, arch = 'amd64') => ({ environment: { os: 'FreeBSD', kernel_version: kernel, arch } }) as unknown as ServerInfo
@@ -85,11 +85,6 @@ describe('the form', () => {
     expect(imageBody({ ...f, kind: 'alpine', name: 'alpine', release: ' 3.22 ', auto: false }).spec).toEqual({ os: 'linux', release: '3.22', arch: 'amd64', source: { type: 'minirootfs' } })
     expect(imageBody({ ...f, kind: 'debian', name: 'debian', release: 'trixie', keys: '/k.gpg' }).spec.source).toEqual({ type: 'debootstrap', keys: '/k.gpg' })
     expect(autoUpgradeSpec(false, '03:00')).toEqual({ enabled: false })
-  })
-  it('knows when apps have no image to start from', () => {
-    expect(baseImageState([])).toBe('none')
-    expect(baseImageState([{ spec: { os: 'linux' } } as never])).toBe('none')
-    expect(baseImageState([{ spec: { os: 'freebsd' } } as never])).toBe('ok')
   })
 })
 

@@ -551,9 +551,6 @@ func refuseManaged(noun, name, managedBy string) error {
 	switch {
 	case managedBy == "":
 		return nil
-	case managedBy == api.AppAccessManagedBy:
-		return api.Errorf(api.CodeForbidden, "%s %q is managed by app access and keeps its name", noun, name).
-			WithHint("jailops app allow and jailops app deny manage it")
 	case strings.HasPrefix(managedBy, "hub:"):
 		return api.Errorf(api.CodeForbidden, "%s %q is managed by a hub (%s)", noun, name, managedBy).
 			WithHint("rename it on the hub, which applies the new name to its hosts")

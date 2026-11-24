@@ -26,8 +26,8 @@ func TestEffectiveDefaults(t *testing.T) {
 		{"one policy denies inbound", []namedSpec{{name: "closed", spec: deny}, {name: "test-access", spec: rules}}, "deny", "allow", []string{"closed"}, nil},
 		{"the order does not matter", []namedSpec{{name: "test-access", spec: rules}, {name: "closed", spec: deny}}, "deny", "allow", []string{"closed"}, nil},
 		{"the project's deny stays a floor under an allow", []namedSpec{{name: "default", project: true, spec: deny}, {name: "open", spec: allow}}, "deny", "allow", []string{"default [project]"}, nil},
-		{"every policy that denies is named", []namedSpec{{name: "default", project: true, spec: deny}, {name: "app-pg", managed: true, spec: deny}, {name: "own", spec: deny}},
-			"deny", "allow", []string{"default [project]", "app-pg [managed]", "own"}, nil},
+		{"every policy that denies is named", []namedSpec{{name: "default", project: true, spec: deny}, {name: "second", spec: deny}, {name: "own", spec: deny}},
+			"deny", "allow", []string{"default [project]", "second", "own"}, nil},
 		{"outbound is its own direction", []namedSpec{{name: "egress", spec: denyOut}}, "allow", "deny", nil, []string{"egress"}},
 	} {
 		in, out, inBy, outBy := effectiveDefaults(tc.pols)

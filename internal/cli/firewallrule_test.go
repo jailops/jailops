@@ -46,7 +46,7 @@ func TestFirewallRuleRefusals(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	h.srv.SeedFirewallPolicy(api.FirewallPolicy{
-		Metadata: api.ObjectMeta{Name: "app-db", Project: "main", ManagedBy: api.AppAccessManagedBy},
+		Metadata: api.ObjectMeta{Name: "hub-db", Project: "main", ManagedBy: "hub:h1"},
 		Spec:     api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow"}})
 	tr := h.transcript()
 	tr.ok("firewall", "policy", "create", "web")
@@ -66,8 +66,8 @@ func TestFirewallRuleRefusals(t *testing.T) {
 		{"rule", "edit", "web", "1"},                                                                               // nothing to change
 		{"rule", "move", "web", "1"},                                                                               // where
 		{"rule", "move", "web", "1", "--to", "1", "--after", "1"},                                                  // one place only
-		{"rule", "add", "app-db", "in", "--action", "allow", "--proto", "tcp", "--port", "5432", "--comment", "x"}, // managed by app access
-		{"rule", "remove", "app-db", "1"},
+		{"rule", "add", "hub-db", "in", "--action", "allow", "--proto", "tcp", "--port", "5432", "--comment", "x"}, // managed by a hub
+		{"rule", "remove", "hub-db", "1"},
 	} {
 		tr.do("", append([]string{"firewall"}, args...)...)
 	}

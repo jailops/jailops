@@ -36,10 +36,6 @@ type LogsQuery struct {
 	Jails []string `json:"jails,omitempty"`
 	// Labels keeps the jails that carry every one of these labels (?label=k=v, repeated).
 	Labels map[string]string `json:"labels,omitempty"`
-	// App keeps the jails installed from this catalog app (the jailops.app label).
-	App string `json:"app,omitempty"`
-	// AppLogs adds the log files an installed app declares below /var/log.
-	AppLogs bool `json:"app_logs,omitempty"`
 	// File is the file read of every jail (default messages).
 	File string `json:"file,omitempty"`
 	// Limit, Since and Grep apply to every source before the merge.
@@ -56,7 +52,6 @@ type LogEntry struct {
 	Time    *time.Time `json:"time,omitempty"`
 	Project string     `json:"project"`
 	Jail    string     `json:"jail"`
-	App     string     `json:"app,omitempty"`
 	File    string     `json:"file"`
 	Line    string     `json:"line"`
 }
@@ -67,7 +62,6 @@ type LogSource struct {
 	Key        string `json:"key"`
 	Project    string `json:"project"`
 	Jail       string `json:"jail"`
-	App        string `json:"app,omitempty"`
 	File       string `json:"file"`
 	NextOffset int64  `json:"next_offset"`
 	Rotated    bool   `json:"rotated,omitempty"`
@@ -108,9 +102,6 @@ func (q LogsQuery) Normalize() (LogsQuery, error) {
 			return q, Errorf(CodeInvalid, "jail %q is not a jail name", j)
 		}
 	}
-	if q.App != "" && !IsName(q.App, MaxName) {
-		return q, Errorf(CodeInvalid, "app %q is not an app name", q.App)
-	}
 	for k := range q.Labels {
 		if k == "" || len(k) > 253 {
 			return q, Errorf(CodeInvalid, "invalid label selector %q", k)
@@ -131,7 +122,7 @@ func (q LogsQuery) Normalize() (LogsQuery, error) {
 
 // ParseLogsQuery reads a LogsQuery from a query string.
 func ParseLogsQuery(v url.Values) (LogsQuery, error) {
-	q := LogsQuery{Jails: v["jail"], App: v.Get("app"), File: v.Get("file"), Since: v.Get("since"), Grep: v.Get("grep")}
+	q := LogsQuery{Jails: v["jail"], File: v.Get("file"), Since: v.Get("since"), Grep: v.Get("grep")}
 	for _, l := range v["label"] {
 		k, val, ok := strings.Cut(l, "=")
 		if !ok || k == "" {
@@ -141,13 +132,6 @@ func ParseLogsQuery(v url.Values) (LogsQuery, error) {
 			q.Labels = map[string]string{}
 		}
 		q.Labels[k] = val
-	}
-	switch v.Get("app_logs") {
-	case "", "false", "0":
-	case "true", "1":
-		q.AppLogs = true
-	default:
-		return q, Errorf(CodeInvalid, "app_logs is true or false")
 	}
 	if s := v.Get("limit"); s != "" {
 		n, err := strconv.Atoi(s)
@@ -181,12 +165,6 @@ func (q LogsQuery) Values() url.Values {
 	for _, k := range keys {
 		v.Add("label", k+"="+q.Labels[k])
 	}
-	if q.App != "" {
-		v.Set("app", q.App)
-	}
-	if q.AppLogs {
-		v.Set("app_logs", "true")
-	}
 	if q.File != "" && q.File != DefaultLogFile {
 		v.Set("file", q.File)
 	}
@@ -208,8 +186,8 @@ func (q LogsQuery) Values() url.Values {
 
 // LogSourceLines are the lines read from one source, in file order, for MergeLogs.
 type LogSourceLines struct {
-	Project, Jail, App, File string
-	Lines                    []string
+	Project, Jail, File string
+	Lines               []string
 }
 
 // MergeLogs merges the lines of several sources into one stream ordered by
@@ -266,7 +244,7 @@ func MergeLogs(sources []LogSourceLines, limit int, now time.Time) (out []LogEnt
 			truncated = true
 			continue
 		}
-		out = append(out, LogEntry{Time: l.own, Project: s.Project, Jail: s.Jail, App: s.App, File: s.File, Line: s.Lines[pos[best]-1]})
+		out = append(out, LogEntry{Time: l.own, Project: s.Project, Jail: s.Jail, File: s.File, Line: s.Lines[pos[best]-1]})
 	}
 	return out, truncated
 }
@@ -331,7 +309,7 @@ type LogSink struct {
 }
 
 // LogSinkSource selects what a sink receives. The zero value is the file
-// messages of every jail plus the logs of installed apps.
+// messages of every jail.
 type LogSinkSource struct {
 	// Projects, Jails and Labels narrow the jails (all of them must match when set).
 	Projects []string          `json:"projects,omitempty" yaml:"projects"`
@@ -342,8 +320,6 @@ type LogSinkSource struct {
 	ExcludeLabels map[string]string `json:"exclude_labels,omitempty" yaml:"exclude_labels"`
 	// Files replaces messages as the files read of every jail (names below /var/log).
 	Files []string `json:"files,omitempty" yaml:"files"`
-	// NoAppLogs leaves out the logs installed apps declare.
-	NoAppLogs bool `json:"no_app_logs,omitempty" yaml:"no_app_logs"`
 	// NoJails sends no jail logs (with Audit: the audit log only).
 	NoJails bool `json:"no_jails,omitempty" yaml:"no_jails"`
 	// Audit adds the daemon's audit log as the source audit.

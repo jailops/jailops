@@ -50,7 +50,7 @@ func TestRequestBodiesAreStrict(t *testing.T) {
 }
 
 // Labels have a charset, a size and a count; descriptions and comments refuse control and invisible characters.
-// What JailOps itself sets (the app labels) passes the same rules.
+// Dotted label keys pass the same rules.
 func TestLabelsAndFreeTextAreChecked(t *testing.T) {
 	e := seeded(t)
 	tok := e.Token(api.PermAdmin)
@@ -79,7 +79,7 @@ func TestLabelsAndFreeTextAreChecked(t *testing.T) {
 		}
 	}
 	for _, c := range []struct{ name, body string }{
-		{"app labels", set("ok1", `"jailops.app":"postgresql","jailops.app.hash":"sha256-abc","jailops.app.version":"16.4_1"`)},
+		{"dotted labels", set("ok1", `"team.name":"postgresql","team.name.hash":"sha256-abc","team.name.version":"16.4_1"`)},
 		{"prefixed key and text value", set("ok2", `"example.org/tier":"front end, café","Env_1":""`)},
 	} {
 		if code, body := rawDo(t, e, "POST", sets, tok, c.body, nil); code != 201 {

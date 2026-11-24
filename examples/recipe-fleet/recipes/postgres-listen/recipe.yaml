@@ -1,0 +1,14 @@
+# Lets the PostgreSQL server of the jail accept the shop network. It installs nothing: the jail comes from an image that has it.
+vars:
+  listen_net: {required: true}
+steps:
+  - file:
+      path: /var/db/postgres/data/pg_hba.d/shop.conf
+      source: pg_hba.conf
+      template: true
+      owner: postgres
+      group: postgres
+      mode: "0640"
+  - service: {name: postgresql, enabled: true, running: true}
+  # Not guarded, so it runs on every apply and says "executed"; it never starts a run by itself.
+  - run: [service, postgresql, reload]

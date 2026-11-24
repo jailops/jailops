@@ -21,14 +21,14 @@ var allowedImports = map[string]bool{
 	modulePath + "/sdk/tarcopy": true,
 	// writes the man pages from the command tree; it links nothing of the daemon
 	modulePath + "/internal/manpage": true,
-	// the catalog's parser and validator, for app validate; TestAppsLinksNoDaemon keeps it pure
-	modulePath + "/internal/apps": true,
 	// the grammar of a firewall reference (jail:NAME, set:NAME, tag:NAME), shared with the server; pure validation
 	modulePath + "/internal/validate": true,
-	"github.com/spf13/cobra":          true,
-	"github.com/spf13/pflag":          true, // cobra's own flag type: it comes with cobra
-	"gopkg.in/yaml.v3":                true,
-	"golang.org/x/term":               true,
+	// the recipe of jail apply: variables and files read into the request; pure, no network and no daemon
+	modulePath + "/internal/recipe": true,
+	"github.com/spf13/cobra":        true,
+	"github.com/spf13/pflag":        true, // cobra's own flag type: it comes with cobra
+	"gopkg.in/yaml.v3":              true,
+	"golang.org/x/term":             true,
 }
 
 // Tests may also use the in-memory server and the package under test.
@@ -96,53 +96,5 @@ func TestImportRuleDetects(t *testing.T) {
 	}
 	if bad != 1 {
 		t.Fatalf("expected one forbidden import, found %d", bad)
-	}
-}
-
-// internal/apps is linked into the client for app validate. It and what it
-// imports, transitively, stay pure validation: no command runner, renderer,
-// store or anything else of the daemon.
-func TestAppsLinksNoDaemon(t *testing.T) {
-	pure := map[string]bool{
-		modulePath + "/internal/apps":     true,
-		modulePath + "/internal/validate": true,
-		modulePath + "/internal/ipam":     true,
-		modulePath + "/internal/schedule": true,
-	}
-	seen := map[string]bool{}
-	var walk func(pkg string)
-	walk = func(pkg string) {
-		if seen[pkg] {
-			return
-		}
-		seen[pkg] = true
-		dir := filepath.Join("..", "..", strings.TrimPrefix(pkg, modulePath+"/"))
-		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
-		if err != nil || len(files) == 0 {
-			t.Fatalf("no Go files in %s: %v", dir, err)
-		}
-		for _, f := range files {
-			if strings.HasSuffix(f, "_test.go") {
-				continue
-			}
-			af, err := parser.ParseFile(token.NewFileSet(), f, nil, parser.ImportsOnly)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, imp := range af.Imports {
-				p, _ := strconv.Unquote(imp.Path.Value)
-				switch {
-				case isStd(p), p == modulePath+"/sdk/api", p == "gopkg.in/yaml.v3":
-				case pure[p]:
-					walk(p)
-				default:
-					t.Errorf("%s imports %q: the client links internal/apps, which may use only %v, sdk/api, yaml.v3 and the standard library", f, p, pure)
-				}
-			}
-		}
-	}
-	walk(modulePath + "/internal/apps")
-	if len(seen) < 2 {
-		t.Fatalf("walked %v", seen)
 	}
 }

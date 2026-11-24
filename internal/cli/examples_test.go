@@ -91,7 +91,7 @@ func TestShellWords(t *testing.T) {
 		`source <(jailops completion bash)`:                                         `completion|bash`,
 		`jailops exec -T nginx -- cat /var/log/messages > messages`:                 `exec|-T|nginx|--|cat|/var/log/messages`,
 		`jailops-sync plan`:                                                         ``,
-		`jailops app list # the catalog`:                                            `app|list`,
+		`jailops jail list # the jails`:                                             `jail|list`,
 	} {
 		var got []string
 		for _, w := range shellWords(line) {

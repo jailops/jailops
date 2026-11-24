@@ -23,9 +23,9 @@ Upgrade JailOps in a step of its own, after the host's FreeBSD has been upgraded
     jailops doctor
     jailops list
 
-`pkg upgrade -r jailops` takes every package of the JailOps repository: `jailops`, `jailops-client`, `jailops-apps` and, on a
+`pkg upgrade -r jailops` takes every package of the JailOps repository: `jailops`, `jailops-client` and, on a
 backup node, `jailops-backupd`. A bare `pkg upgrade` on a pkgbase host mixes base and JailOps updates, and naming only
-`jailops` and `jailops-client` leaves `jailops-apps` and `jailops-backupd` behind.
+`jailops` and `jailops-client` leaves `jailops-backupd` behind.
 
 Both binaries are new and each service runs the old one until it restarts. The two are one service: the helper is the
 part that runs as root. `service jailopsd stop` stops the helper after the daemon and `service jailopsd start` starts it

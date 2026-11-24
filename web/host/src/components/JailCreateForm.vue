@@ -128,7 +128,7 @@ async function save(): Promise<void> {
         <span v-if="check.err('jc-sto')" id="jc-sto-err" class="field-error" role="alert">{{ check.err('jc-sto') }}</span>
       </div>
       <div class="field">
-        <label for="jc-net">{{ s.install.network }}</label>
+        <label for="jc-net">{{ s.jails.networkLabel }}</label>
         <select id="jc-net" v-model="f.network" aria-describedby="jc-net-hint"><option value="">{{ s.jails.noNetwork }}</option><option v-for="x in netNames" :key="x" :value="x">{{ x }}</option></select>
         <span id="jc-net-hint" class="hint">{{ s.jails.networkHint }}</span>
       </div>

@@ -38,13 +38,11 @@ var roots = []any{
 	api.Token{}, api.Certificate{}, api.User{}, api.Remote{},
 	api.Document{},
 	api.Project{}, api.ProjectAggregate{}, api.ProjectHostStatus{}, api.Storage{}, api.Session{}, api.Identity{}, api.TrustTokenRequest{}, api.TrustToken{}, api.TrustClientRequest{}, api.Profile{}, api.ConfigKey{}, api.JailExpanded{}, api.ConfigChange{}, api.UpdateReport{}, api.UpdateRecord{}, api.UpdateCheckRequest{}, api.UpdateApplyRequest{},
-	api.Recipe{}, api.ApplyRequest{}, api.ApplyResult{}, api.ShellSetupRequest{}, api.ShellSetupResult{}, api.ExecRequest{}, api.BackupRun{}, api.BackupRunRequest{}, api.BackupVerifyRequest{},
+	api.Recipe{}, api.ApplyRequest{}, api.ApplyResult{}, api.RecipeValidateRequest{}, api.RecipeValidateResult{}, api.ShellSetupRequest{}, api.ShellSetupResult{}, api.ExecRequest{}, api.BackupRun{}, api.BackupRunRequest{}, api.BackupVerifyRequest{},
 	api.BackupKeyStatus{}, api.BackupKeyCreate{}, api.BackupKeyCreated{}, api.BackupKeyEscrow{}, api.BackupKeyImport{}, api.BackupKeyImported{},
 	api.AuditEntry{}, api.PoolUsage{}, api.DoctorReport{}, api.NDPStatus{}, api.JailReach{}, api.ExportManifest{}, api.JailImportPreflight{}, api.JailImportRequest{}, api.JailImported{}, api.Exposed{}, api.ExposeRequest{}, api.UnexposeRequest{}, api.ExposeResult{}, api.RepositoryStatus{}, api.UserCreate{}, api.UserCreated{}, api.PasswordSet{},
-	api.AppSummary{}, api.AppDetail{}, api.AppInstall{}, api.AppInstallResult{}, api.AppDraft{},
 	api.HostIdentity{}, api.HostIdentityApply{}, api.HostRestore{}, api.HostChange{}, api.HostSnapshot{},
 	api.HostFirewall{}, api.HostFirewallApply{}, api.HostPending{}, api.HostPendingAction{},
-	api.AppAccess{}, api.AppAllow{}, api.AppAllowResult{}, api.AppDeny{}, api.AppDenyResult{},
 	api.LogsRead{}, api.LogForward{}, api.LogForwardTest{}, api.LogForwardTestResult{},
 	api.HostCertificate{}, api.HostCertificateUpload{}, api.ACMESpec{},
 	api.SetupStatus{}, api.SetupRequest{}, api.SetupResult{}, api.SetupToken{},
@@ -53,7 +51,7 @@ var roots = []any{
 
 // enums lists the typed string constants. Keep in sync with sdk/api.
 var enums = map[reflect.Type][]string{
-	reflect.TypeFor[api.Code]():            {"invalid", "not_found", "already_exists", "precondition_failed", "unauthorized", "forbidden", "unsupported", "busy", "internal", "interrupted", "ip_conflict", "pool_exhausted", "image_in_use", "data_loss_unconfirmed", "version_skew", "unverified_platform", "zfs_incompatible", "chain_broken", "merge_conflict", "quota_exceeded", "rate_limited", "key_not_escrowed", "plaintext_denied", "maintenance", "missing_chunks", "lease_expired", "not_managed", "locked", "bad_passphrase"},
+	reflect.TypeFor[api.Code]():            {"invalid", "not_found", "already_exists", "precondition_failed", "unauthorized", "forbidden", "unsupported", "busy", "internal", "interrupted", "step_failed", "ip_conflict", "pool_exhausted", "image_in_use", "data_loss_unconfirmed", "version_skew", "unverified_platform", "zfs_incompatible", "chain_broken", "merge_conflict", "quota_exceeded", "rate_limited", "key_not_escrowed", "plaintext_denied", "maintenance", "missing_chunks", "lease_expired", "not_managed", "locked", "bad_passphrase"},
 	reflect.TypeFor[api.Permission]():      {string(api.PermReadonly), string(api.PermOperator), string(api.PermAdmin), string(api.PermBackupPush), string(api.PermBackupPull), string(api.PermRestore), string(api.PermBackupAdmin)},
 	reflect.TypeFor[api.Role]():            {string(api.RoleHost), string(api.RoleBackup)},
 	reflect.TypeFor[api.OS]():              {string(api.OSFreeBSD), string(api.OSLinux)},
@@ -73,8 +71,6 @@ var enums = map[reflect.Type][]string{
 	reflect.TypeFor[api.DoctorStatus]():    {string(api.DoctorOK), string(api.DoctorWarn), string(api.DoctorFail), string(api.DoctorUnknown), string(api.DoctorInfo)},
 	reflect.TypeFor[api.Scope]():           {string(api.ScopeHost), string(api.ScopeFleet)},
 	reflect.TypeFor[api.JailLogKind]():     {string(api.JailLogActive), string(api.JailLogRotated)},
-	reflect.TypeFor[api.AppCategory]():     {string(api.AppDatabase), string(api.AppWeb), string(api.AppTools), string(api.AppDevops), string(api.AppStorage), string(api.AppMonitoring), string(api.AppCommunication), string(api.AppNetwork), string(api.AppSecurity), string(api.AppOther)},
-	reflect.TypeFor[api.AppSource]():       {string(api.AppSourceCatalog), string(api.AppSourceLocal)},
 	reflect.TypeFor[api.LogSinkType]():     {string(api.LogSinkSyslog), string(api.LogSinkWebhook)},
 	reflect.TypeFor[api.JailAuditResult](): {string(api.AuditPass), string(api.AuditInfo), string(api.AuditWarn), string(api.AuditCritical)},
 

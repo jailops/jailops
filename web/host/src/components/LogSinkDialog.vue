@@ -112,7 +112,6 @@ async function save(): Promise<void> {
       <fieldset class="lsf-set">
         <legend>{{ s.forward.sourcesTitle }}</legend>
         <label class="check"><input v-model="f.jailLogs" type="checkbox" data-test="lsf-jail-logs" />{{ s.forward.jailLogs }}</label>
-        <label class="check"><input v-model="f.appLogs" type="checkbox" :disabled="!f.jailLogs" />{{ s.forward.appLogs }}</label>
         <label class="check"><input v-model="f.audit" type="checkbox" data-test="lsf-audit" />{{ s.forward.audit }}</label>
         <span class="field-error" role="alert">{{ msg('audit') }}</span>
         <template v-if="f.jailLogs">

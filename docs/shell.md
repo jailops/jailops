@@ -86,6 +86,8 @@ Any file `/usr/local/etc/profile.d/NAME.sh` is read by the shells below. A recip
 
     - file: {path: /usr/local/etc/profile.d/50-alias.sh, content: "alias ll='ls -lAh'\n"}
 
+Which files JailOps owns, which blocks it manages and which files it only seeds: [provisioning.md](provisioning.md#3-jailops-managed-files).
+
 | Shell | Reads `profile.d/*.sh` |
 |---|---|
 | login `sh` (`sh -l`, a console login, `su -`) | yes, through FreeBSD's `/etc/profile` |

@@ -14,17 +14,17 @@ var t0 = time.Date(2026, 11, 1, 9, 30, 0, 0, time.UTC)
 
 // The sample of docs/logging.md, byte for byte.
 func TestFormat5424(t *testing.T) {
-	e := Entry{Time: t0, Project: "web", Jail: "nginx", App: "nginx", File: "messages", Line: "Nov  1 09:30:00 nginx sshd[42]: Accepted publickey for deploy"}
+	e := Entry{Time: t0, Project: "web", Jail: "nginx", File: "messages", Line: "Nov  1 09:30:00 nginx sshd[42]: Accepted publickey for deploy"}
 	fac, _ := api.SyslogFacility("local3")
 	got := string(Format5424(e, fac, "host1.example.com"))
-	want := `<158>1 2026-11-01T09:30:00.000000Z host1.example.com jailops - log [jailops project="web" jail="nginx" app="nginx" file="messages"] Nov  1 09:30:00 nginx sshd[42]: Accepted publickey for deploy`
+	want := `<158>1 2026-11-01T09:30:00.000000Z host1.example.com jailops - log [jailops project="web" jail="nginx" file="messages"] Nov  1 09:30:00 nginx sshd[42]: Accepted publickey for deploy`
 	if got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
 	// the audit log, a hostile structured-data value and an empty host name
 	a := Entry{Time: t0, Project: `we"b]\`, File: api.LogSourceAudit, Line: "x"}
 	got = string(Format5424(a, 16, " "))
-	want = `<134>1 2026-11-01T09:30:00.000000Z - jailops - audit [jailops project="we\"b\]\\" jail="" app="" file="audit"] x`
+	want = `<134>1 2026-11-01T09:30:00.000000Z - jailops - audit [jailops project="we\"b\]\\" jail="" file="audit"] x`
 	if got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
@@ -67,7 +67,7 @@ func TestFormatJSON(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["host"] != "host1" || m["jail"] != "nginx" || m["line"] != `a\x1bb` || m["time"] != "2026-11-01T09:30:00Z" || m["app"] != "" {
+	if m["host"] != "host1" || m["jail"] != "nginx" || m["line"] != `a\x1bb` || m["time"] != "2026-11-01T09:30:00Z" {
 		t.Fatalf("%v", m)
 	}
 }

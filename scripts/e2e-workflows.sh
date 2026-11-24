@@ -76,8 +76,6 @@ run_workflows() {
 	expect "the jail carries the profile" 'profiles +wfp' $J config show wfq $P
 	expect "and the boot plan has the setting of the profile (autostart)" 'wfq +[0-9]+ +autostart' $J boot
 
-	row_elsewhere apps "the app block of ci-freebsd-e2e.sh (the catalog, app install, app allow)"
-
 	row_elsewhere copy-files "the exec and cp block of ci-freebsd-e2e.sh (checksums both ways, a symlink escape refused)"
 
 	row volume "a volume for a jail, then for another"

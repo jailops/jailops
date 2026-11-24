@@ -13,13 +13,13 @@ db/messages   Mar  1 08:56:00 db postgres[9]: checkpoint complete
 $ jailops logs -l tier=front --grep UPSTREAM
 web/messages  Mar  1 08:55:00 web nginx[3]: upstream timed out
 
-$ jailops logs --app postgresql --limit 1
+$ jailops logs --jail db --limit 1
 db/messages  Mar  1 08:56:00 db postgres[9]: checkpoint complete
 
 $ jailops logs --jail db -o json
-{"time":"2026-03-01T08:52:00Z","project":"main","jail":"db","app":"postgresql","file":"messages","line":"Mar  1 08:52:00 db postgres[9]: checkpoint starting"}
-{"project":"main","jail":"db","app":"postgresql","file":"messages","line":"  DETAIL: no time of its own"}
-{"time":"2026-03-01T08:56:00Z","project":"main","jail":"db","app":"postgresql","file":"messages","line":"Mar  1 08:56:00 db postgres[9]: checkpoint complete"}
+{"time":"2026-03-01T08:52:00Z","project":"main","jail":"db","file":"messages","line":"Mar  1 08:52:00 db postgres[9]: checkpoint starting"}
+{"project":"main","jail":"db","file":"messages","line":"  DETAIL: no time of its own"}
+{"time":"2026-03-01T08:56:00Z","project":"main","jail":"db","file":"messages","line":"Mar  1 08:56:00 db postgres[9]: checkpoint complete"}
 
 $ jailops logs --all-projects --jail web
 main/web/messages  Mar  1 08:50:00 web sshd[1]: Accepted publickey
@@ -29,7 +29,7 @@ $ jailops logs web messages --limit 1
 Mar  1 08:55:00 web nginx[3]: upstream timed out
 
 $ jailops logs web --jail db
-! usage: a jail name and --jail, --selector, --app, --app-logs, --all-projects or --file do not go together: name the jails with --jail
+! usage: a jail name and --jail, --selector, --all-projects or --file do not go together: name the jails with --jail
 ! hint: run 'jailops logs --help' for usage
 [exit 2]
 

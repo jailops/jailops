@@ -53,18 +53,6 @@ test('a data rollback needs the jail name typed', async ({ page }) => {
   await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
-test('uninstalling an app confirms and lists the data that goes', async ({ page }) => {
-  await open(page, '/apps?tab=installed')
-  await page.getByTestId('uninstall-web').click()
-  const dlg = page.getByTestId('confirm-dialog')
-  await expect(dlg).toHaveAttribute('data-tier', '2')
-  await expect(page.getByRole('dialog')).toContainText('Uninstall nginx (jail web)')
-  await expect(dlg.getByTestId('confirm-items')).not.toContainText('volume content')
-  await expect(dlg).toContainText('The volumes with the data of the app stay')
-  await page.getByTestId('confirm').click()
-  await expect(page.locator('[data-installed="web"]')).toHaveCount(0, { timeout: 10000 })
-})
-
 test('the create form follows the server name rule, says what is missing and focuses it', async ({ page }) => {
   await open(page, '/jails')
   await page.getByTestId('new-jail').click()
@@ -94,8 +82,6 @@ test('jail tabs live in ?tab= and move with the arrow keys', async ({ page }) =>
   await page.keyboard.press('End')
   await expect(page.locator('[data-tab="console"]')).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator('[data-tab="console"]')).toBeInViewport()
-  await open(page, '/jails/web?tab=access')
-  await expect(page.locator('[data-tab="access"]')).toHaveAttribute('aria-selected', 'true')
 })
 
 test('on a phone the jails are cards with their buttons inside the screen', async ({ page }, info) => {
@@ -111,12 +97,11 @@ test('on a phone the jails are cards with their buttons inside the screen', asyn
   }
 })
 
-test('an empty project offers to create a jail and links the catalog', async ({ page }) => {
+test('an empty project offers to create a jail', async ({ page }) => {
   await open(page, '/jails')
   await page.getByTestId('project-select').selectOption('shop')
   const empty = page.getByTestId('jails-empty')
   await expect(empty).toBeVisible()
-  await expect(empty.getByRole('link', { name: 'Browse the app catalog' })).toHaveAttribute('href', '/apps')
   await empty.getByTestId('empty-new-jail').click()
   await expect(page.getByRole('dialog')).toBeVisible()
 })

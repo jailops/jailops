@@ -22,7 +22,7 @@ describe('label rules, as sdk/api/text.go', () => {
     expect(fixture.keys.valid.length + fixture.values.invalid.length).toBeGreaterThan(10)
   })
   it('accepts the keys ValidLabelKey accepts', () => {
-    for (const k of ['env', 'a', 'jailops.app', 'jailops.app.version', 'example.org/tier', 'Team_1', 'a-b.c_d', 'x'.repeat(63), 'p'.repeat(253) + '/n']) expect(validLabelKey(k), k).toBe(true)
+    for (const k of ['env', 'a', 'jailops.custom', 'jailops.custom.version', 'example.org/tier', 'Team_1', 'a-b.c_d', 'x'.repeat(63), 'p'.repeat(253) + '/n']) expect(validLabelKey(k), k).toBe(true)
   })
   it('refuses the keys ValidLabelKey refuses', () => {
     for (const k of ['', '-env', 'env-', '.env', 'env.', 'e nv', 'env=x', 'a/b/c', '/name', 'prefix/', 'pre_fix/name', 'x'.repeat(64), 'p'.repeat(254) + '/n', 'ümlaut', 'a:b']) expect(validLabelKey(k), k).toBe(false)
@@ -53,7 +53,7 @@ describe('label rules, as sdk/api/text.go', () => {
     expect(parseLabelField('flag=')).toEqual({ labels: { flag: '' }, problem: '' })
     expect(parseLabelField('env').problem).toBe('format')
     expect(parseLabelField('=x').problem).toBe('format')
-    expect(parseLabelField('jailops.app=nginx').problem).toBe('system')
+    expect(parseLabelField('jailops.custom=nginx').problem).toBe('system')
     expect(parseLabelField('bad_/k=v').problem).toBe('key')
   })
 })
@@ -118,7 +118,7 @@ describe('filter language', () => {
     expect(queryText(parseQuery('a=1  b:  -c=2 w'))).toBe('a=1 b: -c=2 w')
   })
   it('suggests keys while a key is typed and values after key=', () => {
-    const known = knownLabels([jail('a', { env: 'prod', team: 'web', 'jailops.app': 'nginx' }), jail('b', { env: 'prod', tier: 'edge' }), jail('c', { env: 'dev' })])
+    const known = knownLabels([jail('a', { env: 'prod', team: 'web', 'jailops.custom': 'nginx' }), jail('b', { env: 'prod', tier: 'edge' }), jail('c', { env: 'dev' })])
     expect(suggest('t', 1, known).map((x) => x.text)).toEqual(['team=', 'tier='])
     expect(suggest('', 0, known)).toEqual([])
     const k = suggest('db te', 5, known)[0]
@@ -129,10 +129,10 @@ describe('filter language', () => {
     expect(suggest('env=p web', 5, known)[0]).toMatchObject({ value: 'env=prod web', caret: 8 })
     expect(suggest('-env=d', 6, known)[0]).toMatchObject({ value: '-env=dev ' })
     // system labels come after the others
-    expect(suggest('j', 1, known).map((x) => x.text)).toEqual(['jailops.app='])
+    expect(suggest('j', 1, known).map((x) => x.text)).toEqual(['jailops.custom='])
     expect(suggest('unknown=', 8, known)).toEqual([])
   })
   it('orders chips with the keys people look for first and leaves out system labels', () => {
-    expect(chipOrder({ zeta: '1', role: 'web', env: 'prod', 'jailops.app': 'nginx', app: 'nginx', alpha: '2' }).map(([k]) => k)).toEqual(['env', 'app', 'role', 'alpha', 'zeta'])
+    expect(chipOrder({ zeta: '1', role: 'web', env: 'prod', 'jailops.custom': 'nginx', app: 'nginx', alpha: '2' }).map(([k]) => k)).toEqual(['env', 'app', 'role', 'alpha', 'zeta'])
   })
 })

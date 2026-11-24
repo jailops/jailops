@@ -2,6 +2,8 @@ package api
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -127,9 +129,13 @@ var promptRefs = map[string]string{
 	"{host}":    "${" + EnvHost + "-}",
 }
 
-// WhereTag is the tag of the default prompt, in a quiet grey: " [project/host]", and nothing when the jail has
-// neither. The parameter expansion handles that when the prompt is shown, so no command runs.
-const whereTagFmt = `${` + Where + `:+ \[\e[38;5;%dm\][${` + Where + `}]\[\e[0m\]}`
+// Tag is the shell variable the prompt file sets to the tag of the default prompt: " [project/host]" in a quiet grey,
+// and nothing when the jail has neither. The prompt file builds it once, when it is read, and puts its value into the PS1
+// text (render.PromptFile): FreeBSD's sh on 15.1 expands nothing in PS1 when it shows the prompt, not even a plain
+// ${name} (the 16.0 test VM expands a plain ${name} and not ${name:+word}), and it works out the backslash escapes before
+// it expands. The variable holds the colour sequences themselves, each between the markers that tell the shell they take
+// no room.
+const Tag = "_jailops_tag"
 
 // PromptDimColor is the 256-colour number of the tag: a quiet grey.
 const PromptDimColor = 245
@@ -143,8 +149,21 @@ func ExpandPrompt(ps1 string) string {
 	return ps1
 }
 
-// whereTag is the tag of the default prompt.
-func whereTag() string { return fmt.Sprintf(whereTagFmt, PromptDimColor) }
+// whereTag is the reference to the tag in a PS1 text.
+func whereTag() string { return "${" + Tag + "}" }
+
+// TagRef is the reference to the tag in a PS1 text, and PromptRefs the references the placeholders turn into: what a
+// prompt file takes the value of when it is read (render.PromptFile).
+func TagRef() string { return whereTag() }
+
+func PromptRefs() []string {
+	var refs []string
+	for _, r := range promptRefs {
+		refs = append(refs, r)
+	}
+	sort.Strings(refs)
+	return refs
+}
 
 // DefaultPS1 is the default prompt: user@host in 256-colour number color, then, in a quiet grey, where the jail is
 // as a tag, "[shop/babel]" (project and host, whichever is known), then :directory and # or $ and a space. The
@@ -160,12 +179,38 @@ func ShortPS1(color int) string {
 }
 
 // PromptUsesWhere reports whether a PS1 text is one whose prompt file has to set Where.
-func PromptUsesWhere(ps1 string) bool { return strings.Contains(ps1, "${"+Where) }
+func PromptUsesWhere(ps1 string) bool { return strings.Contains(ps1, whereTag()) }
 
 // WhereLine is the line of the prompt file that sets Where from the variables of EnvFile.
 func WhereLine() string {
 	p, h := "${"+EnvProject+"-}", "${"+EnvHost+"-}"
 	return Where + `="` + p + `${` + EnvProject + `:+${` + EnvHost + `:+/}}` + h + `"`
+}
+
+// VarCheckLines are the lines of the prompt file that run first: each of the three variables of EnvFile that the file
+// reads is set to the empty string unless it is made of lower-case letters, digits and hyphens (spelled out, so no
+// locale widens the range). The variables come from EnvFile, but a shell can inherit them from its parent, and the
+// values are baked into the PS1 text, which bash expands at every prompt: a hostile value must become nothing before
+// it is read. POSIX sh, no eval.
+func VarCheckLines() []string {
+	var l []string
+	for _, v := range []string{EnvJail, EnvProject, EnvHost} {
+		l = append(l, `case "${`+v+`-}" in *[!abcdefghijklmnopqrstuvwxyz0123456789-]*) `+v+`= ;; esac`)
+	}
+	return l
+}
+
+// TagLines is the part of the prompt file that sets Tag from Where, after WhereLine: no command runs but printf, once,
+// when the file is read. The colour sequences sit between non-printing markers, as the shell wants them: bash takes
+// \001 to start and \002 to end such a stretch, FreeBSD's sh takes \001 for both.
+func TagLines() []string {
+	c := strconv.Itoa(PromptDimColor)
+	return []string{
+		`if [ -n "$` + Where + `" ]; then`,
+		"\tif [ -n \"${BASH_VERSION-}\" ]; then " + Tag + `=$(printf ' \001\033[38;5;` + c + `m\002[%s]\001\033[0m\002' "$` + Where + `")`,
+		"\telse " + Tag + `=$(printf ' \001\033[38;5;` + c + `m\001[%s]\001\033[0m\001' "$` + Where + `"); fi`,
+		`else ` + Tag + `=""; fi`,
+	}
 }
 
 // CheckPS1 reports whether a PS1 text is one JailOps writes into the prompt file: what a PS1 value stands for after

@@ -16,8 +16,9 @@ func TestImportsAreRestricted(t *testing.T) {
 		"github.com/spf13/cobra", "gopkg.in/yaml.v3", "filippo.io/age", "golang.org/x/term",
 		"github.com/getsops/sops",
 	}
-	// internal/manpage writes the man pages from the command tree; it links nothing of the daemon
-	own := []string{"jailops.net/jailops/internal/fleet", "jailops.net/jailops/sdk", "jailops.net/jailops/internal/manpage"}
+	// internal/manpage writes the man pages from the command tree; it links nothing of the daemon. internal/recipe renders a recipe
+	// (variables, files beside it) and is the one check shared with the command line
+	own := []string{"jailops.net/jailops/internal/fleet", "jailops.net/jailops/sdk", "jailops.net/jailops/internal/manpage", "jailops.net/jailops/internal/recipe"}
 	roots := []string{"../../cmd/jailops-sync", "."}
 	fset := token.NewFileSet()
 	n := 0

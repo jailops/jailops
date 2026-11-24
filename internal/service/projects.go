@@ -614,15 +614,12 @@ func (s *Service) UpdateProject(ctx context.Context, name string, in api.Project
 		if slices.Contains(old.Spec.FirewallPolicies, pn) {
 			continue
 		}
-		o, err := s.polKind.p(name).get(pn)
+		_, err := s.polKind.p(name).get(pn)
 		if err != nil {
 			if api.IsCode(err, api.CodeNotFound) {
 				return api.Project{}, api.Errorf(api.CodeNotFound, "firewall policy %q does not exist in project %q", pn, name)
 			}
 			return api.Project{}, err
-		}
-		if o.Meta.ManagedBy != "" {
-			return api.Project{}, invalid("firewall policy %q is managed by %s: it belongs to its own jail and cannot be a mandatory policy", pn, o.Meta.ManagedBy)
 		}
 	}
 	if err := s.checkProjectRefs(name, in.Spec, name); err != nil {

@@ -48,6 +48,8 @@ func exitForCode(c api.Code) int {
 		return ExitConflict
 	case api.CodeUnsupported, api.CodeUnverified, api.CodeZFSIncompatible, api.CodeVersionSkew, api.CodeNotManaged:
 		return ExitUnsupported // not_managed: this host does not let JailOps do it
+	case api.CodeStepFailed:
+		return ExitFailure // the recipe's own command failed: not a fault of the server
 	case api.CodeInternal, api.CodeInterrupted:
 		return ExitInternal
 	}
@@ -247,7 +249,7 @@ var listCommands = map[string]string{
 	"firewall-policy": "jailops firewall policy list", "address-set": "jailops firewall address-set list",
 	"session": "jailops sessions list", "wireguard": "jailops wireguard list",
 	"snapshot": "jailops jail snapshot list JAIL", "generation": "jailops image generation list IMAGE",
-	"peer": "jailops wireguard peer list TUNNEL", "app": "jailops app list",
+	"peer": "jailops wireguard peer list TUNNEL",
 }
 
 // fallbackHint is the hint of an error the server sent without one. Codes whose cause is in the message

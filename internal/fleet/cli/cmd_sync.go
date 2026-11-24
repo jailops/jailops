@@ -23,6 +23,9 @@ type syncOpts struct {
 	dirtyOK  bool
 	lockWait time.Duration
 	all      bool
+	asJSON   bool
+	// manual says a person asked for the plan: every recipe is looked at now.
+	manual bool
 }
 
 func (a *app) cmdSync() *cobra.Command {
@@ -53,6 +56,7 @@ to the state directory.`,
 			if err != nil {
 				return err
 			}
+			o.manual = true
 			return a.runSync(cmd.Context(), cmd.OutOrStdout(), f, o)
 		},
 	}
@@ -62,7 +66,8 @@ to the state directory.`,
 	c.Flags().BoolVar(&o.prune, "prune", false, "delete owned objects the repository no longer declares")
 	c.Flags().BoolVar(&o.dirtyOK, "dirty-ok", false, "apply even if the repository is dirty or behind its upstream")
 	c.Flags().DurationVar(&o.lockWait, "lock-wait", 30*time.Second, "how long to wait for the fleet lock")
-	c.Flags().BoolVar(&o.all, "all", false, "also list unchanged objects")
+	c.Flags().BoolVar(&o.all, "all", false, "also list unchanged objects and recipes")
+	c.Flags().BoolVar(&o.asJSON, "json", false, "print the plan and the result as JSON")
 	return c
 }
 
@@ -75,7 +80,13 @@ func (a *app) runSync(ctx context.Context, out io.Writer, f *config.Fleet, o syn
 	s := a.session(f)
 	defer s.Close()
 	if !o.apply {
-		p := plan.Compute(ctx, s, plan.Options{Hosts: hs})
+		p := plan.Compute(ctx, s, plan.Options{Hosts: hs, Manual: o.manual})
+		if o.asJSON {
+			if err := writeJSON(out, planReport(p)); err != nil {
+				return err
+			}
+			return p.Err()
+		}
 		a.printPlan(out, p, o.all)
 		if err := p.Err(); err != nil {
 			return err
@@ -100,9 +111,13 @@ func (a *app) runSync(ctx context.Context, out io.Writer, f *config.Fleet, o syn
 	}
 	defer lock.Release()
 	p := plan.Compute(ctx, s, plan.Options{Hosts: hs})
-	fmt.Fprintln(out, "== PLAN ==")
-	a.printPlan(out, p, o.all)
-	ao := apply.Options{Prune: o.prune, Force: o.force, Out: out}
+	var text io.Writer = out
+	if o.asJSON {
+		text = io.Discard
+	}
+	fmt.Fprintln(text, "== PLAN ==")
+	a.printPlan(text, p, o.all)
+	ao := apply.Options{Prune: o.prune, Force: o.force, Out: text}
 	if err := apply.Check(p, ao); err != nil {
 		return err
 	}
@@ -112,9 +127,9 @@ func (a *app) runSync(ctx context.Context, out io.Writer, f *config.Fleet, o syn
 	} else {
 		defer lg.Close()
 		ao.Log = lg
-		fmt.Fprintf(out, "\nlogging to %s\n", lg.Path())
+		fmt.Fprintf(text, "\nlogging to %s\n", lg.Path())
 	}
-	fmt.Fprintln(out, "\n== APPLYING ==")
+	fmt.Fprintln(text, "\n== APPLYING ==")
 	res, err := apply.Run(ctx, s, p, ao)
 	ok := 0
 	for _, oc := range res.Outcomes {
@@ -122,6 +137,20 @@ func (a *app) runSync(ctx context.Context, out io.Writer, f *config.Fleet, o syn
 			ok++
 		}
 	}
-	fmt.Fprintf(out, "\n%d change(s) applied, %d failed\n", ok, len(res.Failed()))
+	for _, rc := range res.Recipes {
+		if rc.Status == apply.RecipeApplied || rc.Status == apply.RecipeForgotten {
+			ok++
+		}
+	}
+	failed := len(res.Failed()) + len(res.FailedRecipes())
+	if o.asJSON {
+		rep := planReport(p)
+		rep.Result = resultReport(res)
+		if werr := writeJSON(out, rep); werr != nil {
+			return werr
+		}
+		return err
+	}
+	fmt.Fprintf(out, "\n%d change(s) applied, %d failed\n", ok, failed)
 	return err
 }

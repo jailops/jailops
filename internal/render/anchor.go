@@ -134,8 +134,6 @@ type Origin struct {
 	// Policy is the name of the policy of a rule of the stage policy or raw.
 	Policy        string
 	ProjectPolicy bool
-	// Managed is set for the policy of an app (managed by app access).
-	Managed bool
 	// RuleNo is the number of the rule in its policy (1 is the first), as the anchor's heading counts them.
 	RuleNo   int
 	RuleName string
