@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"jailops.net/jailops/internal/daemon"
@@ -19,8 +20,27 @@ type hostReads struct {
 	answers map[string]string
 }
 
+// hostAnswersMu guards the answers and the netstat text: the daemon's goroutines (the reconciler) read them while a test
+// changes them between its checks.
+var hostAnswersMu sync.RWMutex
+
+func setAnswer(answers map[string]string, key, value string) {
+	hostAnswersMu.Lock()
+	defer hostAnswersMu.Unlock()
+	answers[key] = value
+}
+
+func setNetstat(p *string, value string) {
+	hostAnswersMu.Lock()
+	defer hostAnswersMu.Unlock()
+	*p = value
+}
+
 func (h hostReads) Run(ctx context.Context, c run.Cmd) (run.Result, error) {
-	if out, ok := h.answers[c.Name+" "+strings.Join(c.Args, " ")]; ok {
+	hostAnswersMu.RLock()
+	out, ok := h.answers[c.Name+" "+strings.Join(c.Args, " ")]
+	hostAnswersMu.RUnlock()
+	if ok {
 		return run.Result{Stdout: []byte(out)}, nil
 	}
 	return h.Runner.Run(ctx, c)
@@ -32,6 +52,8 @@ func hostReadsEnv(t *testing.T, answers map[string]string, netstat *string) (*dt
 		c.Runner = hostReads{c.Runner, answers}
 		c.HostExec = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 			if name == "netstat" && strings.Join(args, " ") == "-rnW" {
+				hostAnswersMu.RLock()
+				defer hostAnswersMu.RUnlock()
 				return []byte(*netstat), nil
 			}
 			return nil, context.Canceled
@@ -77,7 +99,7 @@ func TestDoctorLegacyRdr(t *testing.T) {
 		{"rdr on egress inet proto tcp from any to any -> 10.9.0.2", api.DoctorWarn, "tcp/8080"},
 		{"binat on em0 from 10.9.0.2 to any -> 192.0.2.7", api.DoctorWarn, "binat"},
 	} {
-		answers["pfctl -s nat"] = tc.nat
+		setAnswer(answers, "pfctl -s nat", tc.nat)
 		c := check("pf.legacy_rdr")
 		if c.Status != tc.status || !strings.Contains(c.Message, tc.want) {
 			t.Errorf("%q: %s %s", tc.nat, c.Status, c.Message)
@@ -94,19 +116,19 @@ func TestDoctorURPF(t *testing.T) {
 	s := e.D.Service()
 	natLan(t, s)
 	seedJail(t, s, "web")
-	answers["pfctl -s rules"] = `anchor "jailops/*" all` + "\nblock drop in all\n"
+	setAnswer(answers, "pfctl -s rules", `anchor "jailops/*" all`+"\nblock drop in all\n")
 	if c := check("pf.urpf"); c.Name != "" {
 		t.Fatalf("no urpf-failed rule, no check: %+v", c)
 	}
-	answers["pfctl -s rules"] = `anchor "jailops/*" all` + "\nblock drop in quick from urpf-failed to any label \"uRPF\"\n"
+	setAnswer(answers, "pfctl -s rules", `anchor "jailops/*" all`+"\nblock drop in quick from urpf-failed to any label \"uRPF\"\n")
 	if c := check("pf.urpf"); c.Status != api.DoctorOK {
 		t.Fatalf("one uplink with the default route: %+v", c)
 	}
-	netstat += "\nInternet6:\nDestination        Gateway            Flags   Nhop#    Mtu      Netif Expire\ndefault            fe80::1%em1        UGS         2   1500        em1\n"
+	setNetstat(&netstat, netstat+"\nInternet6:\nDestination        Gateway            Flags   Nhop#    Mtu      Netif Expire\ndefault            fe80::1%em1        UGS         2   1500        em1\n")
 	if c := check("pf.urpf"); c.Status != api.DoctorWarn || !strings.Contains(c.Message, "em0 (a default route leaves through em1)") || !strings.Contains(c.Hint, "on IF") {
 		t.Fatalf("a second default route elsewhere: %+v", c)
 	}
-	answers["pfctl -s rules"] = `anchor "jailops/*" all` + "\nblock drop in quick on em1 from urpf-failed to any\n"
+	setAnswer(answers, "pfctl -s rules", `anchor "jailops/*" all`+"\nblock drop in quick on em1 from urpf-failed to any\n")
 	if c := check("pf.urpf"); c.Name != "" {
 		t.Fatalf("uRPF on another interface only: %+v", c)
 	}
@@ -147,20 +169,20 @@ func TestDoctorDevfsRuleset(t *testing.T) {
 		t.Fatalf("stock rulesets: %+v", c)
 	}
 	// the CI script's pollution: bpf in ruleset 4, many times over; the jail with devices has its own ruleset
-	answers["devfs rule -s 4 show"] = number("include 1\ninclude 2\ninclude 3\npath fuse unhide\npath zfs unhide\npath bpf* unhide\npath bpf* unhide\npath 'pf' unhide")
+	setAnswer(answers, "devfs rule -s 4 show", number("include 1\ninclude 2\ninclude 3\npath fuse unhide\npath zfs unhide\npath bpf* unhide\npath bpf* unhide\npath 'pf' unhide"))
 	c := check("jail.devfs_ruleset")
 	if c.Status != api.DoctorWarn || !strings.Contains(c.Message, "ruleset 4 has path bpf* unhide, path pf unhide, which the jail(s) "+dtest.SeedProject+"/web get") || strings.Contains(c.Message, "vpn") || !strings.Contains(c.Hint, "devfs.NAME.device") {
 		t.Fatalf("bpf in ruleset 4: %+v", c)
 	}
 	// ruleset 1 that hides nothing reaches every FreeBSD jail
-	answers["devfs rule -s 4 show"] = number("include 1\ninclude 2\ninclude 3\npath fuse unhide\npath zfs unhide")
-	answers["devfs rule -s 1 show"] = number("path dri unhide")
+	setAnswer(answers, "devfs rule -s 4 show", number("include 1\ninclude 2\ninclude 3\npath fuse unhide\npath zfs unhide"))
+	setAnswer(answers, "devfs rule -s 1 show", number("path dri unhide"))
 	c = check("jail.devfs_ruleset")
 	if c.Status != api.DoctorWarn || !strings.Contains(c.Message, "nothing is hidden") || !strings.Contains(c.Message, "vpn") {
 		t.Fatalf("ruleset 1: %+v", c)
 	}
 	// ruleset 4 not loaded: a jail on it sees the whole /dev
-	answers["devfs rule showsets"] = "1\n2\n3\n"
+	setAnswer(answers, "devfs rule showsets", "1\n2\n3\n")
 	if c := check("jail.devfs_ruleset"); c.Status != api.DoctorFail || !strings.Contains(c.Message, "whole /dev") {
 		t.Fatalf("no ruleset 4: %+v", c)
 	}
