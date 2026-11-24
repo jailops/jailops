@@ -967,7 +967,9 @@ settle 10
 fwd_has() { pfctl -a jailops/pfa/r -sr 2>/dev/null | grep -q "$1"; }
 expect allow "r's anchor carries the redirect on the uplink" fwd_has "match in on pfupa inet proto tcp .* port = 18080 rdr-to $R4 port 8080"
 expect allow "and a labelled pass rule for what comes out of the translation (the state of the forward belongs to it)" fwd_has "pass in quick on pfupa inet proto tcp from any to $R4 port = [a-z0-9-]* .*label"
-expect allow "a client on the uplink reaches r through the forwarded port 18080" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 18080"
+# the client jail shows as running a moment before its network is up, as r did: wait for its address before it is the client of anything
+waitfor_ "pfrdr has its address on the uplink" 60 sh -c "jexec pfrdr ifconfig 2>/dev/null | grep -q 'inet 198.51.100.2 '"
+expect allow "a client on the uplink reaches r through the forwarded port 18080" sh -c "for i in 1 2 3 4 5; do jexec pfrdr nc -z -w2 198.51.100.1 18080 && exit 0; sleep 1; done; exit 1" # sleep-ok: the first packet of a fresh jail
 expect deny "a client on the uplink does not reach a port that is not forwarded (18081)" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 18081"
 # the review views say the same: the Internet row of r is a forward, list shows the port of the host, test walks the forward
 expect allow "firewall show r: the Internet reaches tcp 8080 of r through port 18080 of the host" sh -c "$J firewall show r --project pfa </dev/null | grep -E '^Internet +4 +tcp +8080 +any +forward [^ ]*:18080'"
@@ -977,7 +979,9 @@ expect allow "firewall test --from internet walks the forward (host port 18080)"
 expect deny "firewall test --from internet blocks a port that is not forwarded (18081)" sh -c "$J firewall test --from internet --to jail:r --port 18081 --family 4 --project pfa </dev/null"
 # NAT of the network (match out ... nat-to): a connection from r to a machine on the uplink's network arrives from the
 # uplink address, never from the jail's own address. The client jail pfrdr listens and says who connected.
-jexec pfrdr daemon -f nc -k -l 198.51.100.2 9000 || die "nc server in pfrdr"
+pfrdr_listens() { jexec pfrdr sockstat -4 -l -P tcp 2>/dev/null | grep -q ':9000 '; }
+pfrdr_try_listen() { pfrdr_listens && return 0; jexec pfrdr daemon -f nc -k -l 198.51.100.2 9000 >/dev/null 2>&1; sleep 1; pfrdr_listens; } # sleep-ok: the bind of the listener
+waitfor_ "pfrdr listens on 9000" 60 pfrdr_try_listen || die "nc server in pfrdr"
 jx pfa r daemon -f sh -c 'sleep 20 | nc -w25 198.51.100.2 9000 >/dev/null 2>&1' || die "client connection in r"
 waitfor_ "the client connection of r is up" 30 sh -c "jexec pfrdr sockstat -4 -c -P tcp 2>/dev/null | grep -q '198.51.100.2:9000 '"
 nat_from_uplink() { jexec pfrdr sockstat -4 -c -P tcp 2>/dev/null | grep -Eq '198\.51\.100\.2:9000 +198\.51\.100\.1:'; }
