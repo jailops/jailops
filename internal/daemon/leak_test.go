@@ -134,7 +134,9 @@ func TestLeakJailCycles(t *testing.T) {
 		cycle(i)
 	}
 	http.DefaultTransport.(*http.Transport).CloseIdleConnections()
-	growth := base.Verify(t, fmt.Sprintf("%d create/start/stop/delete cycles", n), 6, 6)
+	// A leak shows as about one descriptor per cycle (80 here). A loaded runner that overlaps more operations keeps a few more
+	// connections of the pools open (a database connection is three descriptors), so the slack for descriptors is 16.
+	growth := base.Verify(t, fmt.Sprintf("%d create/start/stop/delete cycles", n), 6, 16)
 	if growth > 24<<20 {
 		t.Errorf("the heap grew by %d bytes over %d jail cycles", growth, n)
 	}
