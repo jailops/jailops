@@ -47,7 +47,7 @@ jobs:
       release_only: ${{ steps.c.outputs.release_only }}
       heavy: ${{ steps.h.outputs.heavy }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           fetch-depth: 2
           persist-credentials: false
@@ -94,10 +94,10 @@ jobs:
     name: Web consoles (build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1   # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -111,7 +111,7 @@ jobs:
       # webui/dist instead of internal/webui/dist
       - name: Pack the built consoles
         run: tar -cf "$RUNNER_TEMP/console-dist.tar" internal/webui/dist internal/backupui/dist
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with:
           name: console-dist
           path: ${{ runner.temp }}/console-dist.tar
@@ -123,10 +123,10 @@ jobs:
     needs: web-build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1   # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -146,17 +146,17 @@ jobs:
     if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
       # the end-to-end tests build a demo of each console (JAILOPS_DEMO_BUILD=1) and serve it with `vite preview`
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
         with:
           name: console-dist
           path: ${{ runner.temp }}/console
       - name: Unpack the built consoles
         run: tar -xf "$RUNNER_TEMP/console/console-dist.tar"
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1   # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -189,7 +189,7 @@ jobs:
       # Only the packages, not the directory: apt leaves `lock` (root, 0640) and `partial/` in it, tar cannot read them, the save failed
       # with exit code 2 and so the cache never existed: every run downloaded Chromium and its libraries again.
       - name: Cache the apt packages and the Playwright browser
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830   # v4.3.0
         with:
           path: |
             /var/cache/apt/archives/*.deb
@@ -207,18 +207,18 @@ jobs:
     env:
       CGO_ENABLED: "0"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           fetch-depth: 2
           persist-credentials: false
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5   # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
       # One Go build cache per job (and shard, architecture or part): setup-go's own cache has one key for all of them, so the first
       # job to finish saved its flavour (race, freebsd, trimpath ...) and the others restored a cache of no use to them.
       - name: Go build cache of this job
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830   # v4.3.0
         with:
           path: |
             ~/go/pkg/mod
@@ -228,7 +228,7 @@ jobs:
             go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
       - name: Fetch the Go modules
         uses: ./.github/actions/go-modules
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
         with:
           name: console-dist
           path: ${{ runner.temp }}/console
@@ -285,17 +285,17 @@ jobs:
     env:
       CGO_ENABLED: "0"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5   # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
       # One Go build cache per job (and shard, architecture or part): setup-go's own cache has one key for all of them, so the first
       # job to finish saved its flavour (race, freebsd, trimpath ...) and the others restored a cache of no use to them.
       - name: Go build cache of this job
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830   # v4.3.0
         with:
           path: |
             ~/go/pkg/mod
@@ -305,7 +305,7 @@ jobs:
             go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
       - name: Fetch the Go modules
         uses: ./.github/actions/go-modules
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
         with:
           name: console-dist
           path: ${{ runner.temp }}/console
@@ -345,17 +345,17 @@ jobs:
     env:
       JAILOPS_TEST_DATABASE_URL: postgres://postgres@localhost:5432/postgres?sslmode=disable
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5   # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
       # One Go build cache per job (and shard, architecture or part): setup-go's own cache has one key for all of them, so the first
       # job to finish saved its flavour (race, freebsd, trimpath ...) and the others restored a cache of no use to them.
       - name: Go build cache of this job
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830   # v4.3.0
         with:
           path: |
             ~/go/pkg/mod
@@ -365,7 +365,7 @@ jobs:
             go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
       - name: Fetch the Go modules
         uses: ./.github/actions/go-modules
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
         with:
           name: console-dist
           path: ${{ runner.temp }}/console
@@ -386,17 +386,17 @@ jobs:
       GOOS: freebsd
       GOARCH: ${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5   # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
       # One Go build cache per job (and shard, architecture or part): setup-go's own cache has one key for all of them, so the first
       # job to finish saved its flavour (race, freebsd, trimpath ...) and the others restored a cache of no use to them.
       - name: Go build cache of this job
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830   # v4.3.0
         with:
           path: |
             ~/go/pkg/mod
@@ -406,7 +406,7 @@ jobs:
             go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
       - name: Fetch the Go modules
         uses: ./.github/actions/go-modules
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
         with:
           name: console-dist
           path: ${{ runner.temp }}/console
@@ -419,7 +419,7 @@ jobs:
           for b in jailops jailopsd jailops-priv jailops-sync jailops-backupd; do
             go build -trimpath -ldflags="-s -w -X main.version=$(tr -d '[:space:]' < version.txt)" -o dist/$b-freebsd-${{ matrix.arch }} ./cmd/$b
           done
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with:
           name: freebsd-${{ matrix.arch }}
           path: dist
@@ -471,10 +471,10 @@ jobs:
             shard: d
             pkgs: curl
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
         with:
           name: console-dist
           path: ${{ runner.temp }}/console
@@ -482,7 +482,7 @@ jobs:
         run: tar -xf "$RUNNER_TEMP/console/console-dist.tar"
       # The e2e and pf VMs get the binaries built here (cross-compiled in about a minute) instead of building them inside the VM, and
       # the forged-frame tool for phase 0e of the PF matrix.
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5   # v7.1.0
         if: matrix.part != 'go'
         with:
           go-version-file: go.mod
@@ -491,7 +491,7 @@ jobs:
       # job to finish saved its flavour (race, freebsd, trimpath ...) and the others restored a cache of no use to them.
       - name: Go build cache of this job
         if: matrix.part != 'go'
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830   # v4.3.0
         with:
           path: |
             ~/go/pkg/mod
@@ -518,7 +518,7 @@ jobs:
         run: |
           test -e /dev/kvm || { echo "::error::no /dev/kvm on this runner: the VM would run on TCG"; exit 1; }
           nproc; ls -l /dev/kvm
-      - uses: vmactions/freebsd-vm@v1
+      - uses: vmactions/freebsd-vm@811efaaac0668df8bfb8308c3ec997b5ab50037b   # v1
         env:
           PART: ${{ matrix.part }}
           SHARD: ${{ matrix.shard }}
