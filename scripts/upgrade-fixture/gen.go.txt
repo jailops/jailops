@@ -74,6 +74,18 @@ func oldSchema(version string) bool {
 	return minor < 8 || (minor == 8 && patch <= 3)
 }
 
+// hasLayout reports whether the release still has the jail field layout (every release before 0.9.3: it stored the
+// root layout of a jail, thin or thick).
+func hasLayout(version string) bool {
+	parts := strings.Split(strings.TrimPrefix(version, "v"), ".")
+	if len(parts) != 3 {
+		must(fmt.Errorf("version %q is not X.Y.Z", version), "version")
+	}
+	minor, _ := strconv.Atoi(parts[1])
+	patch, _ := strconv.Atoi(parts[2])
+	return minor < 9 || (minor == 9 && patch < 3)
+}
+
 func objects(old bool) []doc {
 	lan6 := `{"ndp_proxy":true,"subnet":"2001:db8:77:1::/64","range":"2001:db8:77:1::10-2001:db8:77:1::ff"}`
 	routed6 := `{"subnet":"2001:db8:78:1::/64","range":"2001:db8:78:1::10-2001:db8:78:1::ff"}`
@@ -111,20 +123,24 @@ type jailDoc struct {
 	name, uuid, spec string
 }
 
-func jails(old bool) []jailDoc {
+func jails(old, layout bool) []jailDoc {
 	webImage := `"freebsd-15-1"`
 	reach := `"expose":[{"proto":"tcp","ports":["80","443"],"families":["4","6"],"comment":"the site"}]`
 	if old {
 		webImage = `"freebsd-15-1@stable"`
 		reach = `"proxy":[{"name":"http","listen":"0.0.0.0:8080","jail_port":80,"proto":"tcp"}]`
 	}
-	// "layout":"thin" is the value those releases stored for their old root layout: the fixture keeps it so that this
-	// release is tested on it
+	// "layout":"thin" is the value the releases before 0.9.3 stored for their old root layout: the fixture keeps it so
+	// that this release is tested on it; a release without the field gets none
+	lay := ""
+	if layout {
+		lay = `"layout":"thin",`
+	}
 	return []jailDoc{
-		{name: "web", uuid: "11111111-1111-4111-8111-111111111111", spec: `{"image":` + webImage + `,"storage":"default","layout":"thin",` +
+		{name: "web", uuid: "11111111-1111-4111-8111-111111111111", spec: `{"image":` + webImage + `,"storage":"default",` + lay +
 			`"network":[{"network":"lan","ipv4":"10.77.0.2","ipv6":"2001:db8:77:1::10"}],"firewall":{"policies":["web-access"]},` +
 			`"volumes":[{"volume":"data","mount":"/srv/data"}],"boot":{"autostart":true,"priority":10},"resources":{"memory":"1G","pids":200},` + reach + `}`},
-		{name: "db", uuid: "22222222-2222-4222-8222-222222222222", spec: `{"image":"freebsd-15-1","storage":"default","layout":"thin",` +
+		{name: "db", uuid: "22222222-2222-4222-8222-222222222222", spec: `{"image":"freebsd-15-1","storage":"default",` + lay +
 			`"network":[{"network":"lan","ipv4":"10.77.0.3"}],"firewall":{"policies":["floor"]},"boot":{"autostart":true,"depends":["web"]}}`},
 	}
 }
@@ -164,7 +180,7 @@ func main() {
 
 	// 2. the records of the jails: spec.json and bundle.json as lifecycle writes them
 	var jailNames []string
-	for _, j := range jails(old) {
+	for _, j := range jails(old, hasLayout(*version)) {
 		var spec api.JailSpec
 		must(strict(j.spec, &spec), fmt.Sprintf("the jail %q does not decode strictly with the types of %s", j.name, *version))
 		meta := api.ObjectMeta{Name: j.name, UUID: j.uuid, Project: project, Host: hostUUID, Scope: api.ScopeHost, Generation: 1}

@@ -1,6 +1,7 @@
 package upgradecheck
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -79,13 +80,22 @@ func datasetsOf(t *testing.T, e *dtest.Env, c string) []zfs.Dataset {
 
 // A host upgraded to this release with jails of the old root layout on it: the daemon starts, finds them, never touches
 // their data, marks them (condition UnsupportedLayout, doctor jail.unsupported_layout FAIL), lets them be stopped and
-// deleted, and refuses everything else, a start too, with the fix. The jail records are those of the newest fixture.
+// deleted, and refuses everything else, a start too, with the fix. The jail records are those of the newest fixture
+// of a release that still had the layout (0.9.2 and before).
 func TestADaemonOnAHostWithUnsupportedLayoutJails(t *testing.T) {
 	vs := versions(t)
-	src := filepath.Join(fixtureRoot, vs[len(vs)-1])
-	spec, err := os.ReadFile(filepath.Join(src, "jails", "shop", "web", "spec.json"))
-	if err != nil {
-		t.Fatal(err)
+	var spec []byte
+	for i := len(vs) - 1; i >= 0 && spec == nil; i-- {
+		b, err := os.ReadFile(filepath.Join(fixtureRoot, vs[i], "jails", "shop", "web", "spec.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(b, []byte(`"layout"`)) {
+			spec = b
+		}
+	}
+	if spec == nil {
+		t.Fatal("no fixture has a jail with the layout field")
 	}
 	e := dtest.New(t, dtest.Options{})
 	e.Seed()
