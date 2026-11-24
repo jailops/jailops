@@ -45,7 +45,6 @@ var Authorities = map[Kind]Authority{
 	KindJail:            {ScopeHost, ownerProject, writerOperate, livesJail},
 	KindJailSnapshot:    {ScopeHost, ownerProject, writerOperate, livesZFS},
 	KindVolume:          {ScopeHost, ownerProject, writerProject, livesState + " and the volume's dataset"},
-	KindAppAccess:       {ScopeHost, ownerProject, writerProject, livesState},
 	KindProject:         {ScopeHost, ownerHost, writerGlobal, livesState},
 	KindStorage:         {ScopeHost, ownerHost, writerGlobal, livesState},
 	KindLogForward:      {ScopeHost, ownerHost, writerGlobal, livesState},

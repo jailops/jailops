@@ -1,5 +1,3 @@
-app.install.failed
-app.installed
 backup-failed
 certificate-revoked
 forward-migrate-skipped
@@ -24,7 +22,6 @@ jail-snapshot-created
 jail-snapshot-deleted
 jail-stale-mounts-cleaned
 jail-started
-jail-stopped
 jail-suspected-compromised
 jail-unexposed
 jail-updated

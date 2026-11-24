@@ -4,7 +4,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { s } from '@/i18n'
 import { api } from '@/api/endpoints'
 import { useLoad } from '@jailops/shared/composables/load'
-import { can } from '@jailops/shared/composables/session'
 import { askLifecycle, askStopMany, lifecycleMany, isLocked, type Lifecycle } from '@/composables/jailActions'
 import { canEditLabels, canRunMany, canShell, goShell, shellPath } from '@/composables/shell'
 import { knownLabels, matchTerms, parseQuery, withLabel } from '@/lib/labels'
@@ -174,7 +173,6 @@ function one(n: string, a: Lifecycle, power: string): void {
           <p>{{ s.jails.emptyNone }}</p>
           <div class="row-actions" style="justify-content: center">
             <button class="btn btn-primary" type="button" data-test="empty-new-jail" @click="openCreate"><Icon name="plus" />{{ s.jails.create }}</button>
-            <router-link v-if="can('apps')" class="btn" to="/apps"><Icon name="store" />{{ s.jails.emptyApps }}</router-link>
           </div>
         </div>
         <div v-else class="table-wrap">

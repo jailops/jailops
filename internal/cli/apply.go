@@ -17,7 +17,7 @@ type applier func(ctx context.Context, doc map[string]any) error
 func (a *app) appliers() map[api.Kind]applier {
 	return map[api.Kind]applier{
 		api.KindJail:           applyWith(a, a.jailDesc()),
-		api.KindVolume:         applyWith(a, volumeDesc()),
+		api.KindVolume:         applyWith(a, volumeApplyDesc()),
 		api.KindImage:          applyWith(a, imageDesc()),
 		api.KindNetwork:        applyWith(a, networkDesc()),
 		api.KindProject:        applyWith(a, a.projectDesc()),
@@ -67,7 +67,13 @@ func applyWith[T any](a *app, d *kindDesc[T]) applier {
 			return nil
 		}
 		next := cur
-		d.setSpec(&next, x)
+		if d.existing != nil {
+			if next, err = d.existing(cur, x); err != nil {
+				return err
+			}
+		} else {
+			d.setSpec(&next, x)
+		}
 		before, _ := json.Marshal(document(d.kind, *d.meta(&cur), d.specOf(&cur)))
 		after, _ := json.Marshal(document(d.kind, *d.meta(&next), d.specOf(&next)))
 		if string(before) == string(after) {
@@ -105,8 +111,11 @@ was read so a concurrent change is detected; one that already matches is left
 alone. The file is checked as a whole first (kinds, project); a document the
 server refuses stops the command, and the ones before it stay applied.
 
-Kinds: Jail, Image, Network, Project, Storage, FirewallPolicy, AddressSet,
-BackupTarget, BackupPolicy, Profile and Remote. Jails, firewall policies,
+Kinds: Jail, Volume, Image, Network, Project, Storage, FirewallPolicy, AddressSet,
+BackupTarget, BackupPolicy, Profile and Remote. A Volume is made when it is missing;
+one that exists with the same spec is left alone, and a document that asks for
+another storage, size, owner, mode or encryption is refused: a file never
+re-owns or resizes the data of a volume. Jails, volumes, firewall policies,
 address sets, backup policies and profiles need a project (--project,
 JAILOPS_PROJECT or 'project switch'). With --dry-run every document is read and
 checked and what would be sent is printed; nothing is sent.`,

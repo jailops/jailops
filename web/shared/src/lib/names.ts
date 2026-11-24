@@ -19,7 +19,7 @@ const letters = (max: number) => `Lowercase letters, digits and hyphens, startin
 /** api.NamePattern: lowercase letters, digits and hyphens, starting with a letter, not ending in a hyphen. The length is checked apart. */
 export const NAME_PATTERN = /^[a-z]([a-z0-9-]*[a-z0-9])?$/
 
-/** The rules by name. `object` covers storage, profiles, firewall policies and app instances' other objects. */
+/** The rules by name. `object` covers storage, profiles, firewall policies and the other objects. */
 export const nameRules: Record<NameRule, Rule> = {
   object: { re: NAME_PATTERN, max: 63, hint: letters(63) },
   project: { re: NAME_PATTERN, max: 13, hint: letters(13) + ' Not "all" or "host".', reserved: ['all', 'host'] },

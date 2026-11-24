@@ -4,7 +4,7 @@ export type Feature =
   | 'jails' | 'snapshots' | 'rollback_scopes' | 'images' | 'generations' | 'image_upgrade' | 'networks' | 'firewall'
   | 'backups' | 'restore' | 'audit' | 'events' | 'operations' | 'resources' | 'doctor'
   | 'projects' | 'project_quotas' | 'storage' | 'trust_tokens' | 'sessions' | 'fleet_projects' | 'exec' | 'profiles' | 'config_keys' | 'devices'
-  | 'apps' | 'app_install' | 'jail_logs' | 'jail_files'
+  | 'jail_logs' | 'jail_files'
 
 const need: Record<Feature, string> = {
   jails: 'jails',
@@ -32,8 +32,6 @@ const need: Record<Feature, string> = {
   profiles: 'profiles',
   config_keys: 'config_keys',
   devices: 'devices',
-  apps: 'apps',
-  app_install: 'app_install',
   jail_logs: 'jail_logs',
   jail_files: 'jail_files',
 }

@@ -14,8 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/render"
+	"jailops.net/jailops/internal/sys/jailos"
+	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
@@ -30,9 +31,11 @@ var svcVarRE = regexp.MustCompile(`[^A-Za-z0-9_]`)
 
 // applyRun is the state of one apply.
 type applyRun struct {
-	s    *Service
-	key  string
-	dry  bool
+	s   *Service
+	key string
+	dry bool
+	// sens: the request carries a secret. No command output reaches a result, an error, a log or an operation record.
+	sens bool
 	root string
 	res  api.ApplyResult
 	// accounts are the lines of the jail's /etc/passwd and /etc/group, read when a file names an owner.
@@ -42,6 +45,15 @@ type applyRun struct {
 // stepOutcome is what a step did.
 type stepOutcome struct {
 	kind, name, status, detail string
+}
+
+// ValidateRecipe checks a rendered recipe as ApplyJail would, without a jail. The error names the step and the field and
+// carries no value or file content (validate.Recipe writes none), whatever the request says about secrets.
+func (s *Service) ValidateRecipe(req api.RecipeValidateRequest) (api.RecipeValidateResult, error) {
+	if err := validate.Recipe(req.Recipe); err != nil {
+		return api.RecipeValidateResult{}, err
+	}
+	return api.RecipeValidateResult{Valid: true, Steps: len(req.Recipe.Steps)}, nil
 }
 
 // ApplyJail runs a recipe in a running FreeBSD jail as an operation.
@@ -72,7 +84,7 @@ func (s *Service) ApplyJail(ctx context.Context, name string, req api.ApplyReque
 			if !s.jailRunning(ctx, key) {
 				return nil, api.Errorf(api.CodeBusy, "jail %q is not running; a recipe runs inside it", name).WithHint("start it first")
 			}
-			a := &applyRun{s: s, key: key, dry: req.DryRun, root: s.rootMount(key), res: api.ApplyResult{Jail: name, DryRun: req.DryRun, Steps: []api.ApplyStep{}}}
+			a := &applyRun{s: s, key: key, dry: req.DryRun, sens: req.Sensitive, root: s.rootMount(key), res: api.ApplyResult{Jail: name, DryRun: req.DryRun, Steps: []api.ApplyStep{}}}
 			if err := a.run(ctx, req.Recipe); err != nil {
 				return nil, err
 			}
@@ -83,7 +95,8 @@ func (s *Service) ApplyJail(ctx context.Context, name string, req api.ApplyReque
 		}})
 }
 
-// run runs the steps and stops at the first failure; the error carries the report so far and the output of the step.
+// run runs the steps and stops at the first failure. The error is public (code step_failed): it names the step, the exit
+// status of the command and, unless the request is sensitive, the last lines of its output.
 func (a *applyRun) run(ctx context.Context, r api.Recipe) error {
 	for i, st := range r.Steps {
 		if err := ctx.Err(); err != nil {
@@ -92,10 +105,6 @@ func (a *applyRun) run(ctx context.Context, r api.Recipe) error {
 		o, out, err := a.step(ctx, st)
 		if err != nil {
 			a.res.Steps = append(a.res.Steps, api.ApplyStep{Kind: o.kind, Name: o.name, Status: api.StepFailed})
-			msg := strings.Join(strings.Split(strings.TrimSpace(tailLines(out, 20)), "\n"), " / ")
-			if msg == "" {
-				msg = err.Error()
-			}
 			var done []string
 			for _, d := range a.res.Steps[:len(a.res.Steps)-1] {
 				done = append(done, d.Kind+" "+d.Name+" "+d.Status)
@@ -105,12 +114,55 @@ func (a *applyRun) run(ctx context.Context, r api.Recipe) error {
 				hint = "Before it: " + strings.Join(done, "; ") + ". " + hint
 			}
 			// one line of text: the client does not print a line break of an error
-			return &publicError{ae: api.Errorf(api.CodeInternal, "step %d of %d failed (%s %s): %s", i+1, len(r.Steps), o.kind, o.name, msg).WithHint(hint), cause: err}
+			return &publicError{ae: api.Errorf(api.CodeStepFailed, "step %d of %d failed (%s %s): %s", i+1, len(r.Steps), o.kind, o.name, a.failure(err, out)).WithHint(hint), cause: errors.New("a step failed")}
 		}
 		a.res.Steps = append(a.res.Steps, api.ApplyStep{Kind: o.kind, Name: o.name, Status: o.status, Detail: o.detail})
 	}
 	return nil
 }
+
+// failure says why a step failed. A command that ran and failed is its exit status and its output; a request that
+// carries a secret gets the exit status only, as the output of a command (psql, cat) may print what it read.
+func (a *applyRun) failure(err error, out []byte) string {
+	var xe *execError
+	if a.sens {
+		if errors.As(err, &xe) && xe.code != 0 {
+			return fmt.Sprintf("exit status %d (the output is withheld: the recipe carries a secret)", xe.code)
+		}
+		if errors.As(err, &xe) {
+			return "the command could not run (the output is withheld: the recipe carries a secret)"
+		}
+		var ae *api.Error
+		if errors.As(err, &ae) {
+			return ae.Message
+		}
+		return "the step failed (the details are withheld: the recipe carries a secret)"
+	}
+	text := strings.Join(strings.Split(strings.TrimSpace(tailLines(out, 20)), "\n"), " / ")
+	switch {
+	case errors.As(err, &xe) && xe.code != 0 && text != "":
+		return fmt.Sprintf("exit status %d: %s", xe.code, text)
+	case errors.As(err, &xe) && xe.code != 0:
+		return fmt.Sprintf("exit status %d", xe.code)
+	case text != "":
+		return text
+	}
+	return err.Error()
+}
+
+// execError is a command of a step that failed: its exit status (0 when it did not run at all). Its text has no output.
+type execError struct {
+	code int
+	err  error
+}
+
+func (e *execError) Error() string {
+	if e.code != 0 {
+		return fmt.Sprintf("exit status %d", e.code)
+	}
+	return e.err.Error()
+}
+func (e *execError) Unwrap() error { return e.err }
 
 // tailLines is the last n lines of b.
 func tailLines(b []byte, n int) string {
@@ -128,6 +180,8 @@ func (a *applyRun) step(ctx context.Context, st api.RecipeStep) (o stepOutcome, 
 		return a.packages(ctx, st.Package)
 	case st.File != nil:
 		return a.file(ctx, *st.File)
+	case st.Dir != nil:
+		return a.dir(ctx, *st.Dir)
 	case st.Sysrc != nil:
 		return a.sysrc(ctx, st)
 	case st.Service != nil:
@@ -136,15 +190,34 @@ func (a *applyRun) step(ctx context.Context, st api.RecipeStep) (o stepOutcome, 
 	return a.command(ctx, st)
 }
 
-// inJail runs argv in the jail with the login PATH: the PATH of the daemon has no /usr/local.
+// inJail runs argv in the jail with the login PATH: the PATH of the daemon has no /usr/local. A failure is an *execError.
 func (a *applyRun) inJail(ctx context.Context, timeout time.Duration, argv ...string) ([]byte, error) {
-	return a.s.runInJail(ctx, a.key, timeout, append([]string{"/usr/bin/env", "PATH=" + ShellPATH}, argv...)...)
+	if a.s.d.Jails == nil {
+		return nil, api.Errorf(api.CodeUnsupported, "this daemon cannot run commands in jails")
+	}
+	res, err := a.s.d.Jails.Exec(ctx, a.key, jailos.ExecOpts{Argv: append([]string{"/usr/bin/env", "PATH=" + ShellPATH}, argv...), Timeout: timeout})
+	out := append(append([]byte(nil), res.Stdout...), res.Stderr...)
+	if err != nil {
+		return out, &execError{code: res.ExitCode, err: err}
+	}
+	return out, nil
+}
+
+// pkg runs a package command of the host for the jail (the host's pkg works in the jail with -j). A failure is an *execError.
+func (a *applyRun) pkg(ctx context.Context, timeout time.Duration, argv ...string) ([]byte, error) {
+	host := append([]string{argv[0], "-j", a.key}, argv[1:]...)
+	res, err := a.s.d.Run.Run(ctx, run.Cmd{Name: host[0], Args: host[1:], Timeout: timeout})
+	out := append(append([]byte(nil), res.Stdout...), res.Stderr...)
+	if err != nil {
+		return out, &execError{code: res.ExitCode, err: err}
+	}
+	return out, nil
 }
 
 func (a *applyRun) packages(ctx context.Context, names []string) (stepOutcome, []byte, error) {
 	o := stepOutcome{kind: "package", name: strings.Join(names, " ")}
 	// the host's pkg works in the jail (-j): a minimal jail needs no package tool of its own
-	out, err := a.s.pkgExec(ctx, a.key, 2*time.Minute, "pkg", "query", "%n")
+	out, err := a.pkg(ctx, 2*time.Minute, "pkg", "query", "%n")
 	if err != nil {
 		return o, out, err
 	}
@@ -166,7 +239,7 @@ func (a *applyRun) packages(ctx context.Context, names []string) (stepOutcome, [
 	}
 	for len(missing) > 0 {
 		n := min(len(missing), pkgUpgradeChunk)
-		if out, err := a.s.pkgExec(ctx, a.key, 30*time.Minute, append([]string{"pkg", "install", "-y"}, missing[:n]...)...); err != nil {
+		if out, err := a.pkg(ctx, 30*time.Minute, append([]string{"pkg", "install", "-y"}, missing[:n]...)...); err != nil {
 			return o, out, err
 		}
 		missing = missing[n:]
@@ -192,8 +265,15 @@ func (a *applyRun) readFile(ctx context.Context, rel string) ([]byte, *tar.Heade
 	if st.Type == api.FileTypeNone {
 		return nil, nil, false, nil
 	}
-	if st.Type != api.FileTypeFile {
-		return nil, &tar.Header{Typeflag: tar.TypeDir}, true, nil
+	switch st.Type {
+	case api.FileTypeFile:
+	case api.FileTypeDir:
+		m, _ := strconv.ParseUint(st.Mode, 8, 32)
+		return nil, &tar.Header{Typeflag: tar.TypeDir, Mode: int64(m), Uid: st.Uid, Gid: st.Gid}, true, nil
+	case api.FileTypeSymlink:
+		return nil, &tar.Header{Typeflag: tar.TypeSymlink}, true, nil
+	default:
+		return nil, &tar.Header{Typeflag: tar.TypeFifo}, true, nil
 	}
 	if st.Size > validate.RecipeFileMax {
 		return nil, &tar.Header{Typeflag: tar.TypeReg, Size: st.Size}, true, nil
@@ -221,22 +301,73 @@ func (a *applyRun) account(ctx context.Context, name string, group bool) (int, e
 	if group {
 		file, col, rel, what = &a.group, 2, "etc/group", "group"
 	}
-	if *file == "" {
+	find := func() (int, bool) {
+		for _, l := range strings.Split(*file, "\n") {
+			f := strings.Split(l, ":")
+			if len(f) > col && f[0] == name {
+				if n, err := strconv.Atoi(f[col]); err == nil {
+					return n, true
+				}
+			}
+		}
+		return 0, false
+	}
+	read := func() error {
 		t, _, err := a.jailText(ctx, rel)
-		if err != nil {
+		*file = t + "\n"
+		return err
+	}
+	// the file is read when it is first needed; a miss in one read earlier reads it once more, as a step before this one
+	// (a package, a run) may have created the account since
+	fresh := *file == ""
+	if fresh {
+		if err := read(); err != nil {
 			return 0, err
 		}
-		*file = t + "\n"
 	}
-	for _, l := range strings.Split(*file, "\n") {
-		f := strings.Split(l, ":")
-		if len(f) > col && f[0] == name {
-			if n, err := strconv.Atoi(f[col]); err == nil {
-				return n, nil
-			}
+	if n, ok := find(); ok {
+		return n, nil
+	}
+	if !fresh {
+		if err := read(); err != nil {
+			return 0, err
+		}
+		if n, ok := find(); ok {
+			return n, nil
 		}
 	}
 	return 0, fmt.Errorf("the jail has no %s %q (a run step before this one can create it)", what, name)
+}
+
+// owners resolves the owner and group a step names to numbers through the jail's own files. Without a name an existing
+// file or directory keeps its owner and a new one is root:wheel (0:0). A dry run goes on when a name does not exist yet
+// (a run step may create it): ownerGap says so.
+func (a *applyRun) owners(ctx context.Context, owner, group string, exists bool, hdr *tar.Header) (uid, gid int, ownerGap string, err error) {
+	if exists && owner == "" {
+		uid = hdr.Uid
+	}
+	if exists && group == "" {
+		gid = hdr.Gid
+	}
+	for _, x := range []struct {
+		name  string
+		group bool
+		to    *int
+	}{{owner, false, &uid}, {group, true, &gid}} {
+		if x.name == "" {
+			continue
+		}
+		n, err := a.account(ctx, x.name, x.group)
+		if err != nil {
+			if !a.dry {
+				return 0, 0, "", err
+			}
+			ownerGap = err.Error()
+			continue
+		}
+		*x.to = n
+	}
+	return uid, gid, ownerGap, nil
 }
 
 func (a *applyRun) file(ctx context.Context, f api.RecipeFile) (stepOutcome, []byte, error) {
@@ -253,34 +384,17 @@ func (a *applyRun) file(ctx context.Context, f api.RecipeFile) (stepOutcome, []b
 	if err != nil {
 		return o, nil, err
 	}
-	if exists && hdr.Typeflag == tar.TypeDir {
+	switch {
+	case exists && hdr.Typeflag == tar.TypeDir:
 		return o, nil, fmt.Errorf("%s is a directory", f.Path)
+	case exists && hdr.Typeflag == tar.TypeSymlink:
+		return o, nil, fmt.Errorf("%s is a symbolic link: a file step does not follow it; replace it with a run step or name the real path", f.Path)
+	case exists && hdr.Typeflag != tar.TypeReg:
+		return o, nil, fmt.Errorf("%s is not a regular file", f.Path)
 	}
-	// the owner is resolved in the jail; a dry run goes on when it does not exist yet (a run step may create it)
-	uid, gid, ownerGap := 0, 0, ""
-	if exists && f.Owner == "" {
-		uid = hdr.Uid
-	}
-	if exists && f.Group == "" {
-		gid = hdr.Gid
-	}
-	for _, x := range []struct {
-		name  string
-		group bool
-		to    *int
-	}{{f.Owner, false, &uid}, {f.Group, true, &gid}} {
-		if x.name == "" {
-			continue
-		}
-		n, err := a.account(ctx, x.name, x.group)
-		if err != nil {
-			if !a.dry {
-				return o, nil, err
-			}
-			ownerGap = err.Error()
-			continue
-		}
-		*x.to = n
+	uid, gid, ownerGap, err := a.owners(ctx, f.Owner, f.Group, exists, hdr)
+	if err != nil {
+		return o, nil, err
 	}
 	var why []string
 	switch {
@@ -309,41 +423,115 @@ func (a *applyRun) file(ctx context.Context, f api.RecipeFile) (stepOutcome, []b
 		o.status = api.StepWouldChange
 		return o, nil, nil
 	}
-	// the final mode and owner are set on the temporary file before it is renamed: no moment shows the content with other rights
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: path.Base(f.Path), Mode: mode, Uid: uid, Gid: gid, Size: int64(len(want)), ModTime: a.s.now()}); err != nil {
-		return o, nil, err
-	}
-	if _, err := tw.Write(want); err != nil {
-		return o, nil, err
-	}
-	if err := tw.Close(); err != nil {
-		return o, nil, err
-	}
-	_, err = a.s.d.JailFiles.JailPut(ctx, JailPutReq{Jail: a.key, Root: a.root, Path: strings.TrimPrefix(path.Dir(f.Path), "/"), Mkdir: true, Preserve: true, MaxBytes: validate.RecipeFileMax + 1<<10}, &buf)
-	if err != nil {
+	if err := a.putFile(ctx, f.Path, want, mode, uid, gid); err != nil {
 		return o, nil, err
 	}
 	o.status = api.StepChanged
 	return o, nil, nil
 }
 
-// rcFile reads one of the rc.conf style files of the jail's /etc through the host's file operations (the minimal base
-// set has no sysrc(8), and the file is the same either way).
-func (a *applyRun) rcFile(ctx context.Context, name string) (string, string, error) {
-	p := a.root + "/etc/" + name
-	cur, err := a.s.d.Files.ReadFile(ctx, p)
-	if err != nil && !notExist(err) {
-		return "", p, fmt.Errorf("read %s: %w", p, err)
+// dir makes the directory of a dir step. It is never recursive: the parents that are missing are made root:wheel 0755,
+// and a directory that exists is changed only in the mode, owner and group the step names.
+func (a *applyRun) dir(ctx context.Context, d api.RecipeDir) (stepOutcome, []byte, error) {
+	o := stepOutcome{kind: "dir", name: d.Path}
+	rel := strings.TrimPrefix(d.Path, "/")
+	_, hdr, exists, err := a.readFile(ctx, rel)
+	if err != nil {
+		return o, nil, err
 	}
-	return string(cur), p, nil
+	switch {
+	case exists && hdr.Typeflag == tar.TypeSymlink:
+		return o, nil, fmt.Errorf("%s is a symbolic link: a dir step does not follow it", d.Path)
+	case exists && hdr.Typeflag != tar.TypeDir:
+		return o, nil, fmt.Errorf("%s exists and is not a directory", d.Path)
+	}
+	mode := int64(0o755)
+	if d.Mode != "" {
+		m, _ := strconv.ParseUint(d.Mode, 8, 32)
+		mode = int64(m & 0o777)
+	} else if exists {
+		mode = int64(hdr.Mode) & 0o777
+	}
+	uid, gid, ownerGap, err := a.owners(ctx, d.Owner, d.Group, exists, hdr)
+	if err != nil {
+		return o, nil, err
+	}
+	var why []string
+	if !exists {
+		why = append(why, "new directory")
+	} else {
+		if int64(hdr.Mode)&0o777 != mode {
+			why = append(why, "mode")
+		}
+		if hdr.Uid != uid || hdr.Gid != gid {
+			why = append(why, "owner")
+		}
+	}
+	if ownerGap != "" {
+		why = append(why, "owner not resolved yet")
+	}
+	if len(why) == 0 {
+		o.status = api.StepUnchanged
+		return o, nil, nil
+	}
+	o.detail = strings.Join(why, ", ")
+	if a.dry {
+		o.status = api.StepWouldChange
+		return o, nil, nil
+	}
+	// a tar stream of one directory entry: the extractor makes it when it is missing and sets mode and owner either way
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeDir, Name: path.Base(d.Path) + "/", Mode: mode, Uid: uid, Gid: gid, ModTime: a.s.now()}); err != nil {
+		return o, nil, err
+	}
+	if err := tw.Close(); err != nil {
+		return o, nil, err
+	}
+	if _, err := a.s.d.JailFiles.JailPut(ctx, JailPutReq{Jail: a.key, Root: a.root, Path: strings.TrimPrefix(path.Dir(d.Path), "/"), Mkdir: true, Preserve: true, MaxBytes: validate.RecipeFileMax}, &buf); err != nil {
+		return o, nil, err
+	}
+	o.status = api.StepChanged
+	return o, nil, nil
+}
+
+// putFile writes the regular file at the jail path p (with a leading slash). The final mode and owner are set on the
+// temporary file before it is renamed: no moment shows the content with other rights.
+func (a *applyRun) putFile(ctx context.Context, p string, content []byte, mode int64, uid, gid int) error {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: path.Base(p), Mode: mode, Uid: uid, Gid: gid, Size: int64(len(content)), ModTime: a.s.now()}); err != nil {
+		return err
+	}
+	if _, err := tw.Write(content); err != nil {
+		return err
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	_, err := a.s.d.JailFiles.JailPut(ctx, JailPutReq{Jail: a.key, Root: a.root, Path: strings.TrimPrefix(path.Dir(p), "/"), Mkdir: true, Preserve: true, MaxBytes: validate.RecipeFileMax + 1<<10}, &buf)
+	return err
+}
+
+// rcFile reads one of the rc.conf style files of the jail's /etc: its text, and its header (mode, owner) when it exists.
+func (a *applyRun) rcFile(ctx context.Context, name string) (string, *tar.Header, error) {
+	b, hdr, ok, err := a.readFile(ctx, "etc/"+name)
+	if err != nil {
+		return "", nil, fmt.Errorf("read /etc/%s: %w", name, err)
+	}
+	if ok && hdr.Typeflag != tar.TypeReg {
+		return "", nil, fmt.Errorf("/etc/%s is not a regular file", name)
+	}
+	if !ok {
+		hdr = nil
+	}
+	return string(b), hdr, nil
 }
 
 // setRc sets the variables of vars that differ in the file and says which. rcNo/rcYes forms of a boolean are compared by
 // the rc scripts' own rule (checkyesno), the others by text.
 func (a *applyRun) setRc(ctx context.Context, name string, vars []render.RcVar, same func(v render.RcVar, cur string, ok bool) bool) ([]string, error) {
-	cur, p, err := a.rcFile(ctx, name)
+	cur, hdr, err := a.rcFile(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +551,12 @@ func (a *applyRun) setRc(ctx context.Context, name string, vars []render.RcVar, 
 	if err != nil {
 		return nil, err
 	}
-	return names, a.s.d.Files.WriteAtomic(ctx, p, []byte(next))
+	// an existing file keeps its mode and owner (a recipe may have made it private)
+	mode, uid, gid := int64(0o644), 0, 0
+	if hdr != nil {
+		mode, uid, gid = int64(hdr.Mode)&0o777, hdr.Uid, hdr.Gid
+	}
+	return names, a.putFile(ctx, "/etc/"+name, []byte(next), mode, uid, gid)
 }
 
 func (a *applyRun) sysrc(ctx context.Context, st api.RecipeStep) (stepOutcome, []byte, error) {
@@ -431,7 +624,7 @@ func (a *applyRun) service(ctx context.Context, sv api.RecipeService) (stepOutco
 			verb, argv := "started", []string(nil)
 			if *sv.Running {
 				// through the fixed wrapper that keeps a daemon the rc script starts off the exec's pipes
-				if argv, err = apps.ServiceStartArgv(sv.Name); err != nil {
+				if argv, err = serviceStartArgv(sv.Name); err != nil {
 					return o, nil, err
 				}
 			} else {
@@ -458,7 +651,7 @@ func (a *applyRun) service(ctx context.Context, sv api.RecipeService) (stepOutco
 }
 
 func (a *applyRun) command(ctx context.Context, st api.RecipeStep) (stepOutcome, []byte, error) {
-	o := stepOutcome{kind: "run", name: strings.Join(st.Run, " ")}
+	o := stepOutcome{kind: "run", name: runLabel(st.Run)}
 	guarded := st.Creates != "" || st.Unless != nil
 	if st.Creates != "" {
 		stat, err := a.s.d.JailFiles.JailStat(ctx, JailStatReq{Jail: a.key, Root: a.root, Path: strings.TrimPrefix(st.Creates, "/")})
@@ -497,4 +690,16 @@ func (a *applyRun) command(ctx context.Context, st api.RecipeStep) (stepOutcome,
 	return o, nil, nil
 }
 
-var _ = errors.New
+// runLabel is how a run step is named in a report: its argv on one line. A script in the argv (sh -c "...") spans many
+// lines and would repeat in full on every line of every report: the label stops at the first line and says so.
+func runLabel(argv []string) string {
+	l := strings.Join(argv, " ")
+	if i := strings.IndexByte(l, '\n'); i >= 0 {
+		l = l[:i] + " ..."
+	}
+	const max = 120
+	if len(l) > max {
+		l = l[:max] + "..."
+	}
+	return l
+}

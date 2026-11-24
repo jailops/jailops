@@ -62,7 +62,6 @@ func (s *Server) setupJails() {
 	}
 	k.onDelete = func(j *api.Jail) {
 		delete(s.snapshots, j.Metadata.Project+"/"+j.Metadata.Name)
-		delete(s.access, j.Metadata.Project+"/"+j.Metadata.Name)
 	}
 }
 

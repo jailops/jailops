@@ -79,7 +79,7 @@ from below an approved directory only, through no link, onto a jail's own tree.
 below a jail's root (or a volume of the project, or an image generation) opens that tree as
 its root and walks to it one plain directory at a time: a relative symlink is followed only while it stays inside the
 tree, as the jail itself would see it, and an absolute symlink is refused (the helper does not resolve it as the jail
-would). So no symlink a jail makes turns an operator's `app allow`, an app draft or any other file operation into a read
+would). So no symlink a jail makes turns an operator's file operation (a copy, a recipe's `file` step) into a read
 or a write of another jail's files, and the path arguments of allow-listed commands below a jail's tree must resolve
 inside it as well.
 
@@ -405,7 +405,7 @@ bounded, so that nobody can fill the disk or forge an entry by being refused:
   every path segment below the jail root without following a symlink (`os.Root`), refuses names with `..`, absolute
   names, devices and set-id bits, and bounds bytes, entries and depth; nothing runs inside the jail, so a jail cannot
   steer the copy. It needs the role of exec and is audited with the paths and the size. While an operation has the jail (an
-  upgrade, a stop) or a package update or app installation holds it, a copy into or out of it answers `busy`: it cannot add
+  upgrade, a stop) or a package update holds it, a copy into or out of it answers `busy`: it cannot add
   a link to a root that an upgrade has checked.
 - `jailops exec` and `shell` put the terminal back on SIGINT, SIGTERM and SIGHUP; after a SIGKILL nothing can, and
   `reset` repairs the terminal.
@@ -454,7 +454,7 @@ a directory of its own (root's, mode 0700) and runs `pkg` on that copy, which it
 **Where `pkg -r` may run.** The helper runs `pkg -r TREE` (as root of the host) only on a tree no jail runs in, always with
 `-C` naming an empty configuration file of its own and plugins off, so nothing in the tree configures pkg, and on the root
 of a jail with no package scripts.
-That is the whole check, so what the tree holds matters: an image or app staging root is made by JailOps and holds nothing of
+That is the whole check, so what the tree holds matters: an image staging root is made by JailOps and holds nothing of
 a tenant's. The root of a jail that has run belongs to whoever holds the jail, and the package scripts `pkg -r` runs are
 host processes, as root, on paths of that root, which follow the links its tenant planted. JailOps
 therefore does not run `pkg -r` on such a root for its own convenience: the shell of a jail is set up after the start from
@@ -464,8 +464,7 @@ inside the jail, confined like the jail itself. The one exception is the in-plac
 listed there.
 
 To build an image from a repository of your own, list its host in `fetch-host` and put its key directory below
-`pkg-keys-dir` yourself, as root. An app installation uses the host's own repository configuration (root's files), not
-one the daemon writes.
+`pkg-keys-dir` yourself, as root.
 
 ## Who may widen what a jail or a project is allowed
 
@@ -570,19 +569,13 @@ runs inside the jail after the in-place upgrade, with the jail's rights.
 inside the jail). The start removes it before `jail -c` runs, and a start that cannot remove it does not start; it is
 never written again. While it exists the root is the copy of the image and nothing a tenant could have prepared, and
 the helper lets package scripts run for a `pkg -r` of that root, provided it is a regular file (not a link) and no jail
-runs in the root. The one operation that uses it is `jailops app install`, which installs the app's packages on the new
-jail before its first start. A tenant cannot make the marker appear: the container is not inside any jail, and the daemon
+runs in the root: a package installed on the new jail before its first start may run its scripts. A tenant cannot make the marker appear: the container is not inside any jail, and the daemon
 writes it only when it makes a jail. The in-place upgrade is the one operation that
 runs `pkg -r` on the root of a running jail; it carries the bounds of [its section](#the-in-place-upgrade-of-a-jail). The
 helper takes a package name only as a name or a port origin (`category/name`), never a path or a file name that ends as a
 package or an archive.
 
-- **`jailops app install`** makes the jail, mounts its root on the host and installs the packages with `pkg -r <jail
-  root> install` through the helper while the jail has never run, and only then starts it. What is in the root is the
-  base system of its image. An `operator` may install. The app installation uses the host's own repository
-  configuration (root's files), not one the daemon writes. For a package from the JailOps repository the host's
-  configuration of that repository and its key are copied into the jail, so that its packages are updated from it later.
-- **Package updates, the ports packages of a jail's upgrade and the app draft of a running jail** run `pkg -j <jail>`: `pkg` attaches
+- **Package updates and the ports packages of a jail's upgrade** run `pkg -j <jail>`: `pkg` attaches
   to the jail before it does anything, so what it writes and the scripts it runs are the jail's own, with the jail's
   rights. The helper allows `-j` for a running jail JailOps manages, with none of the options that name a directory of
   the host. `pkg` then reads the repository configuration, the keys and the cache inside the jail, and fetches from the
@@ -590,39 +583,6 @@ package or an archive.
   repositories it updates from are the ones its own `/etc/pkg` and `/usr/local/etc/pkg/repos` name. That configuration is
   the jail's, as the packages it installs are. While a package operation works in a jail, the daemon refuses every exec,
   shell and console session into it (`busy`, "packages are being installed or updated").
-
-## Drafting an app from a jail reads, never writes
-
-`jailops app export` (`GET /api/v1/jails/<n>/app-draft`) needs `operator`, the role that may exec into the jail,
-because it runs commands there: `sockstat`, `find` and `stat` through the in-jail exec, as root in the jail, so what
-they print is the jail's word and is parsed as untrusted text (bounded counts, paths checked against the catalog's
-rules). On the host it runs one exact form, `pkg -j <jail> query -e "%a = 0" "%n %v %R %w"`, which the helper's
-allow-list accepts as it is and in no other shape, and it reads the jail's `/etc/rc.conf` through the helper's file
-operations. It never reads a configuration file, leaves out an rc.conf knob whose name looks like a secret or whose
-value holds a shell expansion, and is audited with counts only. A jail's owner can make the draft say anything; the
-person who sends it to the catalog reviews it.
-
-## Who may connect to an app
-
-An installed app is closed: its managed firewall policy denies every inbound connection, the host's included, until
-`jailops app allow` lets a source in (`operator` in the project). The managed policies are written by app access only; the firewall
-routes refuse to change them, so a person cannot widen a grant behind the registry's back, and a jail's own policy
-cannot reopen the closed default. A jail that is the source of a grant is not deleted until the grant is denied:
-the rule names the jail, and a jail made later under the name would take its place.
-
-For a database app, `psql` runs as `postgres` in the jail through the helper's in-jail exec with the statements on its
-standard input: no statement is in an argument vector. The daemon generates the password (32 characters, about 190 bits),
-computes its SCRAM-SHA-256 verifier and sends only the verifier, so the password reaches no statement, server log or
-history; it is in the one answer to the allow and nowhere else (not the registry, the operation journal, the audit log
-or the daemon log). Whoever reads that answer holds the role's password: treat the terminal or the console where it is
-shown accordingly. Database names are checked against `^[a-z][a-z0-9_]{0,62}$` and PostgreSQL's reserved names before
-any SQL is built, and JailOps never alters or drops a role or a database that its registry does not say it made.
-`pg_hba.conf` is written through the helper's file operations below the jail root (they open the jail root as their
-root, so no symlink of the jail leads out of it, and refuse a file that is not a regular file) and given back to
-`postgres` in the jail; an allow that fails half way keeps the role it made in the registry, and the next allow sets a
-new password and finishes; the lines it writes always require
-`scram-sha-256`. What a jail's root does to its own PostgreSQL afterwards (another `trust` line above the block) is the
-jail's own business.
 
 ## Encrypted volumes
 

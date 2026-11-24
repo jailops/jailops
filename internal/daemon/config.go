@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
-	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/priv"
 	"jailops.net/jailops/sdk/api"
 )
@@ -65,8 +64,6 @@ type Config struct {
 	Updates UpdatesConf `yaml:"updates"`
 	// Jails holds the defaults of new jails: their shell and bash prompt (docs/shell.md).
 	Jails JailsConf `yaml:"jails"`
-	// Apps configures the application catalog (docs/apps.md).
-	Apps AppsConf `yaml:"apps"`
 	// Host configures host management (docs/appliance.md).
 	Host HostConf `yaml:"host"`
 	// Logging configures log forwarding (docs/logging.md).
@@ -110,18 +107,6 @@ type HostConf struct {
 // HostManage lists the modules JailOps manages. Empty (the default): none.
 type HostManage struct {
 	Modules []string `yaml:"modules"`
-}
-
-// AppsConf configures the application catalog: definitions the daemon reads
-// from local files, installed by the jailops-apps package.
-type AppsConf struct {
-	// CatalogDir holds the *.yaml definitions (default
-	// /usr/local/share/jailops/apps). A missing directory is an empty catalog.
-	CatalogDir string `yaml:"catalog_dir"`
-	// LocalDir holds the operator's own definitions (default
-	// /usr/local/etc/jailops/apps), read with the catalog; one of the same
-	// name as a packaged one wins. A missing directory is empty.
-	LocalDir string `yaml:"local_dir"`
 }
 
 // DevdConf configures the events the host raises from the kernel's notifications: ZFS errors, the link of the uplink,
@@ -382,7 +367,6 @@ func Defaults() Config {
 		Log:       Log{Level: "info", Format: "text"},
 		Reconcile: Reconcile{Interval: Duration(60 * time.Second), Autostart: &t},
 		Limits:    Limits{MaxBodyBytes: 4 << 20, RequestTimeout: Duration(60 * time.Second)},
-		Apps:      AppsConf{CatalogDir: apps.DefaultDir, LocalDir: apps.DefaultLocalDir},
 		Audit:     AuditConf{Retention: Duration(90 * 24 * time.Hour), MaxEntries: 1000000},
 		Logging:   LoggingConf{SecretsDir: DefaultLogSecretsDir},
 	}
@@ -449,9 +433,6 @@ func (c Config) finish() (Config, error) {
 	default:
 		return c, fmt.Errorf("config: log.format %q must be text or json", c.Log.Format)
 	}
-	if c.Apps.CatalogDir == "" {
-		c.Apps.CatalogDir = apps.DefaultDir
-	}
 	switch c.Jails.Shell {
 	case "":
 		c.Jails.Shell = api.ShellSh
@@ -479,12 +460,8 @@ func (c Config) finish() (Config, error) {
 	if *c.Jails.MaxStates < 0 || *c.Jails.MaxStates > 10000000 {
 		return c, fmt.Errorf("config: jails.max_states %d must be between 0 and 10000000", *c.Jails.MaxStates)
 	}
-	if c.Apps.LocalDir == "" {
-		c.Apps.LocalDir = apps.DefaultLocalDir
-	}
 	for name, p := range map[string]string{"mount_base": c.MountBase, "state_dir": c.StateDir, "data_dir": c.DataDir, "conf_dir": c.ConfDir,
-		"work_dir": c.WorkDir, "listen.unix.path": c.Listen.Unix.Path, "priv.socket": c.Priv.Socket, "apps.catalog_dir": c.Apps.CatalogDir,
-		"apps.local_dir": c.Apps.LocalDir} {
+		"work_dir": c.WorkDir, "listen.unix.path": c.Listen.Unix.Path, "priv.socket": c.Priv.Socket} {
 		if name == "listen.unix.path" && p == "" {
 			continue // the socket is disabled
 		}
@@ -664,10 +641,39 @@ var hostnameRE = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])
 
 func validHostname(h string) bool { return len(h) <= 253 && hostnameRE.MatchString(h) }
 
+// dropNoAppLogs removes the key no_app_logs (of the removed application logs) from the sources of every
+// logging.forward sink, and reports whether it removed one.
+func dropNoAppLogs(logging *yaml.Node) bool {
+	removed := false
+	for i := 0; logging.Kind == yaml.MappingNode && i+1 < len(logging.Content); i += 2 {
+		fw := logging.Content[i+1]
+		if logging.Content[i].Value != "forward" || fw.Kind != yaml.SequenceNode {
+			continue
+		}
+		for _, sink := range fw.Content {
+			for j := 0; sink.Kind == yaml.MappingNode && j+1 < len(sink.Content); j += 2 {
+				src := sink.Content[j+1]
+				if sink.Content[j].Value != "sources" || src.Kind != yaml.MappingNode {
+					continue
+				}
+				for k := 0; k+1 < len(src.Content); {
+					if src.Content[k].Value == "no_app_logs" {
+						src.Content = append(src.Content[:k], src.Content[k+2:]...)
+						removed = true
+						continue
+					}
+					k += 2
+				}
+			}
+		}
+	}
+	return removed
+}
+
 // UpgradeConfig rewrites a configuration written by an earlier release to the current keys: the line "role: host" that
 // jailopsd.yaml shipped is dropped (the value of the key is host, or empty; any other role stays and is refused as an
-// unknown key), and so is the section lifecycle (the datasets of the root layout of 0.9.2 and before, which this
-// release does not make). The file on disk is not changed.
+// unknown key), and so are the section lifecycle (the datasets of the root layout of 0.9.2 and before, which this
+// release does not make) and the section apps (the application catalog, which this release does not have). The file on disk is not changed.
 func UpgradeConfig(raw []byte) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
@@ -683,8 +689,12 @@ func UpgradeConfig(raw []byte) ([]byte, error) {
 			case "host", "", "null", "~":
 				drop = true
 			}
-		case "lifecycle":
+		case "lifecycle", "apps":
 			drop = true
+		case "logging":
+			if dropNoAppLogs(m.Content[i+1]) {
+				changed = true
+			}
 		}
 		if !drop {
 			i += 2

@@ -39,7 +39,7 @@ the packages follow "--". These commands are for FreeBSD jails; a Linux jail is 
 
 The jail needs the network to reach its package repository. "install" lets FreeBSD's bootstrapper fetch pkg itself
 in a jail that does not have it yet (ASSUME_ALWAYS_YES=yes). Packages of a jail that JailOps updates (its FreeBSD
-base, an app) are changed by 'jailops jail upgrade', 'jailops update' and 'jailops app', not by this command.`,
+base) are changed by 'jailops jail upgrade' and 'jailops update', not by this command.`,
 		Example: `jailops pkg install web -- nginx
 jailops pkg install web1 web2 -- curl rsync
 jailops pkg upgrade -l role=web

@@ -19,23 +19,23 @@ $ jailops jail apply web -f <dir>/recipe.yaml
   6 steps: 5 changed, 1 executed; a run without creates or unless is executed every time
 
 $ jailops jail apply web -f <dir>
-  package  nginx                                  changed
-  file     /usr/local/etc/nginx/nginx.conf        changed
-  sysrc    rc.conf                                changed
-  service  nginx                                  changed
+  package  nginx                                  unchanged
+  file     /usr/local/etc/nginx/nginx.conf        unchanged
+  sysrc    rc.conf                                unchanged
+  service  nginx                                  unchanged
   run      /usr/local/sbin/nginx -t               executed
-  run      pw useradd deploy                      changed
-  6 steps: 5 changed, 1 executed; a run without creates or unless is executed every time
+  run      pw useradd deploy                      unchanged
+  6 steps: 5 unchanged, 1 executed; a run without creates or unless is executed every time
 
 $ jailops --dry-run jail apply web -f <dir>/recipe.yaml
 jail/web: dry run, nothing was changed
-  package  nginx                                  would change
-  file     /usr/local/etc/nginx/nginx.conf        would change
-  sysrc    rc.conf                                would change
-  service  nginx                                  would change
+  package  nginx                                  unchanged
+  file     /usr/local/etc/nginx/nginx.conf        unchanged
+  sysrc    rc.conf                                unchanged
+  service  nginx                                  unchanged
   run      /usr/local/sbin/nginx -t               would execute
-  run      pw useradd deploy                      would change
-  6 steps: 5 would change, 1 would execute; a run without creates or unless is executed every time
+  run      pw useradd deploy                      would check
+  6 steps: 4 unchanged, 1 would execute, 1 would check; a run without creates or unless is executed every time
 
 $ jailops jail apply web -f <dir>/recipe.yaml -o json
 {
@@ -44,22 +44,22 @@ $ jailops jail apply web -f <dir>/recipe.yaml -o json
     {
       "kind": "package",
       "name": "nginx",
-      "status": "changed"
+      "status": "unchanged"
     },
     {
       "kind": "file",
       "name": "/usr/local/etc/nginx/nginx.conf",
-      "status": "changed"
+      "status": "unchanged"
     },
     {
       "kind": "sysrc",
       "name": "rc.conf",
-      "status": "changed"
+      "status": "unchanged"
     },
     {
       "kind": "service",
       "name": "nginx",
-      "status": "changed"
+      "status": "unchanged"
     },
     {
       "kind": "run",
@@ -69,7 +69,7 @@ $ jailops jail apply web -f <dir>/recipe.yaml -o json
     {
       "kind": "run",
       "name": "pw useradd deploy",
-      "status": "changed"
+      "status": "unchanged"
     }
   ]
 }
@@ -85,12 +85,12 @@ $ jailops jail apply ghost -f <dir>/recipe.yaml
 [exit 4]
 
 $ jailops jail apply web -f <dir>/far.yaml
-! usage: steps[0].file.source: "../x" must be a path below the directory of the recipe
+! usage: steps[0].file.source: ../x must be a path below the directory of the recipe
 ! hint: run 'jailops jail apply --help' for usage
 [exit 2]
 
 $ jailops jail apply web -f <dir>/etc.yaml
-! invalid: steps[0].file.path: /etc/passwd belongs to the base system: put local configuration below /usr/local/etc
+! invalid: steps[0].file.path: the path belongs to the base system: put local configuration below /usr/local/etc
 [exit 2]
 
 $ jailops jail apply web -f <dir>/typo.yaml

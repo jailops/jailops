@@ -13,12 +13,13 @@ type Recipe struct {
 	Steps []RecipeStep `json:"steps"`
 }
 
-// RecipeStep is one step: exactly one of Package, File, Sysrc, Service and Run is set. Creates and Unless are the
+// RecipeStep is one step: exactly one of Package, File, Dir, Sysrc, Service and Run is set. Creates and Unless are the
 // guards of a Run step; In names the file of a Sysrc step.
 type RecipeStep struct {
 	// Package lists packages that must be installed; only the missing ones are installed.
 	Package []string          `json:"package,omitempty"`
 	File    *RecipeFile       `json:"file,omitempty"`
+	Dir     *RecipeDir        `json:"dir,omitempty"`
 	Sysrc   map[string]string `json:"sysrc,omitempty"`
 	// In is the file of a Sysrc step, below /etc of the jail: rc.conf (the default) or periodic.conf.
 	In      string         `json:"in,omitempty"`
@@ -43,6 +44,17 @@ type RecipeFile struct {
 	Group string `json:"group,omitempty"`
 }
 
+// RecipeDir makes a directory of the jail. It is never recursive: a missing parent is made root:wheel 0755 (as for a
+// file), a directory that exists is changed only in the mode, owner and group the step names. A new directory is
+// 0755 root:wheel unless the step says otherwise.
+type RecipeDir struct {
+	Path string `json:"path"`
+	// Mode is octal, "0755" or "755".
+	Mode  string `json:"mode,omitempty"`
+	Owner string `json:"owner,omitempty"`
+	Group string `json:"group,omitempty"`
+}
+
 // RecipeService sets the rc.conf variable NAME_enable (Enabled) and starts (Running true) or stops (Running false) the
 // service when it is not already in that state. A service is never restarted.
 type RecipeService struct {
@@ -56,6 +68,23 @@ type ApplyRequest struct {
 	Recipe Recipe `json:"recipe"`
 	// DryRun reads the state and reports what would change; it runs no command in the jail and writes nothing.
 	DryRun bool `json:"dry_run,omitempty"`
+	// Sensitive says that a secret went into the recipe (the client sets it). The daemon then never records the content
+	// of the files, shows no command output of any step in a result, error or operation record, and hides file diffs.
+	Sensitive bool `json:"sensitive,omitempty"`
+}
+
+// RecipeValidateRequest is the body of POST /api/v1/recipes/validate: the rendered recipe (variables replaced, files read
+// into content), as it would be sent to apply. No jail is involved and nothing is read or written on the host.
+type RecipeValidateRequest struct {
+	Recipe    Recipe `json:"recipe"`
+	Sensitive bool   `json:"sensitive,omitempty"`
+}
+
+// RecipeValidateResult is the answer to a recipe that is valid. An invalid one is an error of code invalid that names the
+// step and the field, never a value or the content of a file.
+type RecipeValidateResult struct {
+	Valid bool `json:"valid"`
+	Steps int  `json:"steps"`
 }
 
 // The Status values of an ApplyStep. A dry run reports WouldChange, WouldCheck and WouldExecute in place of the
@@ -73,7 +102,7 @@ const (
 
 // ApplyStep is the report of one step.
 type ApplyStep struct {
-	// Kind is package, file, sysrc, service or run.
+	// Kind is package, file, dir, sysrc, service or run.
 	Kind   string `json:"kind"`
 	Name   string `json:"name"`
 	Status string `json:"status"`

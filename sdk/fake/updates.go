@@ -221,6 +221,21 @@ func (s *Server) handleUpdateHistory(w http.ResponseWriter, r *http.Request) {
 	writeSync(w, 200, out)
 }
 
+// handleRecipeValidate answers a recipe with steps as valid: the fake has the number of steps of the real validator and
+// nothing else of it.
+func (s *Server) handleRecipeValidate(w http.ResponseWriter, r *http.Request) {
+	req, e := decodeOptional[api.RecipeValidateRequest](r)
+	if e != nil {
+		writeErr(w, e)
+		return
+	}
+	if n := len(req.Recipe.Steps); n == 0 || n > 200 {
+		writeErr(w, api.Errorf(api.CodeInvalid, "steps: a recipe has between 1 and 200 steps"))
+		return
+	}
+	writeSync(w, 200, api.RecipeValidateResult{Valid: true, Steps: len(req.Recipe.Steps)})
+}
+
 // handleApply reports every step of a recipe as done (an unguarded run as executed); a dry run reports would change.
 func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 	req, e := decodeOptional[api.ApplyRequest](r)
@@ -245,26 +260,50 @@ func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 				return nil, api.Errorf(api.CodeBusy, "jail %q is not running; a recipe runs inside it", name).WithHint("start it first")
 			}
 			res := api.ApplyResult{Jail: name, DryRun: req.DryRun, Steps: []api.ApplyStep{}}
-			for _, st := range req.Recipe.Steps {
+			done := s.apply.done[jk]
+			if done == nil {
+				done = map[string]bool{}
+				if s.apply.done == nil {
+					s.apply.done = map[string]map[string]bool{}
+				}
+				s.apply.done[jk] = done
+			}
+			s.apply.calls = append(s.apply.calls, ApplyCall{Project: rc.project, Jail: name, Req: req})
+			for i, st := range req.Recipe.Steps {
 				kind, label := "run", strings.Join(st.Run, " ")
 				switch {
 				case st.Package != nil:
 					kind, label = "package", strings.Join(st.Package, " ")
 				case st.File != nil:
 					kind, label = "file", st.File.Path
+				case st.Dir != nil:
+					kind, label = "dir", st.Dir.Path
 				case st.Sysrc != nil:
 					kind, label = "sysrc", "rc.conf"
 				case st.Service != nil:
 					kind, label = "service", st.Service.Name
 				}
+				key := stepKey(st)
+				unguarded := kind == "run" && st.Creates == "" && st.Unless == nil
+				if f, ok := s.apply.fault[jk]; ok && !req.DryRun && f.step == i {
+					delete(s.apply.fault, jk)
+					return nil, api.Errorf(api.CodeStepFailed, "step %d of %d failed (%s %s): %s", i+1, len(req.Recipe.Steps), kind, label, f.msg)
+				}
 				status := api.StepChanged
 				switch {
-				case req.DryRun && kind == "run" && st.Creates == "" && st.Unless == nil:
+				case unguarded && req.DryRun:
 					status = api.StepWouldExecute
+				case unguarded:
+					status = api.StepExecuted
+				case kind == "run" && st.Unless != nil && req.DryRun:
+					status = api.StepWouldCheck
+				case done[key]:
+					status = api.StepUnchanged
 				case req.DryRun:
 					status = api.StepWouldChange
-				case kind == "run" && st.Creates == "" && st.Unless == nil:
-					status = api.StepExecuted
+				}
+				if !req.DryRun && !unguarded {
+					done[key] = true
 				}
 				res.Steps = append(res.Steps, api.ApplyStep{Kind: kind, Name: label, Status: status})
 			}

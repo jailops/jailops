@@ -286,14 +286,12 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	if cfg.Jails.MaxStates != nil {
 		deps.JailMaxStates = *cfg.Jails.MaxStates
 	}
-	deps.AppsDir = cfg.Apps.CatalogDir
 	deps.Host, deps.HostModules = clients.HostSystem, cfg.Host.Manage.Modules
 	deps.ConsolePort = consolePort(cfg.Listen.HTTPS.Address)
 	deps.Certificates, deps.ApplianceModules = d.certMgr, cfg.Appliance
 	deps.ConsoleURLs = func() []string {
 		return consoleURLs(firstNonEmpty(d.HTTPSAddr(), cfg.Listen.HTTPS.Address), hostname, net.InterfaceAddrs)
 	}
-	deps.AppsLocalDir = cfg.Apps.LocalDir
 	deps.LogForward, deps.LogForwardTune, deps.LogSecretsDir = cfg.Logging.Forward, opts.LogForwardTune, cfg.Logging.SecretsDir
 	deps.LogOwnPorts = func() []int {
 		// the console's listener (the port it got when it was 0) and the ACME challenge listener

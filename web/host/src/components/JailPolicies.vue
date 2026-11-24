@@ -25,9 +25,9 @@ const block = computed(() => {
   const role = session.role
   return role && role !== 'operator' && role !== 'admin' ? s.policies.readOnly(role) : ''
 })
-// only a jail's own policies are attached here: the project's and the managed ones are changed where they come from
+// only a jail's own policies are attached here: the project's are changed where they come from
 const free = computed(() => (all.data.value ?? []).map((p) => p.metadata.name).filter((n) => !props.policies.some((x) => x.name === n)))
-const label = (p: ReachPolicy): string => (p.source === 'project' ? s.policies.project : p.source === 'managed' ? s.policies.managed : '')
+const label = (p: ReachPolicy): string => (p.source === 'project' ? s.policies.project : '')
 const states = (p: ReachPolicy): string => {
   const d = [p.default_in ? s.policies.defaultIn(p.default_in) : '', p.default_out ? s.policies.defaultOut(p.default_out) : ''].filter(Boolean)
   return d.length ? d.join(', ') : '-'

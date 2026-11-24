@@ -3,8 +3,8 @@ import { useRoute, useRouter } from 'vue-router'
 
 /**
  * The selected tab of a page, kept in ?tab= so a link, a reload and the back button land on it. The default tab is
- * left out of the address. A tab that is not offered (yet) falls back to the default; when it appears later (the jail
- * turns out to be an app) a ?tab= that names it is honoured then.
+ * left out of the address. A tab that is not offered (yet) falls back to the default; when it appears later (the data it
+ * depends on arrives) a ?tab= that names it is honoured then.
  */
 export function useTabQuery<T extends string>(tabs: Ref<readonly T[]> | ComputedRef<readonly T[]> | (() => readonly T[]), fallback: T | (() => T), key = 'tab') {
   const route = useRoute()

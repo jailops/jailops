@@ -20,8 +20,7 @@ var facilityNames = []string{"local0", "local1", "local2", "local3", "local4", "
 
 func (a *app) logForwardCmd() *cobra.Command {
 	fc := group("forward", "Send the logs of the jails to a syslog server or a webhook",
-		`jailopsd sends the log lines of the jails (messages, and the files installed
-apps declare) and, when asked, its audit log to sinks: syslog servers (RFC 5424
+		`jailopsd sends the log lines of the jails (messages, or the files you name) and, when asked, its audit log to sinks: syslog servers (RFC 5424
 over udp, tcp or tls; tls verifies the server) and https webhooks (JSON lines,
 an optional bearer token read from a root-owned file). A sink reads each file
 from where it stopped, keeps up to --queue lines while the receiver is away
@@ -60,9 +59,6 @@ func describeSources(s api.LogSinkSource) string {
 			files = []string{api.DefaultLogFile}
 		}
 		w := strings.Join(files, ",")
-		if !s.NoAppLogs {
-			w += "+apps"
-		}
 		var sel []string
 		if len(s.Projects) > 0 {
 			sel = append(sel, "projects="+strings.Join(s.Projects, ","))
@@ -155,7 +151,7 @@ type sinkFlags struct {
 	queue                         int
 	projects, jails, labels       []string
 	exJails, exLabels, files      []string
-	noAppLogs, audit, auditOnly   bool
+	audit, auditOnly              bool
 }
 
 func (s *sinkFlags) register(a *app, cmd *cobra.Command, add bool) {
@@ -171,7 +167,6 @@ func (s *sinkFlags) register(a *app, cmd *cobra.Command, add bool) {
 	f.StringArrayVar(&s.exJails, "exclude-jail", nil, "leave out this jail (repeatable)")
 	f.StringArrayVar(&s.exLabels, "exclude-selector", nil, "leave out jails with these labels KEY=VALUE (repeatable)")
 	f.StringArrayVar(&s.files, "file", nil, "file below /var/log to send of every jail instead of messages (repeatable)")
-	f.BoolVar(&s.noAppLogs, "no-app-logs", false, "leave out the log files installed apps declare")
 	f.BoolVar(&s.audit, "audit", false, "send the daemon's audit log too")
 	f.BoolVar(&s.auditOnly, "audit-only", false, "send the audit log and no jail logs")
 	enumFlag(cmd, "facility", facilityNames...)
@@ -241,9 +236,6 @@ func (s *sinkFlags) apply(cmd *cobra.Command, k *api.LogSink) error {
 		if src.ExcludeLabels, err = parseSinkLabels("exclude-selector", s.exLabels); err != nil {
 			return err
 		}
-	}
-	if ch("no-app-logs") {
-		src.NoAppLogs = s.noAppLogs
 	}
 	if ch("audit") {
 		src.Audit = s.audit
@@ -318,15 +310,15 @@ func (a *app) logForwardCreate() *cobra.Command {
 		Long: `Create a sink. Its type follows from the URL: udp://, tcp:// and tls:// make a syslog sink, https:// a
 webhook. A syslog sink sends RFC 5424 messages
 with APP-NAME jailops, this host's name and the structured data
-[jailops project="" jail="" app="" file=""]; --url tls://HOST[:6514] verifies
+[jailops project="" jail="" file=""]; --url tls://HOST[:6514] verifies
 the server (the host's roots, or --ca), tcp:// and udp:// (port 514) send in
 the clear and are for a receiver on this host or a trusted network. A webhook
-receives POSTs of JSON lines (time, host, project, jail, app, file, line);
+receives POSTs of JSON lines (time, host, project, jail, file, line);
 --token-file names a file owned by root (0640 root:jailops) whose first line
 is the bearer token, which never enters the configuration.
 
 Without --jail, --selector or --from-project the sink takes every jail. --file
-replaces messages; --no-app-logs leaves out the files installed apps declare;
+replaces messages;
 --audit adds the daemon's audit log. The sink starts at the end of the files.`,
 		Example: `jailops logs forward create logs --url tls://logs.example.com:6514 --facility local3
 jailops logs forward create local --url tcp://127.0.0.1:1514 --jail web --jail db

@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 
-	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/lifecycle"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
@@ -56,9 +55,6 @@ func (s *Service) RenameJail(ctx context.Context, name string, o RenameOptions) 
 			return nil, api.Errorf(api.CodeAlreadyExists, "jail %q is being created", to)
 		}
 		if err := s.jailIdle(ctx, key, name); err != nil {
-			return nil, err
-		}
-		if err := s.noAppAccess(proj, name); err != nil {
 			return nil, err
 		}
 		if err := s.noRuleNamesJail(proj, name, false); err != nil {
@@ -153,30 +149,6 @@ func (s *Service) jailIdle(ctx context.Context, key, name string) error {
 	return nil
 }
 
-// noAppAccess refuses a jail that app access knows: an installed app with grants, or the source of a grant. The
-// grants, their rule names and the database roles carry the name.
-func (s *Service) noAppAccess(project, name string) error {
-	hint := "deny the grants (jailops app deny), rename the jail, then allow them again"
-	if s.accKind().p(project).exists(name) {
-		return api.Errorf(api.CodePreconditionFailed, "jail %q has app access grants", name).WithHint(hint)
-	}
-	if o, err := s.polKind.p(project).get(apps.AccessPolicyName(name)); err == nil && o.Meta.ManagedBy == api.AppAccessManagedBy {
-		return api.Errorf(api.CodePreconditionFailed, "jail %q has the app access policy %s", name, o.Meta.Name).WithHint(hint)
-	}
-	recs, err := s.accKind().listAll()
-	if err != nil {
-		return err
-	}
-	for _, r := range recs {
-		for _, g := range r.Spec.Grants {
-			if g.Kind == api.AccessSourceJail && r.Meta.Project == project && g.SourceName == name {
-				return api.Errorf(api.CodePreconditionFailed, "jail %q may connect to app %s (project %s) through app access", name, r.Meta.Name, r.Meta.Project).WithHint(hint)
-			}
-		}
-	}
-	return nil
-}
-
 // noRuleNamesJail refuses a jail, to rename or to delete, that a firewall policy or an address set of its project names as
 // jail:NAME: the reference would end up naming nothing, and the rule would stop matching.
 func (s *Service) noRuleNamesJail(project, name string, deleting bool) error {
@@ -191,11 +163,7 @@ func (s *Service) noRuleNamesJail(project, name string, deleting bool) error {
 	for _, o := range pols {
 		for i, r := range o.Spec.Rules {
 			if slices.Contains(r.From, "jail:"+name) || slices.Contains(r.To, "jail:"+name) {
-				e := api.Errorf(api.CodePreconditionFailed, "jail %q is named by rule %d of firewall policy %s", name, i+1, o.Meta.Name)
-				if o.Meta.ManagedBy == api.AppAccessManagedBy {
-					return e.WithHint("it is the source of an app access grant: jailops app deny " + strings.TrimPrefix(o.Meta.Name, "app-") + " --from jail:" + name + " first")
-				}
-				return e.WithHint(hint)
+				return api.Errorf(api.CodePreconditionFailed, "jail %q is named by rule %d of firewall policy %s", name, i+1, o.Meta.Name).WithHint(hint)
 			}
 		}
 	}

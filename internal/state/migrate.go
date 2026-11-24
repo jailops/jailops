@@ -73,9 +73,15 @@ func migrateTo(doc map[string]any, migs []Migration, target string) (bool, error
 // written back, so no later code knows the old names.
 func renameFields(doc map[string]any) bool {
 	kind, _ := doc["kind"].(string)
+	changed := false
+	// the policy app-NAME that the removed app access kept for a jail (managed_by app-access) is an ordinary policy now
+	if meta, ok := doc["metadata"].(map[string]any); ok && api.Kind(kind) == api.KindFirewallPolicy && meta["managed_by"] == "app-access" {
+		delete(meta, "managed_by")
+		changed = true
+	}
 	spec, ok := doc["spec"].(map[string]any)
 	if !ok {
-		return false
+		return changed
 	}
-	return len(api.UpgradeFields(api.Kind(kind), spec)) > 0
+	return len(api.UpgradeFields(api.Kind(kind), spec)) > 0 || changed
 }

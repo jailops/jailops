@@ -121,7 +121,10 @@ type Plan struct {
 	// with another one (an alias that now points at another machine).
 	HostUUIDs map[string]string
 	Items     []Item
-	Errors    []HostError
+	// Recipes are the recipes of the jails the repository declares, decided after every object of their host, in the
+	// order they run.
+	Recipes []RecipeItem
+	Errors  []HostError
 	// ProjectHosts shows, per fleet project and host, what the plan does.
 	ProjectHosts []ProjectHost
 }
@@ -130,6 +133,11 @@ type Plan struct {
 type Options struct {
 	// Hosts limits the plan to these hosts; empty means every host.
 	Hosts []string
+	// Manual says a person asked (plan, drift): every recipe of a running jail is looked at with a dry run now, not
+	// only when drift_interval has passed.
+	Manual bool
+	// NoRecipes leaves the recipes out (a check that is about objects only).
+	NoRecipes bool
 }
 
 // Compute reads the live state of the selected hosts and diffs it with the
@@ -141,7 +149,7 @@ func Compute(ctx context.Context, s *Session, opt Options) *Plan {
 	}
 	p := &Plan{FleetID: s.Fleet.Meta.ID, Hosts: hosts, HostUUIDs: map[string]string{}}
 	for _, h := range hosts {
-		items, err := planHost(ctx, s, h)
+		items, recipes, err := planHost(ctx, s, opt, h)
 		if err != nil {
 			p.Errors = append(p.Errors, HostError{h, err})
 			continue
@@ -150,8 +158,10 @@ func Compute(ctx context.Context, s *Session, opt Options) *Plan {
 			p.HostUUIDs[h] = id
 		}
 		p.Items = append(p.Items, items...)
+		p.Recipes = append(p.Recipes, recipes...)
 	}
 	p.ProjectHosts = projectHosts(s.Fleet, p)
+	_ = s.Checks.Save() // only a memory: a plan that cannot write it looks again next time
 	return p
 }
 
@@ -196,10 +206,10 @@ func projectHosts(f *config.Fleet, p *Plan) []ProjectHost {
 	return out
 }
 
-func planHost(ctx context.Context, s *Session, host string) ([]Item, error) {
+func planHost(ctx context.Context, s *Session, opt Options, host string) ([]Item, []RecipeItem, error) {
 	c, err := s.Client(ctx, host)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	desired := map[config.Key]*config.Object{}
 	for _, o := range s.Fleet.ObjectsFor(host) {
@@ -239,11 +249,11 @@ func planHost(ctx context.Context, s *Session, host string) ([]Item, error) {
 			}
 			for _, p := range names {
 				if err := listKind(ki, p); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 			}
 		} else if err := listKind(ki, ""); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		listed[ki.Kind] = true
 		if ki.Kind == api.KindProject {
@@ -257,7 +267,6 @@ func planHost(ctx context.Context, s *Session, host string) ([]Item, error) {
 	}
 
 	var work, deletes []Item
-	installed := appJails(s.Fleet, host)
 	for _, ki := range model.Kinds {
 		var want []*config.Object
 		for _, o := range s.Fleet.ObjectsFor(host) {
@@ -295,9 +304,6 @@ func planHost(ctx context.Context, s *Session, host string) ([]Item, error) {
 		})
 		for _, k := range keys {
 			l := live[k]
-			if installed[k] {
-				continue // declared as an App: its own item says what it is
-			}
 			if isBuiltin(k) && l.Meta.ManagedBy != me {
 				// The daemon creates the storage named "default" at its
 				// first start. They belong to the host: sync neither claims
@@ -316,9 +322,7 @@ func planHost(ctx context.Context, s *Session, host string) ([]Item, error) {
 			deletes = append(deletes, it)
 		}
 	}
-	appWork, appDeletes := planApps(ctx, s, c, host, live)
-	items = append(append(items, work...), appWork...)
-	deletes = append(deletes, appDeletes...)
+	items = append(items, work...)
 	protectProjects(deletes, live, me)
 	for _, list := range [][]Item{work, deletes} {
 		for i := range list {
@@ -331,7 +335,12 @@ func planHost(ctx context.Context, s *Session, host string) ([]Item, error) {
 	sort.SliceStable(deletes, func(i, j int) bool {
 		return model.Order(deletes[i].Kind) > model.Order(deletes[j].Kind)
 	})
-	return append(items, deletes...), nil
+	items = append(items, deletes...)
+	if opt.NoRecipes {
+		return items, nil, nil
+	}
+	recipes, err := planRecipes(ctx, c, s, opt, host, items, live)
+	return items, recipes, err
 }
 
 // isBuiltin reports the host-owned built-in storage (the dataset the host was set up with).
@@ -665,6 +674,9 @@ func (p *Plan) Summary() string {
 	if c[ActionError] > 0 {
 		s += fmt.Sprintf(", %d error", c[ActionError])
 	}
+	if r := p.RecipeSummary(); r != "" {
+		s += ", " + r
+	}
 	if len(p.Errors) > 0 {
 		s += fmt.Sprintf(", %d host(s) unreachable", len(p.Errors))
 	}
@@ -681,6 +693,13 @@ func (p *Plan) Drifted() bool {
 			return true
 		}
 	}
+	// A recipe that would be applied differs from the jail. A recipe that waits or is unknown is not drift: it is
+	// printed, and it does not fail a drift check (a zero exit does not say those are converged).
+	for _, r := range p.Recipes {
+		if r.Action == RecipeApply || r.Action == RecipeError {
+			return true
+		}
+	}
 	return false
 }
 
@@ -693,6 +712,11 @@ func (p *Plan) Err() error {
 	for _, i := range p.Items {
 		if i.Action == ActionError {
 			errs = append(errs, fmt.Errorf("%s %s on %s: %s", i.Kind, i.Name, i.Host, strings.Join(i.Details, "; ")))
+		}
+	}
+	for _, r := range p.Recipes {
+		if r.Action == RecipeError {
+			errs = append(errs, fmt.Errorf("recipe %s on %s: %s", r.Ref(), r.Host, r.Why))
 		}
 	}
 	return errors.Join(errs...)

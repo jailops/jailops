@@ -60,8 +60,14 @@ func (f *Fleet) Render(host string) ([]byte, error) {
 		if o.Start {
 			doc["start"] = true
 		}
-		if len(o.After) > 0 {
-			doc["after"] = o.After
+		if len(o.Recipes) > 0 {
+			doc["recipes"] = recipeRefs(o.Recipes)
+		}
+		if len(o.Needs) > 0 {
+			doc["needs"] = o.Needs
+		}
+		if len(o.JailVars) > 0 {
+			doc["vars"] = o.JailVars
 		}
 		origin := o.Origin
 		if len(o.Profiles) > 0 || len(o.Templates) > 0 {

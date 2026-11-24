@@ -1,0 +1,19 @@
+apiVersion: jailops/v1
+kind: Jail
+hosts: [h1]
+metadata:
+  name: web
+start: true
+# The recipes of web run after those of db, and only when db's are settled: db runs, its recipes are converged or not due
+# for another look. Otherwise web waits (plan says why) and the next run goes on.
+needs: [db]
+# Given once for every recipe of this jail that declares the name.
+vars: {site: shop.example.test}
+recipes:
+  - path: recipes/nginx-site
+spec:
+  image: freebsd-15
+  storage: default
+  network:
+    - {network: shop, ipv4: auto}
+  firewall: {policies: [web]}

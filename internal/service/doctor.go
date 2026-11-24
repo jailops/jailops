@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/lifecycle"
 	"jailops.net/jailops/internal/plan"
@@ -73,8 +72,6 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorLongOperations(ctx, c)
 	s.doctorDescriptions(ctx, c)
 	s.doctorWireGuard(ctx, c)
-	s.doctorAppsLocal(c)
-	s.doctorAppsAccess(ctx, c)
 	s.doctorBackups(c)
 	s.doctorFirewallSize(c)
 	s.doctorJailRefs(c)
@@ -939,34 +936,6 @@ func (s *Service) doctorPkgbase(ctx context.Context, c *checkSet) {
 		c.add("host.pkgbase", api.DoctorWarn, "the base system is not installed from packages: it came from distribution sets",
 			"FreeBSD 16 removes freebsd-update: convert the host to pkgbase before a major upgrade (the FreeBSD Handbook describes pkgbase); nothing to do on 15.x")
 	}
-}
-
-// doctorAppsLocal checks the host's own app definitions (apps.local_dir)
-// when the directory exists: the daemon must be able to read it, or the
-// whole catalog listing fails.
-func (s *Service) doctorAppsLocal(c *checkSet) {
-	dir := s.appsLocalDir()
-	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-		return
-	}
-	es, err := apps.Load(dir)
-	if err != nil {
-		c.add("apps.local_dir", api.DoctorFail, fmt.Sprintf("%s cannot be read: %v", dir, err),
-			"the daemon runs as the user jailops: chmod 0755 "+dir+" and 0644 its files")
-		return
-	}
-	bad := 0
-	for _, e := range es {
-		if e.Err != nil {
-			bad++
-		}
-	}
-	if bad > 0 {
-		c.add("apps.local_dir", api.DoctorWarn, fmt.Sprintf("%d of %d definition(s) in %s are invalid", bad, len(es), dir),
-			"jailops app list --source local shows the reasons; jailops app validate "+dir+" checks them")
-		return
-	}
-	c.add("apps.local_dir", api.DoctorOK, fmt.Sprintf("%d definition(s) in %s", len(es), dir), "")
 }
 
 // sizeText writes a number of bytes the way a person reads it (1.5 GiB).

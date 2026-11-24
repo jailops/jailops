@@ -1,0 +1,29 @@
+$ jailops apply -f <dir>/vol.yaml
+volume/pgdata created
+
+$ jailops apply -f <dir>/vol.yaml
+volume/pgdata unchanged
+
+$ jailops apply -f <dir>/vol.yaml
+volume/pgdata updated
+
+$ jailops apply -f <dir>/vol.yaml
+! usage: document 1 (Volume): volume "pgdata" exists and differs in size: apply makes a volume that is missing and never changes the storage, size, owner, mode or encryption of one that exists (its data stays as it is)
+! hint: run 'jailops apply --help' for usage
+[exit 2]
+
+$ jailops apply -f <dir>/vol.yaml
+! usage: document 1 (Volume): volume "pgdata" exists and differs in uid: apply makes a volume that is missing and never changes the storage, size, owner, mode or encryption of one that exists (its data stays as it is)
+! hint: run 'jailops apply --help' for usage
+[exit 2]
+
+$ jailops apply -f <dir>/vol.yaml
+! usage: document 1 (Volume): volume "pgdata" exists and differs in mode: apply makes a volume that is missing and never changes the storage, size, owner, mode or encryption of one that exists (its data stays as it is)
+! hint: run 'jailops apply --help' for usage
+[exit 2]
+
+$ jailops apply -f <dir>/vol.yaml
+! usage: document 1 (Volume): volume "pgdata" exists and differs in encrypted: apply makes a volume that is missing and never changes the storage, size, owner, mode or encryption of one that exists (its data stays as it is)
+! hint: run 'jailops apply --help' for usage
+[exit 2]
+

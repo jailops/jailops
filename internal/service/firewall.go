@@ -13,19 +13,14 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// policyUse says who uses the policy of a project: the jails that name it (their own, through a profile, or as the
-// managed policy of app access) and whether it is a mandatory policy of the project.
+// policyUse says who uses the policy of a project: the jails that name it (their own or through a profile) and whether it is a mandatory policy of the project.
 func (s *Service) policyUse(project, name string) api.FirewallPolicyStatus {
 	st := api.FirewallPolicyStatus{UsedBy: []string{}}
 	if pr, err := s.projKind.get(project); err == nil {
 		st.Mandatory = slices.Contains(pr.Spec.FirewallPolicies, name)
 	}
-	managed := ""
-	if o, err := s.polKind.p(project).get(name); err == nil && o.Meta.ManagedBy == api.AppAccessManagedBy {
-		managed = o.Meta.Labels[api.LabelApp+".access"]
-	}
 	for _, j := range s.projectJails(project) {
-		if j.Metadata.Name == managed || slices.Contains(s.effective(j).Firewall.Policies, name) {
+		if slices.Contains(s.effective(j).Firewall.Policies, name) {
 			st.UsedBy = append(st.UsedBy, j.Metadata.Name)
 		}
 	}
@@ -178,13 +173,8 @@ func (s *Service) CreatePolicy(ctx context.Context, in api.FirewallPolicy) (api.
 }
 
 // protectedPolicy reports whether the policy is the project's mandatory
-// firewall policy, which only a global administrator may change, or one that
-// app access manages, which only app allow and deny change.
+// firewall policy, which only a global administrator may change.
 func (s *Service) protectedPolicy(ctx context.Context, p project, name string) error {
-	if o, err := s.polKind.p(p.Meta.Name).get(name); err == nil && o.Meta.ManagedBy == api.AppAccessManagedBy {
-		return api.Errorf(api.CodeForbidden, "firewall policy %q is managed by app access", name).
-			WithHint("jailops app allow and jailops app deny change it; jailops app access shows its grants")
-	}
 	if slices.Contains(p.Spec.FirewallPolicies, name) && !ActorFrom(ctx).Global {
 		return api.Errorf(api.CodeForbidden, "firewall policy %q is a mandatory policy of project %q; a global administrator manages it", name, p.Meta.Name)
 	}
@@ -286,8 +276,7 @@ func (s *Service) allRefs(project string) (fwRefs, error) {
 	return fwRefs{sets: sets, jails: s.projectJailAddrs(project)}, nil
 }
 
-// projectJailAddrs maps every jail of the project to its addresses (with what its profiles give it, as app access
-// reads them).
+// projectJailAddrs maps every jail of the project to its addresses (with what its profiles give it).
 func (s *Service) projectJailAddrs(project string) map[string][]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -528,12 +517,10 @@ func (s *Service) tagMembers(project string, policy api.FirewallPolicySpec) map[
 	return out
 }
 
-// namedSpec is a policy of a jail with its name and where it comes from: the project's mandatory policy or the policy
-// that app access keeps for the jail.
+// namedSpec is a policy of a jail with its name and where it comes from: the project's mandatory policy or its own.
 type namedSpec struct {
 	name    string
 	project bool
-	managed bool
 	spec    api.FirewallPolicySpec
 }
 
@@ -541,8 +528,6 @@ func (n namedSpec) label() string {
 	switch {
 	case n.project:
 		return n.name + " [project]"
-	case n.managed:
-		return n.name + " [managed]"
 	}
 	return n.name
 }

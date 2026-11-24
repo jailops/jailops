@@ -1,0 +1,18 @@
+apiVersion: jailops/v1
+kind: Jail
+hosts: [h1]
+metadata:
+  name: db
+# start: true starts the jail once, when sync creates it. A jail that exists and was stopped is never started by sync:
+# its recipes wait.
+start: true
+recipes:
+  # A directory of this repository (recipes/ also takes a git submodule). The values are the recipe's variables.
+  - path: recipes/postgres-listen
+    vars: {listen_net: 10.70.0.0/24}
+spec:
+  image: freebsd-15
+  storage: default
+  network:
+    - {network: shop, ipv4: auto}
+  firewall: {policies: [db]}

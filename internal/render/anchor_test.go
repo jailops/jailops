@@ -24,7 +24,7 @@ func TestAnchorRulesAreTheFilterLinesOfTheText(t *testing.T) {
 	several := pfBase()
 	several.Policies = []PFPolicy{
 		{Name: "floor", Project: true, Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{rule("ssh", "22")}}},
-		{Name: "app-web", Managed: true, Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{rule("access", "5432")}}},
+		{Name: "app-web", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{rule("access", "5432")}}},
 		{Name: "postgres", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{rule("from the set", "5432")}}},
 	}
 	for name, in := range map[string]PFInput{"base": pfBase(), "full": full, "raw": raw, "several": several} {
@@ -88,7 +88,7 @@ func TestAnchorRulesKnowTheirOrigin(t *testing.T) {
 	in := pfBase()
 	in.Policies = []PFPolicy{
 		{Name: "floor", Project: true, Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{{Name: "ssh", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"22"}, Comment: "ssh for all"}}}},
-		{Name: "app-web", Managed: true, Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
+		{Name: "app-web", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
 			{Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"5432"}}, {Name: "second", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"5433"}}}}},
 	}
 	an, err := BuildAnchor(in)
@@ -103,8 +103,8 @@ func TestAnchorRulesKnowTheirOrigin(t *testing.T) {
 	}
 	want := []Origin{
 		{Stage: StagePolicy, Policy: "floor", ProjectPolicy: true, RuleNo: 1, RuleName: "ssh", Comment: "ssh for all"},
-		{Stage: StagePolicy, Policy: "app-web", Managed: true, RuleNo: 1},
-		{Stage: StagePolicy, Policy: "app-web", Managed: true, RuleNo: 2, RuleName: "second"},
+		{Stage: StagePolicy, Policy: "app-web", RuleNo: 1},
+		{Stage: StagePolicy, Policy: "app-web", RuleNo: 2, RuleName: "second"},
 	}
 	// a policy rule renders once for every family the jail has (the base jail has both)
 	var uniq []Origin

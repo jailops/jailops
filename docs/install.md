@@ -262,7 +262,7 @@ copy of its newest generation (its newest patch level) with a root of its own. T
 release is `jailops jail upgrade --release` for the jails and a new image for new jails
 ([upgrade.md](upgrade.md#a-new-release-move-the-jails)).
 
-Without an image, `jailops app install` and `jailops create` are refused with a hint that names the two commands
+Without an image, `jailops create` is refused with a hint that names the two commands
 above, with the host's release filled in.
 
 `jailops shell web` (or the console's Console tab) opens the jail's shell with a light blue `root@web:/#` prompt:
@@ -270,13 +270,8 @@ FreeBSD's sh unless the jail prefers bash, which you install yourself (`jailops 
 installs a shell). `jailops config set web prompt ...` changes the prompt, your own `~/.bashrc` wins over it, and `jails:` in
 `jailopsd.yaml` changes the defaults of the host ([shell.md](shell.md), also for the green prompt of the host).
 
-An application from the catalog is one command more. The definitions came with the `jailops` package, under
-`/usr/local/share/jailops/apps` (`jailops app list` shows them, `jailops app info nginx` describes one), and
-`jailops app install nginx shop --network lan --storage default` creates a jail named `shop`, installs the package into it
-from the FreeBSD repository, enables and starts the service, checks that it answers, snapshots the fresh installation as
-`app-installed` and prints where the site, the configuration and the logs are. `jailops app installed` lists the jails
-that came from the catalog. What the installation does step by step, and what it leaves behind when a step fails, is in
-[apps.md](apps.md).
+What runs inside a jail is a recipe: `jailops jail apply web -f recipe.yaml` installs packages, writes files and starts
+services in the jail, and runs again without harm ([provisioning.md](provisioning.md#2-applying-a-recipe-to-a-jail)).
 
 Without `project switch` pass `--project web` (or set `JAILOPS_PROJECT=web`) on every jail command. `--start` starts the jail
 once it is created (`jailops start web` does the same later). Several objects at once come from a file:
@@ -308,14 +303,9 @@ certificate, the host firewall (ssh only from your address, reverted unless you 
 base image: the image of the host's own release and architecture, named after it (`freebsd-15-1` on 15.1-RELEASE),
 created and built in the step, with an optional nightly auto upgrade (one checkbox, off until you tick it, 03:00 by default; see
 [upgrade.md](upgrade.md#nightly-auto-upgrade)) (the build downloads the base system packages from `pkg.freebsd.org` and takes a few minutes; a failed
-build says what to check and is tried again in place). The wizard ends with **Install your first app** (the app
-catalog, which came with the `jailops` package), or with **Create the base image** when that step was skipped: apps and
-jails start from an image, and the Images page (Create image) makes it at any time. `jailops doctor` should then
+build says what to check and is tried again in place). The wizard ends with **Create the base image** when that step was skipped: jails
+start from an image, and the Images page (Create image) makes it at any time. `jailops doctor` should then
 report `appliance` ok.
-
-The first service is then one dialog: on the Apps page choose an app and Install; it takes the project, network and
-storage the wizard made and the FreeBSD image of the newest release the host can run (`freebsd-15-1`). Without an
-image the dialog says so and offers to create the base image instead of failing.
 
 The kernel modules, forwarding and the other host settings of sections 1 and 4 still apply; `jailops doctor` names what
 is missing. The browser warns about the self-signed certificate until you replace it, one of two ways:

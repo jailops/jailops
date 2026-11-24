@@ -96,7 +96,7 @@ are expanded. Secret references stay references; nothing is decrypted.`,
 
 func (a *app) cmdPlan() *cobra.Command {
 	var hosts []string
-	var all bool
+	var all, asJSON bool
 	c := &cobra.Command{
 		Use:   "plan",
 		Short: "Show what sync would change (reads hosts, writes nothing)",
@@ -115,27 +115,40 @@ jailops-sync -C /srv/fleet plan`,
 			}
 			s := a.session(f)
 			defer s.Close()
-			p := plan.Compute(cmd.Context(), s, plan.Options{Hosts: hs})
+			p := plan.Compute(cmd.Context(), s, plan.Options{Hosts: hs, Manual: true})
+			if asJSON {
+				if err := writeJSON(cmd.OutOrStdout(), planReport(p)); err != nil {
+					return err
+				}
+				return p.Err()
+			}
 			a.printPlan(cmd.OutOrStdout(), p, all)
 			return p.Err()
 		},
 	}
 	a.hostFlag(c, &hosts)
-	c.Flags().BoolVar(&all, "all", false, "also list unchanged objects")
+	c.Flags().BoolVar(&all, "all", false, "also list unchanged objects and recipes")
+	c.Flags().BoolVar(&asJSON, "json", false, "print the plan as JSON")
 	return c
 }
 
 func (a *app) cmdDrift() *cobra.Command {
 	var hosts []string
+	var asJSON bool
 	c := &cobra.Command{
 		Use:   "drift",
 		Short: "Exit non-zero when live hosts differ from the repository (for CI and cron)",
 		Example: `jailops-sync drift
 jailops-sync drift --host @prod || echo "the fleet has drifted"`,
-		Long: `Computes the plan and prints only what differs. Exit status: 0 the live
-fleet matches the repository, 1 it differs (create, update, delete of an
-owned object, or an object this fleet may not touch), 2 the check itself
-failed (invalid repository, unreachable host). Unmanaged objects are not drift.`,
+		Long: `Computes the plan and prints only what differs. Every recipe of a running
+jail is looked at inside the jail with a dry run (nothing runs in it).
+
+Exit status: 0 there is no drift that was confirmed, 1 the live fleet differs
+(create, update, delete of an owned object, an object this fleet may not touch,
+or a recipe that would be applied), 2 the check itself failed (invalid
+repository, unreachable host). Zero does not say that everything was checked:
+a recipe whose jail is not running is printed as waiting, and one that could
+not be looked at as unknown; both exit 0. Unmanaged objects are not drift.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			f, err := a.load()
@@ -148,20 +161,35 @@ failed (invalid repository, unreachable host). Unmanaged objects are not drift.`
 			}
 			s := a.session(f)
 			defer s.Close()
-			p := plan.Compute(cmd.Context(), s, plan.Options{Hosts: hs})
+			p := plan.Compute(cmd.Context(), s, plan.Options{Hosts: hs, Manual: true})
+			if asJSON {
+				if err := writeJSON(cmd.OutOrStdout(), planReport(p)); err != nil {
+					return err
+				}
+			}
 			if len(p.Errors) > 0 {
-				a.printPlan(cmd.OutOrStdout(), p, false)
+				if !asJSON {
+					a.printPlan(cmd.OutOrStdout(), p, false)
+				}
 				return &ExitError{ExitFatal, p.Err().Error()}
 			}
 			if p.Drifted() {
-				a.printPlan(cmd.OutOrStdout(), p, false)
+				if !asJSON {
+					a.printPlan(cmd.OutOrStdout(), p, false)
+				}
 				return &ExitError{ExitFailure, "drift detected"}
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "no drift: %s\n", p.Summary())
+			if !asJSON {
+				if len(p.Recipes) > 0 && p.RecipeSummary() != "" {
+					a.printPlan(cmd.OutOrStdout(), p, false)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "no drift: %s\n", p.Summary())
+			}
 			return nil
 		},
 	}
 	a.hostFlag(c, &hosts)
+	c.Flags().BoolVar(&asJSON, "json", false, "print the plan as JSON")
 	return c
 }
 
@@ -192,7 +220,7 @@ prune-check only reads. Deleting is always an explicit, separate step.`,
 			}
 			s := a.session(f)
 			defer s.Close()
-			p := plan.Compute(cmd.Context(), s, plan.Options{Hosts: hs})
+			p := plan.Compute(cmd.Context(), s, plan.Options{Hosts: hs, NoRecipes: true})
 			w := cmd.OutOrStdout()
 			n := 0
 			for _, h := range hs {

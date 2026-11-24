@@ -65,8 +65,8 @@ func addrSetDesc() *kindDesc[api.AddressSet] {
 		func(p *api.AddressSet) *api.AddressSetSpec { return &p.Spec })
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.AddressSet] { return c.Firewall().AddressSets() })
 	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.AddressSet] { return c.Firewall().AddressSets() })
-	d.renameLong = renameLong("address set", `the rules (set:NAME) of the policies of the project, the sets that
-name it as a member (set:NAME) and the app access grants made from it. Its PF table is renamed too, which ends the
+	d.renameLong = renameLong("address set", `the rules (set:NAME) of the policies of the project, and the sets that
+name it as a member (set:NAME). Its PF table is renamed too, which ends the
 connections that rules using it passed once; they are made again`)
 	d.show = func(a *app, p api.AddressSet) error { return a.showAddressSet(p) }
 	d.head = []string{"NAME", "ADDRESSES"}

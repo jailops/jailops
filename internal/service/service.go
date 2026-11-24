@@ -172,13 +172,6 @@ type Deps struct {
 	VolumeWatchTick time.Duration
 	// AutoUpgradeZone is the time zone of the time of day of an image's automatic upgrade (default: the host's).
 	AutoUpgradeZone *time.Location
-	// AppsDir is the application catalog directory (default apps.DefaultDir);
-	// a missing directory is an empty catalog.
-	AppsDir string
-	// AppsLocalDir holds the operator's own definitions, read with the
-	// catalog (default apps.DefaultLocalDir); a local definition wins over a
-	// packaged one of the same name.
-	AppsLocalDir string
 	// HostFile reads a world-readable file of the host (/etc/resolv.conf, /etc/rc.conf, /etc/pf.conf) as the
 	// daemon's own user; nil reads the file system.
 	HostFile func(path string) ([]byte, error)
@@ -307,13 +300,9 @@ type Service struct {
 
 	fleet fleetState
 
-	// accMu serialises the changes of app access (appaccess.go): a grant touches the app's policy, its
-	// registry and, for a source in another project, that jail's policy.
-	accMu sync.Mutex
-
 	execMu sync.Mutex
 	execN  map[string]int
-	// installing are the jails an app installation holds: no exec session
+	// installing are the jails a package operation holds (holdJailFor): no exec session
 	// may enter them while pkg works on their root from the host.
 	installing map[string]bool
 	// holds says what holds such a jail and since when (under execMu, with installing).

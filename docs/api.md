@@ -5,9 +5,7 @@ operations for long work (a jail create, an image build, an in-place upgrade of 
 
 | What | Where |
 |---|---|
-| The Go SDK (`jailops.net/jailops/sdk`): typed clients for jails, networks, storage, projects, images, firewall, backups, tokens, the application catalog, its installation, app drafts from a running jail, and host management (`HostSystem()`) | `sdk/` and its `doc.go` |
-| The Go SDK (`jailops.net/jailops/sdk`): typed clients for jails, networks, WireGuard tunnels, storage, projects, images, firewall, backups, tokens, the application catalog, its installation and app drafts from a running jail | `sdk/` and its `doc.go` |
-| The Go SDK (`jailops.net/jailops/sdk`): typed clients for jails, networks, storage, projects, images, firewall, backups, tokens, the application catalog, its installation, app drafts from a running jail and who may connect to an installed app (`Apps().Access`, `Allow`, `Deny`) | `sdk/` and its `doc.go` |
+| The Go SDK (`jailops.net/jailops/sdk`): typed clients for jails, networks, WireGuard tunnels, storage, projects, images, firewall, backups, tokens and host management (`HostSystem()`) | `sdk/` and its `doc.go` |
 | The wire types (`sdk/api`) and the protocol, route by route, with error codes | [../sdk/PROTOCOL.md](../sdk/PROTOCOL.md) |
 | An in-memory server with the same routes, for tests | `sdk/fake` |
 | Error codes and what to do | `jailops explain CODE` |
@@ -31,7 +29,7 @@ Reads need the operator role and never carry a private or preshared key; changes
 
 **Audit** ([audit.md](audit.md)): `GET /api/v1/jails/{name}/audit` (extension `jail_audit`, operator in the project, audited) answers `JailAudit`: one `JailAuditCheck` per check with `id`, `group` (`security` or `practice`), `result` (`pass`, `info`, `warn` or `critical`), `detail` and `fix`, and the number of critical and warning results. `?suggest=true` adds the suggestions, marked `suggestion: true` and never counted. It reads the jail, running or stopped, and changes nothing. SDK: `c.Jails().Audit`, `c.Jails().AuditWith` (`sdk.AuditOptions{Suggest: true}`).
 
-**Files** ([operations.md](operations.md#copying-files)): `GET|PUT /api/v1/jails/{name}/files/{path...}` (extension `jail_files`, operator in the project, audited) read and write below the root of a jail from the host; the path has no leading slash and no empty, `.` or `..` segment. `?stat=true` answers `JailFileStat` (`path`, `type` `file`, `dir`, `symlink`, `other` or `none`, `size`, `mode`, `modified_at`, `link`); a missing path is `none`, not an error. A plain `GET` sends the bytes of a regular file (`X-Jailops-File-Mode` carries its mode), `?archive=tar` a tar stream of a file, a symlink or, with `recursive=true`, a tree (`as=NAME` renames its top entry); a failure after the stream began sets the trailer `X-Jailops-Error`, and a tar without its end blocks is incomplete. A plain `PUT` writes the body (a `Content-Length` is required) as the file; `?archive=tar` unpacks the stream below the directory at the path. `mode`, `mkdir` and `preserve` set the permission bits, create the missing directories and keep owner and times. Symbolic links are never followed, set-id bits are never set and devices, FIFOs and sockets are skipped. The answer of a `PUT` is `JailFileCopy` (`files`, `dirs`, `symlinks`, `skipped`, `bytes`). A transfer over `limits.file_copy_bytes` is `invalid`; a root that is not mounted is `busy`, and so is a `GET` or `PUT` while an operation has the jail or a package update or app installation holds it (`?stat=true` still answers). These routes are streams, not JSON bodies: they are exempt from `limits.max_body_bytes` and the request timeout. SDK: `c.Jails().FileStat`, `FileGet`, `FilePut`.
+**Files** ([operations.md](operations.md#copying-files)): `GET|PUT /api/v1/jails/{name}/files/{path...}` (extension `jail_files`, operator in the project, audited) read and write below the root of a jail from the host; the path has no leading slash and no empty, `.` or `..` segment. `?stat=true` answers `JailFileStat` (`path`, `type` `file`, `dir`, `symlink`, `other` or `none`, `size`, `mode`, `modified_at`, `link`); a missing path is `none`, not an error. A plain `GET` sends the bytes of a regular file (`X-Jailops-File-Mode` carries its mode), `?archive=tar` a tar stream of a file, a symlink or, with `recursive=true`, a tree (`as=NAME` renames its top entry); a failure after the stream began sets the trailer `X-Jailops-Error`, and a tar without its end blocks is incomplete. A plain `PUT` writes the body (a `Content-Length` is required) as the file; `?archive=tar` unpacks the stream below the directory at the path. `mode`, `mkdir` and `preserve` set the permission bits, create the missing directories and keep owner and times. Symbolic links are never followed, set-id bits are never set and devices, FIFOs and sockets are skipped. The answer of a `PUT` is `JailFileCopy` (`files`, `dirs`, `symlinks`, `skipped`, `bytes`). A transfer over `limits.file_copy_bytes` is `invalid`; a root that is not mounted is `busy`, and so is a `GET` or `PUT` while an operation has the jail or a package update holds it (`?stat=true` still answers). These routes are streams, not JSON bodies: they are exempt from `limits.max_body_bytes` and the request timeout. SDK: `c.Jails().FileStat`, `FileGet`, `FilePut`.
 
 **Boot plan** ([operations.md](operations.md#start-at-boot)): `GET /api/v1/boot` (extension `boot_plan`, readonly) answers `BootPlan`:
 what the daemon starts after a boot of the host, in order (`order`: `position`, `project`, `jail`, `priority`, `depends`,
@@ -42,8 +40,8 @@ of every project it may use, in the same order and numbered again. SDK: `c.BootP
 
 **Logs** ([logging.md](logging.md)): `GET /api/v1/logs` (extension `logs_unified`, operator) merges the end of one file
 (`file`, default `messages`) of the jails of `?project=` (or of every project the caller may use with `all_projects=true`)
-by time: `jail` (repeatable), `label=k=v` (repeatable), `app`, `app_logs=true`, `tail`, `since`, `grep`, and `cursor`,
-the `next` map of the previous reply as JSON, to follow. Reply `LogsRead`: `lines` (`time`, `project`, `jail`, `app`,
+by time: `jail` (repeatable), `label=k=v` (repeatable), `tail`, `since`, `grep`, and `cursor`,
+the `next` map of the previous reply as JSON, to follow. Reply `LogsRead`: `lines` (`time`, `project`, `jail`,
 `file`, `line`), `sources` (with `error` for a file that could not be read), `next`, `truncated`; at most 50 files and
 2000 lines. Log forwarding (extension `log_forward`, global admin): `GET|PUT|DELETE /api/v1/logs/forward` (kind
 `LogForward`: `spec.sinks` and `status` with `origin` config or api, `generation` as ETag and each sink's state; `PUT`
@@ -82,7 +80,7 @@ restores the jail with no volume attachments with `no_volumes`.
 administrator asks for every one with `?all_projects=true` (SDK: `sdk.AllProjects()`; anyone else gets `forbidden`), and `status.granted_to` of
 each object names the projects that hold it, as far as the caller may see them.
 
-**Renames** (extension `rename`, [design.md](design.md#88-renames)): `POST /api/v1/networks/{name}/rename`,
+**Renames** (extension `rename`, [design.md](design.md#87-renames)): `POST /api/v1/networks/{name}/rename`,
 `/api/v1/firewall/address-sets/{name}/rename`, `/api/v1/firewall/policies/{name}/rename`, `/api/v1/profiles/{name}/rename`,
 `/api/v1/jails/{name}/rename` (a stopped jail), `/api/v1/images/{name}/rename`, `/api/v1/projects/{name}/rename` (its
 jails stopped), `/api/v1/volumes/{name}/rename` (the jails that attach it stopped), `/api/v1/storage/{name}/rename`,
@@ -118,8 +116,7 @@ hint; the cause, which can carry paths and command output of the host, is in the
 operation is the same: its `error` is `internal` with `internal error` and the id of the operation in the hint, in the
 operation, the list, the event stream and the CLI and console views, whoever reads it; the cause is in the log under the
 operation id. No role reads that text through the API: an administrator reads the log of the daemon. An operation that the daemon's restart cut off is `interrupted`: its `error.detail.recovery` says what startup recovery did with the run it had open (`rolled_back`, `completed`, `dropped` or `needs_attention`). An error with a code of
-its own (`invalid`, `busy`, `pool_exhausted` and the others) keeps its message and hint. An app installation that fails names
-the step, whether the jail was kept, and for a health check the answer it got; the output of pkg and of the helper is in the log. A port forward
+its own (`invalid`, `busy`, `pool_exhausted` and the others) keeps its message and hint. The output of pkg and of the helper is in the log. A port forward
 (an IPv4 exposure of a jail behind NAT: `expose`, `unexpose`, `spec.expose`) answers `forbidden` (403) to anyone but a global
 administrator and `invalid` (400) on a host port or an address that is the host's own. The firewall objects of a project are
 bounded: a policy has at most 500 rules, an address set 5000 members, a project 200 policies, 200 address sets and 20000 set
@@ -209,7 +206,7 @@ version, until they move to the first list.
 | Promise | Extensions |
 |---|---|
 | 1.x | `operations`, `etag`, `events`, `jails`, `jail_snapshots`, `jail_rollback_scopes`, `jail_copy`, `jail_config`, `config_keys`, `jail_devices`, `jail_exec`, `jail_console`, `jail_shell`, `jail_shell_setup`, `jail_usage`, `jail_logs`, `jail_expose`, `jail_reach`, `jail_apply`, `profiles`, `rename`, `images_pkgbase`, `image_generations`, `image_upgrade`, `networks_vnet`, `network_ipam_range`, `interface_descriptions`, `storage`, `volumes`, `projects`, `project_quotas`, `firewall_anchors`, `firewall_test`, `firewall_applied`, `updates`, `trust_tokens`, `sessions`, `audit_log`, `doctor`, `resources`, `logs_unified` |
-| Not yet | `backup_policies`, `backup_key`, `backup_run`, `backup_verify`, `restore_preflight` (backups: the preflight is a restore request with dry_run), `fleet_projects` (several hosts), `sealed_secrets`, `apps`, `app_install`, `app_draft`, `app_access` (the application catalog), `host_identity`, `host_firewall`, `host_pending`, `host_certificate`, `setup`, `boot_plan`, `wireguard`, `log_forward` (the host itself, appliance mode), `jail_export` (export and import of jails), `jail_files` (copying files), `volume_from_dir` (a volume from a host directory), `top` (live usage), `jail_audit` (the audit of a jail), `jail_base` (the base packages of a jail) |
+| Not yet | `backup_policies`, `backup_key`, `backup_run`, `backup_verify`, `restore_preflight` (backups: the preflight is a restore request with dry_run), `fleet_projects` (several hosts), `sealed_secrets`, `host_identity`, `host_firewall`, `host_pending`, `host_certificate`, `setup`, `boot_plan`, `wireguard`, `log_forward` (the host itself, appliance mode), `jail_export` (export and import of jails), `jail_files` (copying files), `volume_from_dir` (a volume from a host directory), `top` (live usage), `jail_audit` (the audit of a jail), `jail_base` (the base packages of a jail), `recipe_validate` (checking a rendered recipe without a jail) |
 
 ## Naming
 

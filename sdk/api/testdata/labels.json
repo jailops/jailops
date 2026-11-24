@@ -1,7 +1,7 @@
 {
   "comment": "Label rules shared by TestLabelRulesFixture (Go) and web/host/src/lib/labels.test.ts, so the console checks what the server checks. A case is a list of parts; a part is a string or [string, times].",
   "keys": {
-    "valid": [["env"], ["a"], ["Z9"], ["jailops.app"], ["jailops.app.version"], ["example.org/tier"], ["Team_1"], ["a-b.c_d"], [["x", 63]], [["p", 253], "/n"], ["a.b-c/x_y"]],
+    "valid": [["env"], ["a"], ["Z9"], ["team.name"], ["team.name.sub"], ["example.org/tier"], ["Team_1"], ["a-b.c_d"], [["x", 63]], [["p", 253], "/n"], ["a.b-c/x_y"]],
     "invalid": [[""], ["-env"], ["env-"], [".env"], ["env."], ["_env"], ["e nv"], ["env=x"], ["a/b/c"], ["/name"], ["prefix/"], ["pre_fix/name"], [["x", 64]], [["p", 254], "/n"], ["ümlaut"], ["a:b"], ["tab\tkey"]]
   },
   "values": {

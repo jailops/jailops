@@ -546,10 +546,9 @@ With `jailops_appliance`, a fresh host starts without any user. Three parts make
      its first generation with `POST /api/v1/images/freebsd-15-1/generations`, followed in the step as an operation (progress, Cancel while it may be
      cancelled). The build downloads the base system packages and takes minutes; a failed build keeps the definition,
      says what to check (the network, `pkg.freebsd.org` from the host) and is built again with Try again. When a FreeBSD
-     image exists the step says so. Skipping it is allowed: apps and jails then need an image, which the Images page
+     image exists the step says so. Skipping it is allowed: jails then need an image, which the Images page
      (Create image) makes later.
-  7. **Done**: **Install your first app** (the app catalog) when an image exists, else **Create the base image** (the
-     Images page with its Create image dialog).
+  7. **Done**: **Create the base image** when that step was skipped (the Images page with its Create image dialog).
 
 Corrections to the design below: the token is issued by the rc script of `jailopsd` (the daemon makes it; root asks for
 it), not by an installer; the account comes first, because every later step is an API call that needs it; the pool is
@@ -567,7 +566,6 @@ The design, for the installer image that does not exist yet:
 4. **Pool**: choose the pool and the dataset for JailOps (`jailops-setup -pool`), or create a pool on empty disks
    (a mirror or a single disk; the wizard lists the disks and says what will be erased).
 5. **Admin account**: the first global administrator with a password and, optionally, TOTP.
-6. **First app**: optionally install one app from the catalog (or skip).
 
 At the end the setup token is gone, the firewall module's default template is loaded (ssh and the console open), and
 the console asks the administrator to sign in.
@@ -580,7 +578,7 @@ It asks only: the target disk or disks (with a clear warning), the keyboard layo
 (or an ssh key). It installs:
 
 - the FreeBSD base system as packages (pkgbase) on ZFS on root, with boot environments;
-- `jailops`, `jailops-priv`, `jailopsd` and `jailops-apps`;
+- `jailops`, `jailops-priv` and `jailopsd`;
 - an `rc.conf` with DHCP on the first interface that has a link, `sshd_enable`, `ntpd_enable`, `jailops_priv_enable`,
   `jailopsd_enable` and `jailopsd_web="YES"`;
 - `rc.conf` with `jailops_appliance="YES"` (in place of editing `priv.conf` and `jailopsd.yaml`);

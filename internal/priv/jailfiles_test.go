@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"jailops.net/jailops/internal/service"
@@ -320,4 +321,25 @@ func TestJailFilesOverTheSocket(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	var _ tarcopy.Stats = st
+}
+
+// A directory made for a file is a system directory: 0755 whatever the umask says (and root:wheel for the helper, which
+// runs as root), never the owner of the file.
+func TestJailPutMakesParentsRootWheel0755(t *testing.T) {
+	e := newEnv(t)
+	jail, root := jfTree(t, e)
+	old := syscall.Umask(0o077)
+	defer syscall.Umask(old)
+	if _, err := e.local.JailPut(context.Background(), service.JailPutReq{Jail: jail, Root: root, Path: "opt/app/conf", Mkdir: true, Preserve: true}, tarOf(t, "f", "x", 0o600)); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"opt", "opt/app", "opt/app/conf"} {
+		st, err := os.Stat(filepath.Join(root, d))
+		if err != nil || st.Mode().Perm() != 0o755 {
+			t.Errorf("%s: %v %v", d, st, err)
+		}
+	}
+	if st, err := os.Stat(filepath.Join(root, "opt/app/conf/f")); err != nil || st.Mode().Perm() != 0o600 {
+		t.Errorf("the file keeps its own mode: %v %v", st, err)
+	}
 }

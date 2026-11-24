@@ -73,13 +73,13 @@ $ jailops firewall rule move web 1 --to 1 --after 1
 ! hint: run 'jailops firewall rule move --help' for usage
 [exit 2]
 
-$ jailops firewall rule add app-db in --action allow --proto tcp --port 5432 --comment x
-! usage: firewall policy "app-db" is managed by app-access: its rules are not changed here
+$ jailops firewall rule add hub-db in --action allow --proto tcp --port 5432 --comment x
+! usage: firewall policy "hub-db" is managed by hub:h1: its rules are not changed here
 ! hint: run 'jailops firewall rule add --help' for usage
 [exit 2]
 
-$ jailops firewall rule remove app-db 1
-! usage: firewall policy "app-db" is managed by app-access: its rules are not changed here
+$ jailops firewall rule remove hub-db 1
+! usage: firewall policy "hub-db" is managed by hub:h1: its rules are not changed here
 ! hint: run 'jailops firewall rule remove --help' for usage
 [exit 2]
 

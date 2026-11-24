@@ -3,7 +3,6 @@ import { runOp } from '@jailops/shared/composables/ops'
 import { confirmAction } from '@jailops/shared/composables/confirm'
 import { plural } from '@jailops/shared/lib/format'
 import { s } from '@/i18n'
-import { isInstalledApp } from '@/lib/access'
 import type { Jail, JailSnapshot } from '@jailops/shared/api/types'
 
 export type Lifecycle = 'start' | 'stop' | 'restart'
@@ -53,21 +52,12 @@ export function deleteItems(j: Jail, snaps: JailSnapshot[]): string[] {
 }
 
 /**
- * Delete a jail: data loss, so the name is typed (tier 3). An installed app is a jail too: there it is "uninstall",
- * a tier-2 confirmation. The volumes with the app's data stay.
+ * Delete a jail: data loss, so the name is typed (tier 3). The volumes it attaches stay.
  */
 export function askDelete(j: Jail, snaps: JailSnapshot[], done?: () => void): void {
   const name = j.metadata.name
-  const run = () => runOp(isInstalledApp(j) ? s.jails.uninstallTitle(appOf(j), name) : s.jails.deleteTitle(name), () => api.jails.remove(name))
-  if (isInstalledApp(j)) {
-    confirmAction({ title: s.jails.uninstallTitle(appOf(j), name), confirmLabel: s.jails.uninstall, text: s.jails.uninstallText(appOf(j), name), items: deleteItems(j, snaps), itemsLabel: s.jails.destroyed, danger: true, run, done })
-    return
-  }
+  const run = () => runOp(s.jails.deleteTitle(name), () => api.jails.remove(name))
   confirmAction({ title: s.jails.deleteTitle(name), confirmLabel: s.jails.delete, text: s.jails.deleteText, items: deleteItems(j, snaps), itemsLabel: s.jails.destroyed, typeName: name, typeLabel: s.jails.typeName(name), danger: true, run, done })
-}
-
-function appOf(j: Jail): string {
-  return j.metadata.labels?.['jailops.app'] ?? ''
 }
 
 /** Run an action on several jails; every jail gets its own toast, failures do not stop the rest. */

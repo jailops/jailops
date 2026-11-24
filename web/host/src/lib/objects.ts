@@ -7,7 +7,6 @@ const e = encodeURIComponent
 export const hostKinds: KindMap = {
   jails: { kind: 'jail', to: (n) => `/jails/${e(n)}` },
   images: { kind: 'image', to: () => '/images' },
-  apps: { kind: 'app', to: (n) => `/apps/${e(n)}` },
   networks: { kind: 'network', to: () => '/networks' },
   wireguard: { kind: 'tunnel', to: () => '/networks/wireguard' },
   'firewall/policies': { kind: 'firewall policy', to: (n) => `/firewall?policy=${e(n)}` },

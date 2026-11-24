@@ -169,8 +169,6 @@ type PFPolicy struct {
 	Policy  api.FirewallPolicySpec
 	// AllowRaw allows its raw fragment, as PFInput.AllowRaw does for all.
 	AllowRaw bool
-	// Managed is set for the policy of an app: managed by app access, not by the administrator.
-	Managed bool
 }
 
 // heading is the comment line that opens the policy in the anchor.
@@ -256,7 +254,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			return nil, api.Errorf(api.CodeForbidden, "raw PF fragments require the admin role")
 		}
 		sections = append(sections, section{heading: p.heading(), comment: p.Policy.Comment, raw: p.Policy.Raw, rules: p.Policy.Rules,
-			origin: Origin{Stage: StagePolicy, Policy: p.Name, ProjectPolicy: p.Project, Managed: p.Managed}})
+			origin: Origin{Stage: StagePolicy, Policy: p.Name, ProjectPolicy: p.Project}})
 		all = append(all, p.Policy.Rules...)
 	}
 	if len(in.Expose) > 0 {
@@ -607,7 +605,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 		head(i)
 		filterRules(&b, &in, sec.origin, sec.rules, sec.fams, fams, ifs, false, want)
 		if sec.raw != "" {
-			b.rule(Rule{Kind: RuleRaw, Origin: Origin{Stage: StageRaw, Policy: sec.origin.Policy, ProjectPolicy: sec.origin.ProjectPolicy, Managed: sec.origin.Managed}},
+			b.rule(Rule{Kind: RuleRaw, Origin: Origin{Stage: StageRaw, Policy: sec.origin.Policy, ProjectPolicy: sec.origin.ProjectPolicy}},
 				"%s", rawBegin)
 			b.line("%s", strings.TrimRight(strings.ReplaceAll(sec.raw, "\r\n", "\n"), "\n"))
 			b.line("%s", rawEnd)

@@ -83,10 +83,10 @@ func classify(pattern string) (api.Permission, string) {
 		return "", scopePublic
 	case path == "/api/v1/auth/session":
 		return api.PermReadonly, scopeSelf
-	case strings.HasPrefix(path, "/api/v1/apps/") && strings.HasSuffix(path, "/install"):
-		return api.PermOperator, scopeProject
-	case path == "/api/v1/config-keys", strings.HasPrefix(path, "/api/v1/apps"):
+	case path == "/api/v1/config-keys":
 		return api.PermReadonly, scopeSelf
+	case path == "/api/v1/recipes/validate":
+		return api.PermOperator, scopeSelf
 	case strings.HasPrefix(path, "/api/v1/sessions"):
 		return api.PermReadonly, scopeSelf
 	case path == "/api/v1/trust/tokens", strings.HasPrefix(path, "/api/v1/users"), strings.HasPrefix(path, "/api/v1/tokens"),
@@ -139,9 +139,6 @@ func classify(pattern string) (api.Permission, string) {
 		case strings.HasSuffix(path, "/logs"), strings.Contains(path, "/logs/"):
 			// logs hold secrets: the role that may exec into the jail
 			return api.PermOperator, scopeProject
-		case strings.HasSuffix(path, "/app-draft"):
-			// it runs commands in the jail: the role that may exec
-			return api.PermOperator, scopeProject
 		case strings.HasSuffix(path, "/audit"):
 			// the helper reads the tenant's files as root of the host and the jail runs sockstat: the role that may exec
 			return api.PermOperator, scopeProject
@@ -152,7 +149,6 @@ func classify(pattern string) (api.Permission, string) {
 			return api.PermAdmin, scopeGlobal
 		case strings.HasSuffix(path, "/state"), strings.HasSuffix(path, "/snapshots"), strings.Contains(path, "/snapshots/"),
 			strings.HasSuffix(path, "/rollback"), strings.HasSuffix(path, "/config"), strings.HasSuffix(path, "/exec"),
-			strings.HasSuffix(path, "/access/allow"), strings.HasSuffix(path, "/access/deny"),
 			strings.HasSuffix(path, "/unlock"), strings.HasSuffix(path, "/lock"), strings.HasSuffix(path, "/shell-setup"), strings.HasSuffix(path, "/apply"):
 			return api.PermOperator, scopeProject
 		}

@@ -1092,3 +1092,26 @@ func TestStoredJailWithProvisionLoads(t *testing.T) {
 		t.Fatalf("%+v %v", spec, err)
 	}
 }
+
+// The firewall policy app-NAME that the removed app access kept (managed_by app-access) is rewritten as an ordinary
+// policy when it is loaded; the same marker on another kind or another value stays.
+func TestStoredAppAccessPolicyBecomesOrdinary(t *testing.T) {
+	doc := map[string]any{"kind": "FirewallPolicy", "metadata": map[string]any{"name": "app-db", "managed_by": "app-access"}, "spec": map[string]any{"rules": []any{}}}
+	if !renameFields(doc) {
+		t.Fatal("the marker was kept")
+	}
+	if _, has := doc["metadata"].(map[string]any)["managed_by"]; has {
+		t.Fatalf("metadata: %v", doc["metadata"])
+	}
+	if renameFields(doc) {
+		t.Fatal("the rewrite is not idempotent")
+	}
+	for _, d := range []map[string]any{
+		{"kind": "FirewallPolicy", "metadata": map[string]any{"managed_by": "fleet:x"}, "spec": map[string]any{}},
+		{"kind": "Network", "metadata": map[string]any{"managed_by": "app-access"}, "spec": map[string]any{}},
+	} {
+		if renameFields(d) {
+			t.Fatalf("touched: %v", d)
+		}
+	}
+}

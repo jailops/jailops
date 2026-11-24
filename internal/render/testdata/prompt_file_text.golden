@@ -5,6 +5,9 @@
 # Only an interactive shell (sh or bash) sets the prompt; scripts, sh -c and bash -c are not affected.
 case "$-" in
 *i*)
-	PS1='\u@${JAILOPS_JAIL-} ${JAILOPS_PROJECT-}/${JAILOPS_HOST-}:\w\$ '
+	case "${JAILOPS_JAIL-}" in *[!abcdefghijklmnopqrstuvwxyz0123456789-]*) JAILOPS_JAIL= ;; esac
+	case "${JAILOPS_PROJECT-}" in *[!abcdefghijklmnopqrstuvwxyz0123456789-]*) JAILOPS_PROJECT= ;; esac
+	case "${JAILOPS_HOST-}" in *[!abcdefghijklmnopqrstuvwxyz0123456789-]*) JAILOPS_HOST= ;; esac
+	PS1='\u@'"${JAILOPS_JAIL-}"' '"${JAILOPS_PROJECT-}"'/'"${JAILOPS_HOST-}"':\w\$ '
 	;;
 esac

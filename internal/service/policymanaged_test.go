@@ -9,13 +9,13 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// A jail's own policy is neither a policy that something else manages (app-JAIL) nor the project's mandatory policy,
-// which is rendered for every jail already.
-func TestJailMayNotNameAManagedPolicyOrTheProjectFloor(t *testing.T) {
+// A jail may not name the project's mandatory policy, which is rendered for every jail already. A policy that a hub or
+// the fleet sync created (managed_by set) is attached to a jail and taken as a mandatory policy like any other.
+func TestJailMayNotNameTheProjectFloorButMayNameASyncedPolicy(t *testing.T) {
 	_, s := newEnv(t)
 	ctx := as(globalAdmin, dtest.SeedProject)
 	spec := api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow"}
-	if err := service.SetManagedPolicy(s, dtest.SeedProject, "app-db", api.AppAccessManagedBy, spec); err != nil {
+	if err := service.SetManagedPolicy(s, dtest.SeedProject, "synced", "sync:fleet1", spec); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.CreatePolicy(ctx, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "floor"}, Spec: spec}); err != nil {
@@ -25,18 +25,27 @@ func TestJailMayNotNameAManagedPolicyOrTheProjectFloor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pr.Spec.FirewallPolicies = []string{"floor"}
+	pr.Spec.FirewallPolicies = []string{"floor", "synced"}
 	if _, err := s.UpdateProject(as(globalAdmin, ""), dtest.SeedProject, pr, pr.Metadata.Generation); err != nil {
+		t.Fatalf("a synced policy as a mandatory policy: %v", err)
+	}
+	j := dtest.WebJail("web")
+	j.Spec.Firewall.Policies = []string{"floor"}
+	_, err = s.CreateJail(ctx, j)
+	wantCode(t, err, api.CodeInvalid)
+	if !strings.Contains(err.Error(), "is a mandatory policy of project") {
+		t.Errorf("%v", err)
+	}
+	if _, err := s.CreatePolicy(ctx, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "own"}, Spec: spec}); err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]string{"app-db": "is managed by " + api.AppAccessManagedBy, "floor": "is a mandatory policy of project"} {
-		j := dtest.WebJail("web")
-		j.Spec.Firewall.Policies = []string{name}
-		_, err := s.CreateJail(ctx, j)
-		wantCode(t, err, api.CodeInvalid)
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("%s: %v", name, err)
-		}
+	if err := service.SetManagedPolicy(s, dtest.SeedProject, "synced2", "sync:fleet1", spec); err != nil {
+		t.Fatal(err)
+	}
+	j = dtest.WebJail("web")
+	j.Spec.Firewall.Policies = []string{"own", "synced2"}
+	if _, err := s.CreateJail(ctx, j); err != nil {
+		t.Fatalf("a jail attaching a synced policy: %v", err)
 	}
 }
 

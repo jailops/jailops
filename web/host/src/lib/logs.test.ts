@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyFollow, applyUnified, emptyFollow, filterFromQuery, filterToQuery, jailColour, jailHue, lineTime, logFileOf, logQuery, pickFile, plainText, sortFiles, sourceLabel, startFrom, startUnified, stripControls, unifiedQuery, unifiedText } from './logs'
+import { applyFollow, applyUnified, emptyFollow, filterFromQuery, filterToQuery, jailColour, jailHue, lineTime, logQuery, pickFile, plainText, sortFiles, sourceLabel, startFrom, startUnified, stripControls, unifiedQuery, unifiedText } from './logs'
 import type { JailLogFile, JailLogRead, LogsRead } from '@jailops/shared/api/types'
 
 const read = (lines: string[], next: number, extra: Partial<JailLogRead> = {}): JailLogRead => ({ jail: 'web', file: 'messages', lines: lines.map((text) => ({ text })), next_offset: next, ...extra })
@@ -78,11 +78,6 @@ describe('files', () => {
   it('sorts active files first', () => {
     expect(sortFiles(files).map((x) => x.name)).toEqual(['auth.log', 'messages', 'nginx/access.log', 'messages.0', 'messages.1.gz'])
   })
-  it('maps an app log path to a name below /var/log', () => {
-    expect(logFileOf('/var/log/nginx/access.log')).toBe('nginx/access.log')
-    expect(logFileOf('/var/log/forgejo')).toBe('forgejo')
-    expect(logFileOf('/var/db/app/log.txt')).toBe('')
-  })
 })
 
 describe('unified view', () => {
@@ -91,10 +86,10 @@ describe('unified view', () => {
   })
 
   it('reads the filters from the query string, with the current project and defaults', () => {
-    expect(filterFromQuery({}, 'web')).toEqual({ project: 'web', all: false, jails: [], app: '', grep: '', since: '1h', file: 'messages', appLogs: false })
+    expect(filterFromQuery({}, 'web')).toEqual({ project: 'web', all: false, jails: [], grep: '', since: '1h', file: 'messages' })
     expect(filterFromQuery({}, '')).toMatchObject({ all: true, project: '' })
-    expect(filterFromQuery({ project: '*', jail: ['web', 'db', 'web'], since: '', grep: 'x', file: 'auth.log', app_logs: 'true' }, 'web'))
-      .toEqual({ project: '', all: true, jails: ['web', 'db'], app: '', grep: 'x', since: '', file: 'auth.log', appLogs: true })
+    expect(filterFromQuery({ project: '*', jail: ['web', 'db', 'web'], since: '', grep: 'x', file: 'auth.log' }, 'web'))
+      .toEqual({ project: '', all: true, jails: ['web', 'db'], grep: 'x', since: '', file: 'auth.log' })
     expect(filterFromQuery({ jail: 'web,db', since: 'yesterday', project: 'shop' }, 'web')).toMatchObject({ project: 'shop', jails: ['web', 'db'], since: '1h' })
   })
 
@@ -102,17 +97,17 @@ describe('unified view', () => {
     const f = filterFromQuery({ jail: 'web', since: '15m' }, 'web')
     expect(filterToQuery(f, 'web')).toEqual({ jail: ['web'], since: '15m' })
     expect(filterFromQuery(filterToQuery(f, 'web'), 'web')).toEqual(f)
-    const all = filterFromQuery({ project: '*', app: 'nginx', app_logs: '1', file: 'cron' }, 'web')
-    expect(filterToQuery(all, 'web')).toEqual({ project: '*', app: 'nginx', app_logs: 'true', file: 'cron' })
+    const all = filterFromQuery({ project: '*', file: 'cron' }, 'web')
+    expect(filterToQuery(all, 'web')).toEqual({ project: '*', file: 'cron' })
     expect(filterToQuery(filterFromQuery({ project: 'shop' }, 'web'), 'web')).toEqual({ project: 'shop' })
   })
 
   it('builds the server query, with the cursor of a follow', () => {
     const f = filterFromQuery({ jail: ['web', 'db'], grep: 'GET /a' }, 'web')
     expect(unifiedQuery(f)).toBe('?project=web&jail=web&jail=db&since=1h&grep=GET+%2Fa')
-    const all = { ...f, all: true, project: '', jails: [], grep: '', since: '', appLogs: true, file: 'auth.log' }
-    expect(unifiedQuery(all, { 'web/web/messages': 120 }, 5000)).toBe('?all_projects=true&app_logs=true&file=auth.log&limit=5000&cursor=%7B%22web%2Fweb%2Fmessages%22%3A120%7D')
-    expect(unifiedQuery({ ...all, all: false, appLogs: false, file: 'messages' }, {})).toBe('')
+    const all = { ...f, all: true, project: '', jails: [], grep: '', since: '', file: 'auth.log' }
+    expect(unifiedQuery(all, { 'web/web/messages': 120 }, 5000)).toBe('?all_projects=true&file=auth.log&limit=5000&cursor=%7B%22web%2Fweb%2Fmessages%22%3A120%7D')
+    expect(unifiedQuery({ ...all, all: false, file: 'messages' }, {})).toBe('')
   })
 
   it('starts from a read, keeps the failed sources and the cursors', () => {

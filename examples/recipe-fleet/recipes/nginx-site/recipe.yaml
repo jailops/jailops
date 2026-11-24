@@ -1,0 +1,9 @@
+vars:
+  site: {required: true}
+steps:
+  - file:
+      path: /usr/local/etc/nginx/sites/shop.conf
+      source: site.conf
+      template: true
+  - service: {name: nginx, enabled: true, running: true}
+  - run: [service, nginx, reload]

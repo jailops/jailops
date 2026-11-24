@@ -62,7 +62,7 @@ func TestEveryKindHasAnAuthority(t *testing.T) {
 	for _, k := range []Kind{KindJail, KindImage, KindNetwork, KindFirewallPolicy, KindAddressSet, KindBackupPolicy, KindBackupTarget,
 		KindHostGroup, KindRollout, KindJailTemplate, KindRemote, KindUser, KindToken, KindCertificate, KindHost, KindImageGeneration,
 		KindJailSnapshot, KindBackup, KindOperation, KindProject, KindStorage, KindVolume, KindWireGuard, KindHostIdentity,
-		KindLogForward, KindHostFirewall, KindHostCertificate, KindAppAccess, KindProfile} {
+		KindLogForward, KindHostFirewall, KindHostCertificate, KindProfile} {
 		values["Kind"+string(k)] = k
 	}
 	for _, name := range declared {

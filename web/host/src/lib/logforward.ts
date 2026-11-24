@@ -24,13 +24,12 @@ export interface SinkForm {
   excludeJails: string
   excludeLabels: string
   files: string
-  appLogs: boolean
   jailLogs: boolean
   audit: boolean
 }
 
 export function blankSink(): SinkForm {
-  return { name: '', type: 'syslog', to: '', facility: 'local0', caFile: '', tokenFile: '', queue: '', projects: '', jails: '', labels: '', excludeJails: '', excludeLabels: '', files: '', appLogs: true, jailLogs: true, audit: false }
+  return { name: '', type: 'syslog', to: '', facility: 'local0', caFile: '', tokenFile: '', queue: '', projects: '', jails: '', labels: '', excludeJails: '', excludeLabels: '', files: '', jailLogs: true, audit: false }
 }
 
 const join = (xs: string[] | undefined) => (xs ?? []).join(', ')
@@ -43,7 +42,7 @@ export function formOf(k: LogSink): SinkForm {
     name: k.name, type: k.type, to: k.to, facility: k.facility || 'local0', caFile: k.ca_file ?? '', tokenFile: k.token_file ?? '',
     queue: k.queue ? String(k.queue) : '', projects: join(src.projects), jails: join(src.jails), labels: joinLabels(src.labels),
     excludeJails: join(src.exclude_jails), excludeLabels: joinLabels(src.exclude_labels), files: join(src.files),
-    appLogs: !src.no_app_logs, jailLogs: !src.no_jails, audit: !!src.audit,
+    jailLogs: !src.no_jails, audit: !!src.audit,
   }
 }
 
@@ -124,7 +123,6 @@ export function sinkBody(f: SinkForm): LogSink {
   set('exclude_jails', list(f.excludeJails))
   set('exclude_labels', labels(f.excludeLabels))
   set('files', list(f.files))
-  if (!f.appLogs) src.no_app_logs = true
   if (!f.jailLogs) src.no_jails = true
   if (f.audit) src.audit = true
   const k: LogSink = { name: f.name.trim(), type: f.type, to: f.to.trim(), sources: src }

@@ -206,7 +206,7 @@ func jailLoss(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name strin
 }
 
 // jailDefaults gives a jail without a network or a storage (and without a profile, which may carry them) the
-// project's only grant of that kind, as app install does, and says which it took.
+// project's only grant of that kind and says which it took.
 func (a *app) jailDefaults(ctx context.Context, c *sdk.Client, j *api.Jail) error {
 	if j.Spec.Image == "" {
 		if err := a.defaultImage(ctx, c, j); err != nil {

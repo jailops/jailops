@@ -22,6 +22,7 @@ pool_exhausted 409
 precondition_failed 412
 quota_exceeded 409
 rate_limited 429
+step_failed 422
 unauthorized 401
 unsupported 501
 unverified_platform 501

@@ -13,7 +13,7 @@ var (
 	recipePkgRE  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$`)
 	recipeSvcRE  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 	recipeUserRE = regexp.MustCompile(`^([a-z_][a-z0-9_-]{0,31}\$?|[0-9]{1,10})$`)
-	recipeModeRE = regexp.MustCompile(`^0?[0-7]{3,4}$`)
+	recipeModeRE = regexp.MustCompile(`^(0[0-7]{3}|[0-7]{3})$`)
 	recipeVarRE  = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 )
 
@@ -32,7 +32,7 @@ var RecipeSysrcFiles = []string{"rc.conf", "periodic.conf"}
 // recipeDenied are the directories of the base system: pkgbase owns what is below them, so a recipe does not write
 // there. It is a rule against clobbering base files, not a security boundary: a run step can do anything its operator
 // can do in the jail.
-var recipeDenied = []string{"/etc", "/boot", "/bin", "/sbin", "/lib", "/libexec", "/rescue", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/libexec", "/usr/share", "/usr/include"}
+var recipeDenied = []string{"/etc", "/boot", "/bin", "/sbin", "/lib", "/libexec", "/rescue", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/libexec", "/usr/lib32", "/usr/libdata", "/usr/share", "/usr/include", "/usr/tests"}
 
 // RecipeAllowedFiles are the files below /etc that FreeBSD expects an administrator to edit (the base ships them as
 // defaults only) and that nothing of JailOps writes.
@@ -63,13 +63,13 @@ func Recipe(r api.Recipe) error {
 	for i, st := range r.Steps {
 		fld := fmt.Sprintf("steps[%d]", i)
 		kinds := 0
-		for _, set := range []bool{st.Package != nil, st.File != nil, st.Sysrc != nil, st.Service != nil, st.Run != nil} {
+		for _, set := range []bool{st.Package != nil, st.File != nil, st.Dir != nil, st.Sysrc != nil, st.Service != nil, st.Run != nil} {
 			if set {
 				kinds++
 			}
 		}
 		if kinds != 1 {
-			return Invalid(fld, "%s: a step is exactly one of package, file, sysrc, service and run", fld)
+			return Invalid(fld, "%s: a step is exactly one of package, file, dir, sysrc, service and run", fld)
 		}
 		if (st.Creates != "" || st.Unless != nil) && st.Run == nil {
 			return Invalid(fld, "%s: creates and unless belong to a run step", fld)
@@ -85,6 +85,8 @@ func Recipe(r api.Recipe) error {
 			var n int
 			n, err = recipeFile(fld, *st.File)
 			total += n
+		case st.Dir != nil:
+			err = recipeDir(fld, *st.Dir)
 		case st.Sysrc != nil:
 			err = recipeSysrc(fld, st)
 		case st.Service != nil:
@@ -108,7 +110,7 @@ func recipePackages(fld string, names []string) error {
 	}
 	for _, n := range names {
 		if !recipePkgRE.MatchString(n) {
-			return Invalid(fld+".package", "%s.package: %q is not a package name", fld, n)
+			return Invalid(fld+".package", "%s.package: a name is not a package name", fld)
 		}
 	}
 	return nil
@@ -126,20 +128,46 @@ func recipeFile(fld string, f api.RecipeFile) (int, error) {
 		return 0, err
 	}
 	if f.Path == "/" || RecipePathDenied(f.Path) {
-		return 0, Invalid(fld+".path", "%s.path: %s belongs to the base system: put local configuration below /usr/local/etc", fld, f.Path)
+		return 0, Invalid(fld+".path", "%s.path: the path belongs to the base system: put local configuration below /usr/local/etc", fld)
 	}
 	if len(*f.Content) > RecipeFileMax || !utf8.ValidString(*f.Content) || strings.ContainsRune(*f.Content, 0) {
 		return 0, Invalid(fld+".content", "%s: a file is text of at most %d MiB (copy other files with jailops cp)", fld, RecipeFileMax>>20)
 	}
-	for k, v := range map[string]string{"owner": f.Owner, "group": f.Group} {
-		if v != "" && !recipeUserRE.MatchString(v) {
-			return 0, Invalid(fld+"."+k, "%s.%s: %q is not a user or group name or id", fld, k, v)
-		}
-	}
-	if f.Mode != "" && !recipeModeRE.MatchString(f.Mode) {
-		return 0, Invalid(fld+".mode", "%s.mode: %q must be octal such as 0644", fld, f.Mode)
+	if err := recipeOwnerMode(fld, f.Owner, f.Group, f.Mode); err != nil {
+		return 0, err
 	}
 	return len(*f.Content), nil
+}
+
+// recipeOwnerMode checks the owner, group and mode of a file or directory step.
+func recipeOwnerMode(fld, owner, group, mode string) error {
+	for _, x := range [][2]string{{"owner", owner}, {"group", group}} {
+		if x[1] != "" && !recipeUserRE.MatchString(x[1]) {
+			return Invalid(fld+"."+x[0], "%s.%s: not a user or group name or id", fld, x[0])
+		}
+	}
+	if mode != "" && !recipeModeRE.MatchString(mode) {
+		return Invalid(fld+".mode", "%s.mode: must be three octal digits such as 0644 (no set-id or sticky bit)", fld)
+	}
+	return nil
+}
+
+func recipeDir(fld string, d api.RecipeDir) error {
+	fld += ".dir"
+	if err := AbsPath(fld+".path", d.Path); err != nil {
+		return err
+	}
+	if d.Path == "/" || RecipePathDenied(d.Path) {
+		return Invalid(fld+".path", "%s.path: the path belongs to the base system: put local configuration below /usr/local/etc", fld)
+	}
+	if err := recipeOwnerMode(fld, d.Owner, d.Group, d.Mode); err != nil {
+		return err
+	}
+	// the owner of a directory can always enter it and write: the extractor never leaves less than 0700
+	if d.Mode != "" && d.Mode[len(d.Mode)-3] != '7' {
+		return Invalid(fld+".mode", "%s.mode: the owner of a directory has all rights (7xx, such as 0755 or 0750)", fld)
+	}
+	return nil
 }
 
 func recipeSysrc(fld string, st api.RecipeStep) error {
@@ -152,7 +180,7 @@ func recipeSysrc(fld string, st api.RecipeStep) error {
 	}
 	for k, v := range st.Sysrc {
 		if !recipeVarRE.MatchString(k) {
-			return Invalid(fld, "%s: %q is not a variable name", fld, k)
+			return Invalid(fld, "%s: a key is not a variable name", fld)
 		}
 		if len(v) > 1024 || strings.ContainsAny(v, "\n\r\x00") {
 			return Invalid(fld, "%s: the value of %s is one line of text", fld, k)
@@ -173,7 +201,7 @@ func contains(l []string, s string) bool {
 func recipeService(fld string, s api.RecipeService) error {
 	fld += ".service"
 	if !recipeSvcRE.MatchString(s.Name) {
-		return Invalid(fld+".name", "%s.name: %q is not a service name", fld, s.Name)
+		return Invalid(fld+".name", "%s.name: not a service name", fld)
 	}
 	if s.Enabled == nil && s.Running == nil {
 		return Invalid(fld, "%s: set enabled, running or both", fld)

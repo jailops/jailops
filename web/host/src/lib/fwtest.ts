@@ -130,7 +130,7 @@ export type Verdict = 'pass' | 'block' | 'unknown'
 export const verdictOf = (v: string): Verdict => (v === 'pass' || v === 'block' ? v : 'unknown')
 
 /** What decided a hop, in the words of the console. `by` is the rule's own stage, the rest says which one. */
-export type DecisionKind = 'policy' | 'projectPolicy' | 'managedPolicy' | 'default' | 'isolation' | 'fixed' | 'none'
+export type DecisionKind = 'policy' | 'projectPolicy' | 'default' | 'isolation' | 'fixed' | 'none'
 export interface Decision {
   kind: DecisionKind
   stage: string
@@ -146,7 +146,7 @@ export function decisionOf(r: FirewallTestRule | undefined): Decision {
   if (!r) return { kind: 'none', stage: '', pf: '' }
   const base = { stage: r.stage, policy: r.policy, rule: r.rule, name: r.name, comment: r.comment, pf: r.pf }
   switch (r.stage) {
-    case 'policy': return { ...base, kind: r.managed ? 'managedPolicy' : r.project_policy ? 'projectPolicy' : 'policy' }
+    case 'policy': return { ...base, kind: r.project_policy ? 'projectPolicy' : 'policy' }
     case 'default': return { ...base, kind: 'default', setBy: r.set_by }
     case 'isolation': return { ...base, kind: 'isolation' }
     default: return { ...base, kind: 'fixed' }

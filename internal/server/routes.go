@@ -484,6 +484,19 @@ func (s *Server) routeTable() []route {
 			c.sync(200, api.ConfigKeys(), "")
 			return nil
 		}},
+		route{method: "POST", pattern: "/api/v1/recipes/validate", h: func(c *rc) error {
+			c.r.Body = http.MaxBytesReader(c.w, c.r.Body, 2*validate.RecipeTotalMax+1<<20)
+			var in api.RecipeValidateRequest
+			if err := c.decode(&in); err != nil {
+				return err
+			}
+			v, err := svc.ValidateRecipe(in)
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, "")
+			return nil
+		}},
 		route{method: "GET", pattern: "/api/v1/updates", h: func(c *rc) error {
 			v, err := svc.ListUpdates(c.r.Context())
 			if err != nil {
@@ -614,38 +627,6 @@ func (s *Server) routeTable() []route {
 			}
 			restart := c.r.URL.Query().Get("restart") == "true"
 			op, err := svc.ConfigureJail(c.r.Context(), c.pathArg("name"), ch, restart)
-			if err != nil {
-				return err
-			}
-			c.async(op)
-			return nil
-		}},
-	)
-
-	// The application catalog.
-	add(
-		route{method: "GET", pattern: "/api/v1/apps", h: func(c *rc) error {
-			v, err := svc.ListApps(c.r.Context())
-			if err != nil {
-				return err
-			}
-			c.sync(200, v, "")
-			return nil
-		}},
-		route{method: "GET", pattern: "/api/v1/apps/{name}", h: func(c *rc) error {
-			v, err := svc.GetApp(c.r.Context(), c.pathArg("name"))
-			if err != nil {
-				return err
-			}
-			c.sync(200, v, "")
-			return nil
-		}},
-		route{method: "POST", pattern: "/api/v1/apps/{name}/install", h: func(c *rc) error {
-			var in api.AppInstall
-			if err := c.decodeOptional(&in); err != nil {
-				return err
-			}
-			op, err := svc.InstallApp(c.r.Context(), c.pathArg("name"), in)
 			if err != nil {
 				return err
 			}
@@ -847,7 +828,6 @@ func (s *Server) routeTable() []route {
 			return nil
 		}},
 	)
-	add(s.appAccessRoutes()...)
 	add(s.renameRoutes()...)
 
 	// Projects, storage, trust and sessions.

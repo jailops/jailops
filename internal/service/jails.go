@@ -316,16 +316,12 @@ func (s *Service) checkJailRefs(project string, spec api.JailSpec) error {
 	}
 	pr, perr := s.projKind.get(project)
 	for _, p := range spec.Firewall.Policies {
-		o, err := s.polKind.p(project).get(p)
+		_, err := s.polKind.p(project).get(p)
 		if err != nil {
 			if api.IsCode(err, api.CodeNotFound) {
 				return notFound("firewall-policy", p)
 			}
 			return err
-		}
-		if o.Meta.ManagedBy != "" {
-			return invalid("firewall policy %q is managed by %s: it belongs to its own jail and is not a policy to attach", p, o.Meta.ManagedBy).
-				WithHint("write a policy of your own (jailops firewall policy create); app access keeps app-JAIL")
 		}
 		if perr == nil && slices.Contains(pr.Spec.FirewallPolicies, p) {
 			return invalid("firewall policy %q is a mandatory policy of project %s: it is rendered for every jail already", p, project).
@@ -774,7 +770,6 @@ func (s *Service) DeleteJail(ctx context.Context, name string, expect int64) (ap
 			s.mu.Unlock()
 			s.forgetKeys(key)
 			s.emitIn(ctx, p.Meta.Name, "jail-deleted", "/api/v1/jails/"+name)
-			s.accessJailGone(ctx, p.Meta.Name, name)
 			s.kick()
 			return nil, nil
 		},

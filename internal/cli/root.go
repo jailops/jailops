@@ -158,7 +158,9 @@ jailops events --type lifecycle -o json`,
 				f, a.compact = fmtTable, true
 			}
 			a.format = f
-			if projectScoped(cmd) {
+			// jail apply --validate renders and checks a recipe on this machine: no project, no jail, no daemon
+			validating := cmd.Name() == "apply" && cmd.Flags().Lookup("validate") != nil && cmd.Flags().Changed("validate")
+			if projectScoped(cmd) && !validating {
 				if err := a.requireProject(); err != nil {
 					a.started = false
 					return err
@@ -187,7 +189,7 @@ jailops events --type lifecycle -o json`,
 	_ = root.RegisterFlagCompletionFunc("remote", a.remoteNames())
 	_ = root.RegisterFlagCompletionFunc("host", a.completeHosts())
 	root.AddCommand(
-		a.jailCmd(), a.volumeCmd(), a.imageCmd(), a.appCmd(), a.networkCmd(), a.wireguardCmd(), a.firewallCmd(), a.backupCmd(),
+		a.jailCmd(), a.volumeCmd(), a.imageCmd(), a.networkCmd(), a.wireguardCmd(), a.firewallCmd(), a.backupCmd(),
 		a.projectCmd(), a.storageCmd(), a.sessionsCmd(), a.whoamiCmd(), a.opCmd(), a.eventsCmd(), a.tokenCmd(), a.certCmd(), a.userCmd(), a.hostCmd(),
 		a.remoteCmd(), a.auditCmd(), a.bootCmd(), a.topCmd(), a.stopAllCmd(), a.doctorCmd(), a.serverCmd(), a.explainCmd(), a.completionCmd(), a.versionCmd(), a.manCmd(),
 	)
@@ -240,7 +242,7 @@ func seconds(d time.Duration) int {
 // 'logs' checks for a project itself: with --all-projects it needs none.
 var projectScopedCommands = []string{
 	"jail", "create", "delete", "rename", "list", "info", "start", "stop", "restart", "exec", "pkg", "cp", "shell", "label", "expose", "unexpose",
-	"firewall", "profile", "update", "config", "backup policy", "backup restore", "app export",
+	"firewall", "profile", "update", "config", "backup policy", "backup restore",
 }
 
 const projectAnnotation = "jailops/project"

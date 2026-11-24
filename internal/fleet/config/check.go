@@ -47,6 +47,8 @@ func (f *Fleet) Check() error {
 		}
 	}
 
+	errs = append(errs, f.checkNeeds()...)
+
 	// Every SOPS file needs a creation_rule, or nobody knows who may decrypt it.
 	if f.SopsSecrets != nil {
 		if err := vault.CheckCovered(f.Path, vault.SecretsRel); err != nil {
@@ -128,7 +130,7 @@ func (f *Fleet) Check() error {
 	for _, o := range f.Objects {
 		// The daemon's name rules are narrower than the repository's file-name rule: a name it refuses fails at apply time.
 		switch o.Kind {
-		case api.KindJail, api.KindVolume, api.KindNetwork, api.KindFirewallPolicy, api.KindWireGuard, model.KindApp, api.KindAppAccess:
+		case api.KindJail, api.KindVolume, api.KindNetwork, api.KindFirewallPolicy, api.KindWireGuard:
 			if !api.IsName(o.Name, api.MaxName) {
 				add(o, "%s name %q must follow %s (lowercase letters, digits and '-', starting with a letter, not ending in '-')", o.Kind, o.Name, api.NamePattern)
 			}
@@ -144,6 +146,18 @@ func (f *Fleet) Check() error {
 				}
 			} else if !f.Secrets[s] {
 				add(o, "env refers to secret %q: no secrets/%s.age", s, s)
+			}
+		}
+		for _, r := range o.Recipes {
+			for _, name := range sortedKeys(r.Secrets) {
+				ref := r.Secrets[name]
+				if IsSopsRef(ref) {
+					if !vault.PathExists(f.SopsSecrets, ref) {
+						add(o, "recipe %s: secret %q: no such path in %s", r.Path, ref, vault.SecretsRel)
+					}
+				} else if !f.Secrets[ref] {
+					add(o, "recipe %s: secret %q: no secrets/%s.age", r.Path, ref, ref)
+				}
 			}
 		}
 		// Reference checks are per host: a shared object must resolve on each
@@ -266,49 +280,6 @@ func (f *Fleet) Check() error {
 				}
 				if pdef != nil && s.Storage != "" && !grantsStorage(pdef.Spec, s.Storage) {
 					add(o, "storage %q is not granted to project %s", s.Storage, o.Project)
-				}
-			}
-		case model.AppSpec:
-			pdef := f.Projects[o.Project]
-			for _, h := range o.Hosts {
-				if _, dup := tables[h][Key{api.KindJail, o.Project, o.Name}]; dup {
-					add(o, "a jail %q is declared too: an app is installed as its own jail", o.Name)
-				}
-				if s.Image != "" {
-					missing(h, api.KindImage, "", ImageName(s.Image), o, "image")
-				}
-				if s.Network != "" {
-					missing(h, api.KindNetwork, "", s.Network, o, "network")
-					if pdef != nil && !grantsNetwork(pdef.Spec, s.Network) {
-						add(o, "network %q is not granted to project %s", s.Network, o.Project)
-					}
-				}
-				if s.Storage != "" && s.Storage != "default" {
-					missing(h, api.KindStorage, "", s.Storage, o, "storage")
-				}
-				if pdef != nil && s.Storage != "" && !grantsStorage(pdef.Spec, s.Storage) {
-					add(o, "storage %q is not granted to project %s", s.Storage, o.Project)
-				}
-			}
-		case model.AppAccessSpec:
-			for _, h := range o.Hosts {
-				if _, ok := tables[h][Key{model.KindApp, o.Project, o.Name}]; !ok {
-					note(o, "no App %q is declared for host %s: the grants apply only if it was installed there", o.Name, h)
-				}
-				for _, g := range s.Grants {
-					c, _ := model.CanonicalSource(g.Source)
-					t := tables[h]
-					if name, ok := strings.CutPrefix(c, "jail:"); ok {
-						_, jail := t[Key{api.KindJail, o.Project, name}]
-						_, app := t[Key{model.KindApp, o.Project, name}]
-						if !jail && !app {
-							note(o, "source %s is neither a jail nor an app declared for host %s: it must exist there", c, h)
-						}
-					} else if name, ok := strings.CutPrefix(c, "set:"); ok {
-						if _, set := t[Key{api.KindAddressSet, o.Project, name}]; !set {
-							note(o, "source %s is not an address set declared for host %s: it must exist there", c, h)
-						}
-					}
 				}
 			}
 		case api.FirewallPolicySpec:

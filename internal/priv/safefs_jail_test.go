@@ -118,7 +118,7 @@ func TestFileOpsStayInsideTheJail(t *testing.T) {
 }
 
 // The same refusals over the socket, through the helper's dispatcher and allow-list, and through the daemon's
-// paths (pg_hba.conf of app access, rc.conf of an app draft) in the volume and image trees as well.
+// paths (a pg_hba.conf, an rc.conf) in the volume and image trees as well.
 func TestFileOpsStayInsideTheJailOverTheSocket(t *testing.T) {
 	var a, b string
 	f := newFixtureWith(t, func(e *env) {

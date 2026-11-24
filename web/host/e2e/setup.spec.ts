@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { DEMO_SETUP_TOKEN } from '../src/demo/setupToken'
 
 // The first-run wizard in demo mode (`?demo=setup`: a host without an administrator): the setup token, the account,
-// the skippable steps, the firewall with its confirmation, the defaults, the base image and the way to the app catalog. Runs on
+// the skippable steps, the firewall with its confirmation, the defaults, the base image and the way on from Done. Runs on
 // desktop and phone.
 
 function watch(page: Page): string[] {
@@ -91,11 +91,11 @@ test('the wizard creates the administrator, then every later step', async ({ pag
   await expect(page.getByTestId('setup-done')).toContainText('Network lan with 10.77.0.0/24')
   await expect(page.getByTestId('setup-done')).toContainText('Project main')
   await expect(page.getByTestId('setup-done')).toContainText('Image freebsd-15-1 (FreeBSD 15.1-RELEASE), first generation built, upgraded every night at 03:00')
-  await expect(page.getByTestId('setup-apps')).toHaveText('Install your first app')
+  await expect(page.getByTestId('setup-image-link')).toHaveCount(0)
 
-  await page.getByTestId('setup-apps').click()
-  await expect(page).toHaveURL(/\/apps$/)
-  await expect(page.locator('main h1').first()).toHaveText('Apps')
+  await page.getByTestId('setup-overview').click()
+  await expect(page).toHaveURL(/\/$/)
+  await expect(page.locator('main h1').first()).toHaveText('Overview')
   // the wizard is gone once the host has an administrator
   await page.evaluate(() => { history.pushState({}, '', '/setup'); dispatchEvent(new PopStateEvent('popstate')) })
   await expect(page.locator('main h1').first()).toHaveText('Overview')
@@ -112,12 +112,11 @@ test('every step after the account can be skipped', async ({ page }) => {
   }
   // the base image step says what skipping it means
   await expect(step).toContainText('Base image')
-  await expect(page.getByTestId('setup-image-skip-note')).toContainText('Apps and jails need an image')
+  await expect(page.getByTestId('setup-image-skip-note')).toContainText('Jails need an image')
   await page.getByTestId('setup-skip').click()
   await expect(step).toHaveText('Step 7 of 7: Done')
-  // without an image the way on is to make it, not the catalog
+  // without an image the way on is to make it
   await expect(page.getByTestId('setup-done-no-image')).toBeVisible()
-  await expect(page.getByTestId('setup-apps')).toHaveCount(0)
   await page.getByTestId('setup-image-link').click()
   await expect(page).toHaveURL(/\/images$/)
   await expect(page.getByTestId('image-create')).toBeVisible()
@@ -141,7 +140,7 @@ test('a failed build of the base image is retried in the step', async ({ page })
   await expect(page.getByTestId('image-name')).toBeDisabled()
   await page.getByTestId('setup-image-retry').click()
   await expect(step).toHaveText('Step 7 of 7: Done', { timeout: 15000 })
-  await expect(page.getByTestId('setup-apps')).toHaveText('Install your first app')
+  await expect(page.getByTestId('setup-image-link')).toHaveCount(0)
 })
 
 test('wrong setup tokens are locked out after five tries', async ({ page }) => {

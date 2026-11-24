@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test'
 import { audit } from '../../shared/a11y'
 import { DEMO_SETUP_TOKEN } from '../src/demo/setupToken'
 
-const routes = ['/', '/doctor', '/jails', '/jails/web', '/jails/mail', '/projects', '/projects/shop', '/storage', '/profiles', '/updates', '/images', '/apps', '/apps?tab=installed', '/apps/nginx', '/apps/postgresql', '/apps/isms', '/apps/nsd', '/apps/mail', '/apps/memcached', '/apps/wiki', '/jails/web?tab=logs', '/jails/build?tab=logs', '/networks', '/firewall', '/backups', '/hosts', '/operations', '/events', '/audit', '/access', '/host', '/networks/wireguard', '/jails/db?tab=access', '/jails/web?tab=access', '/logs', '/logs?jail=db&app_logs=true', '/logs?tab=forwarding', '/jails/vault', '/volumes', '/volumes/pgdata', '/volumes/secrets',
-  '/jails/web?tab=config', '/firewall?tab=sets', '/firewall?tab=test', '/firewall?tab=test&from=jail:web&to=jail:db&port=5432', '/firewall?tab=test&from=jail:web&to=jail:db&port=5433', '/firewall?tab=test&from=192.0.2.66&to=@web&port=80', '/firewall?tab=test&from=jail:web&to=jail:mail&port=26', '/backups?tab=policies', '/profiles?tab=host', '/access?tab=sessions', '/access?tab=trust', '/access?tab=tokens', '/nope']
+const routes = ['/', '/doctor', '/jails', '/jails/web', '/jails/mail', '/projects', '/projects/shop', '/storage', '/profiles', '/updates', '/images', '/jails/web?tab=logs', '/jails/build?tab=logs', '/networks', '/firewall', '/backups', '/hosts', '/operations', '/events', '/audit', '/access', '/host', '/networks/wireguard', '/logs', '/logs?jail=db&file=postgresql/postgresql.log', '/logs?tab=forwarding', '/jails/vault', '/volumes', '/volumes/pgdata', '/volumes/secrets',
+  '/jails/web?tab=config', '/jails/web?tab=recipes', '/firewall?tab=sets', '/firewall?tab=test', '/firewall?tab=test&from=jail:web&to=jail:db&port=5432', '/firewall?tab=test&from=jail:web&to=jail:db&port=5433', '/firewall?tab=test&from=192.0.2.66&to=@web&port=80', '/firewall?tab=test&from=jail:web&to=jail:mail&port=26', '/backups?tab=policies', '/profiles?tab=host', '/access?tab=sessions', '/access?tab=trust', '/access?tab=tokens', '/nope']
 
 for (const scheme of ['light', 'dark'] as const) {
   test.describe(`a11y ${scheme}`, () => {
@@ -99,7 +99,6 @@ for (const scheme of ['light', 'dark'] as const) {
 const states: Array<{ name: string; route: string; steps: Array<{ click?: string; force?: boolean; fill?: [string, string] }> }> = [
   { name: 'delete jail (typed)', route: '/jails/proxy', steps: [{ click: '[data-test="jail-delete"]' }, { click: '[data-test="confirm"]', force: true }] },
   { name: 'stop a running jail', route: '/jails', steps: [{ click: '[data-stop="db"]' }] },
-  { name: 'uninstall an app', route: '/apps?tab=installed', steps: [{ click: '[data-test^="uninstall-"]' }] },
   { name: 'create jail after a failed submit', route: '/jails', steps: [{ click: '[data-test="new-jail"]' }, { click: '[data-test="jail-create-go"]', force: true }] },
   { name: 'image upgrade confirm', route: '/images', steps: [{ click: '[data-test^="upgrade-"]' }] },
   { name: 'nightly upgrade after a failed save', route: '/images', steps: [{ fill: ['[data-test="auto-upgrade-at"]', ''] }, { click: '[data-test="auto-upgrade-save"]', force: true }] },
@@ -120,6 +119,7 @@ const states: Array<{ name: string; route: string; steps: Array<{ click?: string
   { name: 'bulk labels', route: '/jails', steps: [{ click: '[aria-label="Select api"]' }, { click: '[data-test="bulk-labels"]' }, { click: '[data-test="bl-apply"]', force: true }] },
   { name: 'run a command on selected jails', route: '/jails', steps: [{ click: '[aria-label="Select api"]' }, { click: '[data-test="bulk-run"]' }, { fill: ['[data-test="rc-command"]', 'hostname'] }, { click: '[data-test="rc-run"]' }] },
   { name: 'files of a jail', route: '/jails/web?tab=files', steps: [] },
+  { name: 'recipe with a variable and a failed check', route: '/jails/web?tab=recipes', steps: [{ fill: ['#r-text', 'vars:\n  pw: {secret: true, required: true}\nsteps:\n  - file: {path: /usr/local/etc/a, template: true, content: "${pw}"}\n'] }, { click: '[data-test="r-validate"]' }] },
   { name: 'connected shell', route: '/jails/web/shell', steps: [] },
 ]
 for (const scheme of ['light', 'dark'] as const) {

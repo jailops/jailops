@@ -19,6 +19,7 @@ import (
 	"jailops.net/jailops/internal/fleet/config"
 	"jailops.net/jailops/internal/fleet/plan"
 	"jailops.net/jailops/internal/fleet/secrets"
+	"jailops.net/jailops/sdk/api"
 )
 
 // Environment variables.
@@ -215,7 +216,9 @@ func (a *app) session(f *config.Fleet) *plan.Session {
 	} else {
 		conn = &plan.SDKConnector{Fleet: f, Store: st, Getenv: a.env.Getenv}
 	}
-	return plan.NewSession(f, conn, st)
+	s := plan.NewSession(f, conn, st)
+	s.Checks = plan.OpenChecks(a.state(), f.Meta.ID)
+	return s
 }
 
 // hosts resolves --host values (names or @groups); empty means every host.
@@ -252,6 +255,30 @@ func (a *app) printPlan(w io.Writer, p *plan.Plan, all bool) {
 			}
 			for _, d := range it.Dangers {
 				fmt.Fprintf(w, "              DANGER: %s\n", d)
+			}
+		}
+		for _, r := range p.Recipes {
+			if r.Host != h {
+				continue
+			}
+			label, show := string(r.Action), true
+			if r.Action == plan.RecipeMatch {
+				label = string(r.Status)
+				show = all || r.Status == plan.StatusUnknown
+			}
+			if !show {
+				continue
+			}
+			shown++
+			fmt.Fprintf(w, "  recipe %-9s %s", label, r.Ref())
+			if r.Why != "" {
+				fmt.Fprintf(w, " (%s)", r.Why)
+			}
+			fmt.Fprintln(w)
+			if (r.Pending() || all) && len(r.Steps) > 0 {
+				for _, l := range (api.ApplyResult{Steps: r.Steps}).Lines() {
+					fmt.Fprintf(w, "              %s\n", l)
+				}
 			}
 		}
 		for _, he := range p.Errors {

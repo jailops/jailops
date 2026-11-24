@@ -35,7 +35,7 @@ let debounce: ReturnType<typeof setTimeout> | undefined
 const multi = computed(() => can('projects') && projectState.projects.length > 1)
 const allProjects = computed(() => multi.value && all.value)
 
-const kindIcon: Record<Kind, IconName> = { jail: 'box', app: 'store', image: 'layers', network: 'network', project: 'users', storage: 'hardDrive', page: 'layoutDashboard' }
+const kindIcon: Record<Kind, IconName> = { jail: 'box', image: 'layers', network: 'network', project: 'users', storage: 'hardDrive', page: 'layoutDashboard' }
 
 interface Section { key: string; label: string; icon: IconName; items: Entry[]; more: number }
 

@@ -145,6 +145,17 @@ func (c *Client) Profiles() *Resource[api.Profile] {
 	return newResource[api.Profile](c, "/api/v1/profiles")
 }
 
+// ValidateRecipe checks a rendered recipe (variables replaced, files read into content) as apply would, without a jail:
+// nothing is read or written on the host. An invalid recipe is an error of code invalid that names the step and the
+// field, never a value or the content of a file (extension recipe_validate).
+func (c *Client) ValidateRecipe(ctx context.Context, req api.RecipeValidateRequest) (api.RecipeValidateResult, error) {
+	if err := c.need("recipe_validate"); err != nil {
+		return api.RecipeValidateResult{}, err
+	}
+	out, _, err := send[api.RecipeValidateResult](ctx, c, request{method: http.MethodPost, path: "/api/v1/recipes/validate", body: req})
+	return out, err
+}
+
 // ConfigKeys returns the registry of configuration keys of the server.
 func (c *Client) ConfigKeys(ctx context.Context) ([]api.ConfigKey, error) {
 	out, _, err := get[[]api.ConfigKey](ctx, c, "/api/v1/config-keys", nil)

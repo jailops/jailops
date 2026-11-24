@@ -1,0 +1,7 @@
+apiVersion: jailops/v1
+kind: Host
+metadata:
+  name: h1
+spec:
+  url: https://h1.example.test:8443
+  fingerprint: 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff

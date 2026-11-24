@@ -106,8 +106,10 @@ func parentOf(jr *os.Root, segs []string, mkdir bool) (*os.Root, error) {
 	}
 	for _, seg := range segs {
 		st, err := cur.Lstat(seg)
+		created := false
 		if errors.Is(err, fs.ErrNotExist) && mkdir {
 			if err = cur.Mkdir(seg, 0o755); err == nil {
+				created = true
 				st, err = cur.Lstat(seg)
 			}
 		}
@@ -137,10 +139,35 @@ func parentOf(jr *os.Root, segs []string, mkdir bool) (*os.Root, error) {
 			}
 			return nil, forbidden("%s changed while it was opened", seg)
 		}
+		if created {
+			if err := rootWheel(next); err != nil {
+				next.Close()
+				closeCur()
+				return nil, err
+			}
+		}
 		closeCur()
 		cur = next
 	}
 	return cur, nil
+}
+
+// rootWheel gives a directory made for a file or directory below it the rights of a system directory: root:wheel 0755,
+// whatever the umask or the group of its parent says, and never the owner of the file that follows. A process that is
+// not root keeps its own ids.
+func rootWheel(d *os.Root) error {
+	f, err := d.Open(".")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Chmod(0o755); err != nil {
+		return err
+	}
+	if err := f.Chown(0, 0); err != nil && !(errors.Is(err, syscall.EPERM) && os.Geteuid() != 0) {
+		return err
+	}
+	return nil
 }
 
 // copyErr maps what tarcopy and the file system answer to the helper's errors.
@@ -219,6 +246,9 @@ func (l *Local) JailStat(ctx context.Context, q service.JailStatReq) (api.JailFi
 		out.Type = api.FileTypeOther
 	}
 	out.Mode = octal(st.Mode().Perm())
+	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+		out.Uid, out.Gid = int(sys.Uid), int(sys.Gid)
+	}
 	return out, nil
 }
 

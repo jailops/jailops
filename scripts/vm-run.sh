@@ -30,7 +30,7 @@ mkdir -p "$stage/bin"
 CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=$(tr -d '[:space:]' < version.txt)" -o "$stage/bin/" ./cmd/jailops ./cmd/jailopsd ./cmd/jailops-priv ./cmd/jailops-sync ./cmd/jailops-backupd
 CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -trimpath -o "$stage/bin/forge" ./scripts/forge
 tar cf "$stage/files.tar" scripts/vm-clean.sh scripts/pkg-build.sh scripts/gen-share.sh scripts/ci-freebsd-e2e.sh scripts/ci-freebsd-pf.sh scripts/e2e-workflows.sh \
-	internal/render/testdata internal/apps/testdata packaging test version.txt README.md LICENSE.md docs/design.md \
+	internal/render/testdata packaging test version.txt README.md LICENSE.md docs/design.md \
 	-C "$stage" bin
 ssh_vm 'rm -rf /tmp/jopsci && mkdir -p /tmp/jopsci && tar xf - -C /tmp/jopsci' < "$stage/files.tar"
 release=$(ssh_vm 'freebsd-version -u' | sed 's/-p[0-9]*$//')

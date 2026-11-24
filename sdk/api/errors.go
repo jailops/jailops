@@ -40,6 +40,7 @@ const (
 	CodeNotManaged         Code = "not_managed"      // a host management module is not enabled (HTTP 403); the hint names the lines to add
 	CodeLocked             Code = "locked"           // an encrypted volume waits for its passphrase (HTTP 409); unlock the jail first
 	CodeBadPassphrase      Code = "bad_passphrase"   // the passphrase of an encrypted volume is wrong (HTTP 403); nothing else is said
+	CodeStepFailed         Code = "step_failed"      // a step of a recipe failed (HTTP 422): the message names the step, the exit status and, unless the request is sensitive, the output
 	CodeInterrupted        Code = "interrupted"      // the daemon stopped while the operation ran; error.detail.recovery says what startup recovery did (Recovery*)
 )
 
@@ -106,7 +107,7 @@ func (c Code) HTTPStatus() int {
 		return http.StatusConflict
 	case CodeRateLimited:
 		return http.StatusTooManyRequests
-	case CodeKeyNotEscrowed, CodePlaintextDenied:
+	case CodeKeyNotEscrowed, CodePlaintextDenied, CodeStepFailed:
 		return http.StatusUnprocessableEntity
 	case CodeMergeConflict:
 		return http.StatusConflict

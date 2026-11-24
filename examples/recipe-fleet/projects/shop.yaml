@@ -1,0 +1,11 @@
+apiVersion: jailops/v1
+kind: Project
+metadata:
+  name: shop
+spec:
+  hosts: [h1]
+  networks:
+    - {network: shop}
+  storage:
+    - {storage: default}
+  images: [freebsd-15]

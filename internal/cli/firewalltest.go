@@ -273,8 +273,6 @@ func describeRule(r *api.FirewallTestRule) string {
 	switch {
 	case r.ProjectPolicy:
 		kind = "project policy"
-	case r.Managed:
-		kind = "managed policy"
 	}
 	s := fmt.Sprintf("%s %s", kind, r.Policy)
 	if r.Rule > 0 {

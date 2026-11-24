@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 
 // Images from the console: the empty Images page, the Create image dialog with its build followed as an operation, a
-// failed build and its retry, the install and create forms of a host without an image (`?demo=empty`,
+// failed build and its retry, the create form of a host without an image (`?demo=empty`,
 // `?demo=noimage`), the nightly upgrade of an image (`?demo=nightlyfail` for a failed night) and the image of a new
 // host release (`?demo=newrelease`). Runs on desktop and phone.
 
@@ -14,7 +14,7 @@ async function go(page: Page, demo: string, path: string): Promise<void> {
 test('an empty Images page explains images and creates the base image', async ({ page }) => {
   await go(page, 'empty', '/images')
   const empty = page.getByTestId('images-empty')
-  await expect(empty).toContainText('An image is the base system jails and apps start from')
+  await expect(empty).toContainText('An image is the base system jails start from')
   await empty.getByTestId('image-new-empty').click()
   const dialog = page.getByTestId('image-create')
   await expect(page.getByTestId('image-name')).toHaveValue('freebsd-15-1')
@@ -57,22 +57,6 @@ test('a failed build says what to check and is built again', async ({ page }) =>
   await expect(page.getByTestId('image-name')).toBeDisabled()
   await page.getByTestId('image-retry').click()
   await expect(page.getByTestId('image-done')).toBeVisible({ timeout: 15000 })
-})
-
-test('the install dialog of a host without an image offers the base image', async ({ page }) => {
-  await go(page, 'noimage', '/apps/nginx')
-  await page.getByTestId('app-install').click()
-  const note = page.getByTestId('install-no-image')
-  await expect(note).toContainText('There is no image yet')
-  await expect(page.getByTestId('install-go')).toHaveJSProperty('disabled', true)
-  await expect(page.getByTestId('install-why')).toHaveText('Create the base image first.')
-  await note.getByTestId('install-make-image').click()
-  await expect(page.getByTestId('image-create')).toBeVisible()
-  await page.getByTestId('image-create-go').click()
-  await expect(page.getByTestId('image-done')).toBeVisible({ timeout: 15000 })
-  await page.getByTestId('image-close').click()
-  await expect(page.getByTestId('install-no-image')).toHaveCount(0)
-  await expect(page.getByTestId('install-go')).toHaveJSProperty('disabled', false)
 })
 
 test('the jail form of a host without an image offers the base image', async ({ page }) => {
@@ -139,13 +123,9 @@ test('a host on a new release is offered its image, from Overview and from Image
   await page.getByTestId('image-create-go').click()
   await expect(page.getByTestId('image-done')).toHaveText('The image freebsd-15-2 is ready.', { timeout: 15000 })
   await page.getByTestId('image-close').click()
-  // the image exists: the notice is gone, and apps get the new release first
+  // the image exists: the notice is gone
   await expect(page.locator('[data-image="freebsd-15-2"]')).toBeVisible()
   await expect(page.getByTestId('new-release')).toHaveCount(0)
-  await page.evaluate(() => { history.pushState({}, '', '/apps/nginx'); dispatchEvent(new PopStateEvent('popstate')) })
-  await page.getByTestId('app-install').click()
-  await expect(page.getByTestId('install-image')).toHaveValue('freebsd-15-2')
-  await expect(page.getByTestId('install-image').locator('option')).toHaveText(['freebsd-15-2 (15.2-RELEASE)', 'freebsd-15-1 (15.1-RELEASE)'])
 })
 
 test('a generation shows the FreeBSD version of its packages, and the jail list its patch level', async ({ page }, info) => {

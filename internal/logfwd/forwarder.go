@@ -28,12 +28,8 @@ type Jail struct {
 	Project string
 	Name    string
 	Labels  map[string]string
-	// App is the catalog app the jail was installed from ("" for none).
-	App string
 	// LogDir is <jail root>/var/log on the host.
 	LogDir string
-	// AppFiles are the files below /var/log the app declares.
-	AppFiles []string
 }
 
 // Reader reads the end of a log file from an offset (the helper's fs.tail_file).
@@ -246,8 +242,8 @@ func (f *Forwarder) Test(ctx context.Context, k api.LogSink, fromAPI bool) api.L
 
 // source is one file of a jail, or the audit log.
 type source struct {
-	key, project, jail, app, file, path string
-	audit                               bool
+	key, project, jail, file, path string
+	audit                          bool
 }
 
 // sink is the loop of one destination. The loop goroutine owns everything
@@ -379,8 +375,7 @@ func matchAny(labels, any map[string]string) bool {
 }
 
 // Select picks the sources of a sink from the jails: the files named by
-// the sink (default messages) of every jail it matches, the files their
-// apps declare, and the audit log when asked. The list is sorted by key.
+// the sink (default messages) of every jail it matches and the audit log when asked. The list is sorted by key.
 func Select(sel api.LogSinkSource, jails []Jail) []source {
 	var out []source
 	if !sel.NoJails {
@@ -394,17 +389,13 @@ func Select(sel api.LogSinkSource, jails []Jail) []source {
 				!matchAll(j.Labels, sel.Labels) || slices.Contains(sel.ExcludeJails, j.Name) || matchAny(j.Labels, sel.ExcludeLabels) {
 				continue
 			}
-			fs := slices.Clone(files)
-			if !sel.NoAppLogs {
-				fs = append(fs, j.AppFiles...)
-			}
 			seen := map[string]bool{}
-			for _, f := range fs {
+			for _, f := range files {
 				if seen[f] || api.ValidLogFileName(f) != nil {
 					continue
 				}
 				seen[f] = true
-				out = append(out, source{key: api.LogSourceKey(j.Project, j.Name, f), project: j.Project, jail: j.Name, app: j.App, file: f, path: path.Join(j.LogDir, f)})
+				out = append(out, source{key: api.LogSourceKey(j.Project, j.Name, f), project: j.Project, jail: j.Name, file: f, path: path.Join(j.LogDir, f)})
 			}
 		}
 	}
@@ -518,7 +509,7 @@ func (s *sink) readSource(ctx context.Context, src source) {
 		if !ok {
 			t = now
 		}
-		s.push(Entry{Time: t, Project: src.project, Jail: src.jail, App: src.app, File: src.file, Line: text, src: src.key, begin: pos, end: end})
+		s.push(Entry{Time: t, Project: src.project, Jail: src.jail, File: src.file, Line: text, src: src.key, begin: pos, end: end})
 		pos = end
 	}
 	s.read[src.key] = start + int64(last) + 1

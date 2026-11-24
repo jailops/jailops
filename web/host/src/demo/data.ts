@@ -5,7 +5,6 @@ import type {
   Remote, Token, User, Certificate, AuditEntry, Operation, ServerInfo, PoolUsage, PowerState, Volume,
 } from '@jailops/shared/api/types'
 import { knownExtensions } from '@jailops/shared/api/types'
-import { appHash } from './apps'
 
 const now = Date.now()
 const ago = (sec: number) => new Date(now - sec * 1000).toISOString()
@@ -25,7 +24,7 @@ const meta = (name: string, createdAgo = 86400 * 30, extra: Record<string, unkno
 
 export function server(): ServerInfo {
   return {
-    api_version: '1.0', api_extensions: [...knownExtensions], version: '0.1.0-demo', host_uuid: '6a1f0c52-2f0e-4f0b-8a5c-0123456789ab',
+    api_version: '1.0', api_extensions: [...knownExtensions], version: '0.9.4', host_uuid: '6a1f0c52-2f0e-4f0b-8a5c-0123456789ab',
     hostname: 'bsd01.example.net', role: 'host', hub: true, auth: 'trusted',
     environment: { os: 'FreeBSD', kernel_version: '15.1-RELEASE', arch: 'amd64', zfs_version: '2.3.0', pool: 'tank', pf: true, linuxulator: true },
   }
@@ -67,8 +66,8 @@ function jail(name: string, power: PowerState, o: { image?: string; gen?: string
 
 export function jails(): Jail[] {
   return [
-    jail('web', 'running', { ipv4: '10.20.0.11', vols: [{ volume: 'content', mount: '/usr/local/www' }], labels: { role: 'web', tier: 'frontend', env: 'prod', team: 'web', app: 'nginx', 'jailops.app': 'nginx', 'jailops.app.version': '1.30.6,3', 'jailops.app.hash': appHash('nginx') } }),
-    jail('db', 'running', { ipv4: '10.20.0.12', policy: 'db-internal', net: 'backend', vols: [{ volume: 'pgdata', mount: '/var/db/postgres' }, { volume: 'wal', mount: '/var/db/wal', read_only: false }], labels: { role: 'db', env: 'prod', team: 'data', backup: 'yes', 'jailops.app': 'postgresql', 'jailops.app.version': '18.5', 'jailops.app.hash': appHash('postgresql-previous') } }),
+    jail('web', 'running', { ipv4: '10.20.0.11', vols: [{ volume: 'content', mount: '/usr/local/www' }], labels: { role: 'web', tier: 'frontend', env: 'prod', team: 'web', app: 'nginx' } }),
+    jail('db', 'running', { ipv4: '10.20.0.12', policy: 'db-internal', net: 'backend', vols: [{ volume: 'pgdata', mount: '/var/db/postgres' }, { volume: 'wal', mount: '/var/db/wal', read_only: false }], labels: { role: 'db', env: 'prod', team: 'data', backup: 'yes' } }),
     jail('mail', 'error', { image: 'freebsd-15-1#g3', gen: 'freebsd-15-1#g3', drift: ['rctl: memoryuse limit 2G rendered, live 512M', 'pf anchor jailops/mail is not loaded'], cond: [{ type: 'Ready', status: 'False', reason: 'ApplyFailed', message: 'pfctl: anchor load failed: syntax error at line 14', since: ago(900) }], policy: 'mail-edge', vols: [{ volume: 'spool', mount: '/var/spool' }], labels: { role: 'mail', env: 'prod', team: 'ops', app: 'postfix' } }),
     jail('build', 'stopped', { autostart: false, labels: { role: 'ci', env: 'dev', team: 'platform' } }),
     jail('proxy', 'running', { net: 'edge', ipv4: '192.0.2.10', ipv6: 'auto', labels: { role: 'proxy', env: 'prod', team: 'web', app: 'haproxy' } }),

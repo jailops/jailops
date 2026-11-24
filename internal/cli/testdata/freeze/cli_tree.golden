@@ -11,43 +11,6 @@ jailops
     --wait bool =true
     --wait-timeout duration =0s
     --yes/-y bool
-jailops app  (aliases: apps)
-jailops app access
-jailops app allow
-    --db string
-    --from string
-    --port stringSlice
-    --proto string =tcp
-    --rotate bool
-jailops app deny
-    --drop-role bool
-    --from string
-jailops app export
-    --file/-f string
-    --overwrite bool
-jailops app info
-jailops app install
-    --cpu int
-    --disk string
-    --image string
-    --memory string
-    --network string
-    --storage string
-jailops app installed
-jailops app list  (aliases: ls)
-    --category string
-    --columns/-c stringSlice
-    --selector/-l stringArray
-    --sort string
-    --source string
-jailops app new
-    --category string
-    --dir string =.
-    --overwrite bool
-    --package stringSlice
-    --port stringSlice
-    --service stringSlice
-jailops app validate
 jailops apply
     --file/-f string
 jailops audit
@@ -495,10 +458,16 @@ jailops info
 jailops jail  (aliases: jails)
 jailops jail apply
     --file/-f string
+    --set stringArray
+    --set-file stringArray
+    --validate bool
+    --vars string
 jailops jail audit
     --suggest bool
 jailops jail base
 jailops jail base add
+    --all bool
+    --selector/-l stringArray
 jailops jail base list
 jailops jail console
     --shell string
@@ -666,8 +635,6 @@ jailops list  (aliases: ls)
     --verbose/-v bool
 jailops logs
     --all-projects bool
-    --app string
-    --app-logs bool
     --events bool
     --file string
     --follow/-f bool
@@ -688,7 +655,6 @@ jailops logs forward create
     --file stringArray
     --from-project stringArray
     --jail stringArray
-    --no-app-logs bool
     --queue int
     --selector/-l stringArray
     --token-file string
@@ -706,7 +672,6 @@ jailops logs forward set
     --file stringArray
     --from-project stringArray
     --jail stringArray
-    --no-app-logs bool
     --queue int
     --selector/-l stringArray
     --token-file string

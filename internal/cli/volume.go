@@ -29,6 +29,8 @@ func volumeDesc() *kindDesc[api.Volume] {
 	d.del = func(ctx context.Context, c *sdk.Client, n string) (opHandle, error) {
 		return handle(c.Volumes().Delete(ctx, n))
 	}
+	// apply makes a volume that is missing; a volume that exists keeps its data, owner, mode, size and storage
+	d.existing = existingVolume
 	d.rename = func(ctx context.Context, c *sdk.Client, n string, req api.Rename, etag string) (*sdk.Operation[api.RenameResult], error) {
 		return c.Volumes().Rename(ctx, n, req, etag)
 	}
@@ -591,4 +593,51 @@ func unlimitedOr(size string) string {
 		return "unlimited"
 	}
 	return size
+}
+
+// existingVolume is what 'apply -f' does with a volume that exists: the same spec is unchanged, a document that asks for
+// another storage, size, owner, mode, encryption or directory is refused (the data is never re-owned or resized by a
+// file), and what a file may change (comment, notes, labels, the watch of a host directory) is updated. A field the file
+// leaves out is not compared.
+func existingVolume(cur, want api.Volume) (api.Volume, error) {
+	c, w := cur.Spec, want.Spec
+	var diff []string
+	for _, f := range []struct {
+		name    string
+		differs bool
+	}{
+		{"storage", w.Storage != "" && w.Storage != c.Storage},
+		{"size", w.Size != "" && w.Size != c.Size},
+		{"uid", w.UID != 0 && w.UID != c.UID},
+		{"gid", w.GID != 0 && w.GID != c.GID},
+		{"mode", w.Mode != "" && strings.TrimLeft(w.Mode, "0") != strings.TrimLeft(c.Mode, "0")},
+		{"encrypted", w.Encrypted != c.Encrypted},
+		{"path", w.Path != "" && w.Path != c.Path},
+	} {
+		if f.differs {
+			diff = append(diff, f.name)
+		}
+	}
+	if len(diff) > 0 {
+		return cur, usagef("volume %q exists and differs in %s: apply makes a volume that is missing and never changes the storage, size, owner, mode or encryption of one that exists (its data stays as it is)", cur.Metadata.Name, strings.Join(diff, ", "))
+	}
+	next := cur
+	next.Spec.Comment, next.Spec.Notes = w.Comment, w.Notes
+	next.Spec.Watch, next.Spec.Probe, next.Spec.OnLoss = w.Watch, w.Probe, w.OnLoss
+	next.Metadata.Labels = want.Metadata.Labels
+	return next, nil
+}
+
+// volumeApplyDesc is the volume of 'apply -f': it creates a volume that is missing without the questions of 'volume
+// create' (an encrypted volume needs a passphrase typed twice, so it is made with that command).
+func volumeApplyDesc() *kindDesc[api.Volume] {
+	d := volumeDesc()
+	d.create = func(ctx context.Context, c *sdk.Client, v api.Volume) (opHandle, api.Volume, error) {
+		if v.Spec.Encrypted {
+			return nil, api.Volume{}, usagef("volume %q is encrypted: it needs a passphrase typed twice, make it with 'jailops volume create %s --encrypted'", v.Metadata.Name, v.Metadata.Name)
+		}
+		h, err := handle(c.Volumes().Create(ctx, v, ""))
+		return h, api.Volume{}, err
+	}
+	return d
 }

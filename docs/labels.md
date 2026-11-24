@@ -1,7 +1,7 @@
 # Labels
 
 A label is a `key=value` pair on a jail (and on images, networks, projects and other objects). JailOps itself gives no
-meaning to most labels: they are how you group jails (`env=prod`, `team=web`, `app=nginx`) and how other parts select
+meaning to most labels: they are how you group jails (`env=prod`, `team=web`, `tier=front`) and how other parts select
 them. What selects jails by label:
 
 - backup policies (`jailops backup policy create nightly --selector backup=yes`, [backup-restore.md](backup-restore.md));
@@ -19,13 +19,9 @@ anything, against the same test cases (`sdk/api/testdata/labels.json`).
 
 | Part | Rule |
 |---|---|
-| key | letters, digits, `-`, `_` and `.`, beginning and ending with a letter or digit, at most 63 characters; an optional prefix of letters, digits, `-` and `.` (at most 253) and a `/` before it: `env`, `jailops.app`, `example.org/tier` |
+| key | letters, digits, `-`, `_` and `.`, beginning and ending with a letter or digit, at most 63 characters; an optional prefix of letters, digits, `-` and `.` (at most 253) and a `/` before it: `env`, `team.name`, `example.org/tier` |
 | value | at most 253 bytes of printable UTF-8: no control characters, no characters that reverse or hide text; it may be empty |
 | count | at most 64 labels on one object |
-
-Keys that start with `jailops.` are set by JailOps: an app installation writes `jailops.app` (the app),
-`jailops.app.version` and `jailops.app.hash`. The console shows them but does not offer to change them; the command
-line can, which turns the jail into one the app pages no longer know.
 
 Changing labels needs the **admin** permission in the jail's project (it is a `PATCH` of the jail); reading them is
 part of reading the jail.

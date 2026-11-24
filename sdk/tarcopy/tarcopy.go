@@ -13,6 +13,9 @@
 //   - The set-user-id, set-group-id and sticky bits are never set. Owner and times are written only with Preserve.
 //   - A regular file is written to a temporary name and renamed over the target, so a reader never sees half a file
 //     and a target that is a symlink is replaced, not followed. A directory is never replaced by a file.
+//     The temporary file is created exclusive, 0600 and owned by the writer; its mode and owner are set to the final ones
+//     before the rename, a failing chmod or chown is an error, and a failed write removes it at once. A writer that was
+//     killed leaves it behind: the next write in the same directory removes a leftover whose writer no longer exists.
 //   - The number of bytes and of entries is bounded.
 package tarcopy
 
@@ -24,7 +27,9 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -338,6 +343,8 @@ type extractor struct {
 	// the parent directory of the last entry, held open: archives list the files of a directory together
 	lastDir  string
 	lastRoot *os.Root
+	// swept are the directories whose leftover temporary files were removed
+	swept map[string]bool
 }
 
 func (x *extractor) closeCache() {
@@ -472,22 +479,36 @@ func (x *extractor) mkdir(dir, base string, h *tar.Header) error {
 		return err
 	}
 	defer f.Close()
-	x.apply(f, h, true)
+	if err := x.apply(f, h, true); err != nil {
+		return err
+	}
 	x.st.Dirs++
 	return nil
 }
 
 // apply sets mode, and with Preserve owner and times, on the open file or directory f.
-func (x *extractor) apply(f *os.File, h *tar.Header, dir bool) {
+// A failed chmod or chown is an error (a file whose owner is not the one asked for must not be reported as written), except
+// the chown of a user that is not root, which keeps its own ids.
+func (x *extractor) apply(f *os.File, h *tar.Header, dir bool) error {
 	mode := fs.FileMode(h.Mode) & 0o777 // never the set-id and sticky bits
 	if dir {
 		mode |= 0o700
 	}
-	_ = f.Chmod(mode)
+	if err := f.Chmod(mode); err != nil {
+		return err
+	}
 	if x.o.Preserve {
-		_ = f.Chown(h.Uid, h.Gid) // a user that is not root keeps its own ids
+		if err := f.Chown(h.Uid, h.Gid); chownFailed(err) {
+			return err
+		}
 		setTimes(f, h.ModTime)
 	}
+	return nil
+}
+
+// chownFailed reports whether err is a chown failure to return: any, but the refusal of a process that is not root.
+func chownFailed(err error) bool {
+	return err != nil && !(errors.Is(err, syscall.EPERM) && os.Geteuid() != 0)
 }
 
 func (x *extractor) file(dir, base string, h *tar.Header, body io.Reader) error {
@@ -503,6 +524,7 @@ func (x *extractor) file(dir, base string, h *tar.Header, body io.Reader) error 
 	if max := x.o.Limits.MaxBytes; max > 0 && x.st.Bytes+h.Size > max {
 		return fmt.Errorf("%w: more than %d bytes", ErrTooLarge, max)
 	}
+	x.sweep(p, dir)
 	tmp, f, err := x.temp(p)
 	if err != nil {
 		return err
@@ -524,7 +546,9 @@ func (x *extractor) file(dir, base string, h *tar.Header, body io.Reader) error 
 	if n != h.Size {
 		return fail(refused("%s is shorter than its header says", abbreviate(h.Name)))
 	}
-	x.apply(f, h, false)
+	if err := x.apply(f, h, false); err != nil {
+		return fail(err)
+	}
 	if err := f.Close(); err != nil {
 		_ = p.Remove(tmp)
 		return err
@@ -537,10 +561,53 @@ func (x *extractor) file(dir, base string, h *tar.Header, body io.Reader) error 
 	return nil
 }
 
-// temp creates the temporary file a regular file is written to.
+// tempRE is the name of the temporary file of a write: the process id of the writer, a time and a counter.
+var tempRE = regexp.MustCompile(`^\.jailops-cp-([0-9]+)-[0-9]+-[0-9]+$`)
+
+// sweep removes what a writer left in dir when it was killed (SIGKILL, a power loss): a regular file whose name is a
+// temporary name of a process that no longer exists. It runs once per directory and writer, before the first file of
+// the directory is written, and touches nothing else: not a file of another name, not one of a live writer. A leftover
+// is 0600 and owned by the writer, never wider than the file it would have become.
+func (x *extractor) sweep(p *os.Root, dir string) {
+	if x.swept[dir] {
+		return
+	}
+	if x.swept == nil {
+		x.swept = map[string]bool{}
+	}
+	x.swept[dir] = true
+	names, err := readNames(p)
+	if err != nil {
+		return
+	}
+	for _, n := range names {
+		m := tempRE.FindStringSubmatch(n)
+		if m == nil {
+			continue
+		}
+		pid, err := strconv.Atoi(m[1])
+		if err != nil || pid <= 0 || processAlive(pid) {
+			continue
+		}
+		if st, err := p.Lstat(n); err == nil && st.Mode().IsRegular() {
+			_ = p.Remove(n)
+		}
+	}
+}
+
+// processAlive says whether a process with this id exists (kill with signal 0 sends nothing).
+func processAlive(pid int) bool {
+	if pid == os.Getpid() {
+		return true
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// temp creates the temporary file a regular file is written to: exclusive, 0600, never through a link.
 func (x *extractor) temp(p *os.Root) (string, *os.File, error) {
 	for i := 0; i < 100; i++ {
-		name := fmt.Sprintf(".jailops-cp-%d-%d", time.Now().UnixNano(), i)
+		name := fmt.Sprintf(".jailops-cp-%d-%d-%d", os.Getpid(), time.Now().UnixNano(), i)
 		f, err := p.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o600)
 		if err == nil {
 			return name, f, nil
@@ -574,7 +641,9 @@ func (x *extractor) symlink(dir, base string, h *tar.Header) error {
 		return err
 	}
 	if x.o.Preserve {
-		_ = p.Lchown(base, h.Uid, h.Gid)
+		if err := p.Lchown(base, h.Uid, h.Gid); chownFailed(err) {
+			return err
+		}
 	}
 	x.st.Symlinks++
 	return nil

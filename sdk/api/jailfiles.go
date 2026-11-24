@@ -71,6 +71,8 @@ type JailFileStat struct {
 	Type       JailFileType `json:"type"`
 	Size       int64        `json:"size_bytes,omitempty"`
 	Mode       string       `json:"mode,omitempty"` // permission bits in octal, "0644"
+	Uid        int          `json:"uid,omitempty"`  // the owner and group as numbers; absent is 0 (root, wheel)
+	Gid        int          `json:"gid,omitempty"`
 	ModifiedAt *time.Time   `json:"modified_at,omitempty"`
 	Link       string       `json:"link,omitempty"` // the target of a symlink (text, never followed)
 }

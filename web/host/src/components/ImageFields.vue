@@ -74,7 +74,7 @@ const said = (id: string, hint: string) => (props.err(id) ? `${id}-err` : hint)
       <label :for="knownArch ? 'img-arch-ro' : 'img-arch'">{{ s.imageCreate.arch }}</label>
       <input v-if="knownArch" id="img-arch-ro" :value="f.arch" class="mono" type="text" readonly aria-describedby="img-arch-h" data-test="image-arch" />
       <select v-else id="img-arch" v-model="f.arch" :aria-invalid="!!err('img-arch')" :aria-describedby="said('img-arch', 'img-arch-h')" data-test="image-arch">
-        <option value="" disabled>{{ s.install.choose }}</option>
+        <option value="" disabled>{{ s.imageCreate.choose }}</option>
         <option v-for="a in ARCHES" :key="a" :value="a">{{ a }}</option>
       </select>
       <span v-if="err('img-arch')" id="img-arch-err" class="field-error" role="alert">{{ err('img-arch') }}</span>

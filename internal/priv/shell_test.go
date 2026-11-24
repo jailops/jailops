@@ -7,13 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/sdk/api"
 )
 
-// The shell setup of a jail (docs/shell.md) needs nothing new of the helper: pkg -r ROOT install -y bash is the
-// app installer's command, and the prompt files are ordinary files below the jail root. A jail root that
+// The shell setup of a jail (docs/shell.md) needs nothing new of the helper: pkg -r ROOT install -y bash is an
+// ordinary pkg command, and the prompt files are ordinary files below the jail root. A jail root that
 // points one of them outside, with a symbolic link, gets nothing written there.
 func TestShellSetupThroughTheHelper(t *testing.T) {
 	e := newEnv(t)
@@ -22,7 +21,7 @@ func TestShellSetupThroughTheHelper(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "usr", "local", "etc"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	argv := apps.PkgInstallArgv(root, "ports", []string{api.BashPackage})
+	argv := []string{"pkg", "-r", root, "install", "-y", api.BashPackage}
 	if _, out, err := e.cfg.CheckCommandCtx(ctx, argv); err != nil || out[0] != "/usr/sbin/pkg" {
 		t.Fatalf("%q: %q %v", argv, out, err)
 	}

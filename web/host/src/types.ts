@@ -39,3 +39,4 @@ export interface ExecSessionInfo { id: string }
 
 /** The result of POST /jails/{n}/config: the jail plus what needs a restart and whether it was restarted. */
 export interface ConfigResult { restart_required?: string[]; restarted?: boolean }
+

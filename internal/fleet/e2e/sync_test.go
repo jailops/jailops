@@ -252,7 +252,7 @@ func TestHostSelectionAndGroups(t *testing.T) {
 	mustFail(t, run(t, e, "plan", "--host", "@nope"), "unknown group")
 }
 
-func TestTemplatesAndHooks(t *testing.T) {
+func TestTemplates(t *testing.T) {
 	e := standardFleet(t)
 	e.Write("templates/web-base/manifest.yaml", `apiVersion: jailops/v1
 kind: JailTemplate
@@ -268,10 +268,6 @@ spec:
         ipv4: auto
     firewall: {policies: [web]}
     resources: {memory: 1G, cpu: 1}
-  after:
-    - action: snapshot
-      name: first
-    - action: start
 `)
 	e.Write("projects/main/jails/shop.yaml", `apiVersion: jailops/v1
 kind: Jail
@@ -280,6 +276,7 @@ metadata:
   name: shop
   labels: {tier: web}
 templates: [web-base]
+start: true
 spec:
   resources: {memory: 2G}
 `)
@@ -293,33 +290,10 @@ spec:
 		t.Fatalf("template merge: %+v", j.Spec.Resources)
 	}
 	if j.Status.Power != api.PowerRunning {
-		t.Fatalf("after hook start did not run: %s", j.Status.Power)
+		t.Fatalf("start did not run: %s", j.Status.Power)
 	}
-	if snaps := e.Hosts["web1"].Server.Snapshots(fleettest.Project, "shop"); len(snaps) != 1 || snaps[0] != "first" {
-		t.Fatalf("after hook snapshot: %v", snaps)
-	}
-	// Hooks run once, at creation: a second sync changes nothing.
+	// start runs once, at creation: a second sync changes nothing.
 	mustOK(t, run(t, e, "drift", "--host", "web1"))
-}
-
-func TestExecHookNeedsARunningJail(t *testing.T) {
-	e := standardFleet(t)
-	e.Write("projects/main/jails/exec.yaml", `apiVersion: jailops/v1
-kind: Jail
-hosts: [web1]
-metadata:
-  name: exec
-after:
-  - action: exec
-    argv: [/usr/local/bin/setup, "--flag", "a b; rm -rf /"]
-spec:
-  image: freebsd-15
-  storage: default
-  network: [{network: internal}]
-  firewall: {policies: [web]}
-`)
-	mustOK(t, run(t, e, "validate"))
-	mustFail(t, run(t, e, "sync", "--apply", "--host", "web1"), "is not running")
 }
 
 func TestFilenameMustEqualName(t *testing.T) {

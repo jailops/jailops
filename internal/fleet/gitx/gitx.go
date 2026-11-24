@@ -149,6 +149,12 @@ func (r Runner) Pull(ctx context.Context, remote, branch string) (changed bool, 
 			return false, before, err
 		}
 	}
+	// A Recipe Book kept as a submodule moves with the commit the fleet repository pins.
+	if _, err := os.Stat(filepath.Join(r.Dir, ".gitmodules")); err == nil {
+		if _, err := r.Run(ctx, "submodule", "update", "--init", "--quiet"); err != nil {
+			return false, before, err
+		}
+	}
 	after, err := r.Head(ctx)
 	if err != nil {
 		return false, before, err

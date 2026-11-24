@@ -81,7 +81,7 @@ describe('the wizard: base image', () => {
     expect(writes(sent)).toEqual(['POST /images', 'POST /images/freebsd-15-1/generations'])
     expect((sent.find((r) => r.method === 'POST' && r.path === '/images')?.body as { spec: unknown }).spec).toMatchObject({ auto_upgrade: { enabled: true } })
     expect(w.get('[data-test="setup-done"]').text()).toContain('Image freebsd-15-1 (FreeBSD 15.1-RELEASE), first generation built, upgraded every night at 03:00')
-    expect(w.get('[data-test="setup-apps"]').text()).toBe('Install your first app')
+    expect(w.get('[data-test="setup-overview"]').classes()).toContain('btn-primary')
     expect(w.find('[data-test="setup-image-link"]').exists()).toBe(false)
   })
 
@@ -111,7 +111,7 @@ describe('the wizard: base image', () => {
     await w.get('[data-test="setup-image"]').trigger('submit')
     await settle(() => step().includes('Done'))
     expect(writes(sent)).toEqual(['POST /images', 'POST /images/flaky/generations', 'POST /images/flaky/generations'])
-    expect(w.find('[data-test="setup-apps"]').exists()).toBe(true)
+    expect(w.find('[data-test="setup-image-link"]').exists()).toBe(false)
   })
 
   it('can be skipped: the Done step then leads to the base image', async () => {
@@ -121,6 +121,6 @@ describe('the wizard: base image', () => {
     expect(writes(sent)).toEqual([])
     expect(w.get('[data-test="setup-done-no-image"]').text()).toContain('create the base image')
     expect(w.get('[data-test="setup-image-link"]').attributes('href')).toBe('/images?create=1')
-    expect(w.find('[data-test="setup-apps"]').exists()).toBe(false)
+    expect(w.get('[data-test="setup-overview"]').classes()).not.toContain('btn-primary')
   })
 })

@@ -23,7 +23,6 @@ type Entry struct {
 	Time    time.Time
 	Project string
 	Jail    string
-	App     string
 	File    string
 	Line    string
 	// src, begin and end say where the entry came from: the source key and
@@ -102,7 +101,7 @@ func sdValue(s string) string {
 
 // Format5424 renders e as an RFC 5424 message (without transport framing):
 //
-//	<134>1 2026-11-01T09:30:00.000000Z host1 jailops - log [jailops project="web" jail="nginx" app="" file="messages"] Nov  1 09:30:00 nginx sshd[42]: ...
+//	<134>1 2026-11-01T09:30:00.000000Z host1 jailops - log [jailops project="web" jail="nginx" file="messages"] Nov  1 09:30:00 nginx sshd[42]: ...
 //
 // The MSG is the escaped line; MSGID is "audit" for the audit log and "log" otherwise.
 func Format5424(e Entry, facility int, hostname string) []byte {
@@ -120,7 +119,7 @@ func Format5424(e Entry, facility int, hostname string) []byte {
 	b.WriteByte(' ')
 	b.WriteString(headerField(hostname, 255))
 	b.WriteString(" " + AppName + " - " + msgid + " ")
-	b.WriteString(`[jailops project="` + sdValue(e.Project) + `" jail="` + sdValue(e.Jail) + `" app="` + sdValue(e.App) + `" file="` + sdValue(e.File) + `"] `)
+	b.WriteString(`[jailops project="` + sdValue(e.Project) + `" jail="` + sdValue(e.Jail) + `" file="` + sdValue(e.File) + `"] `)
 	b.WriteString(Escape(e.Line))
 	return []byte(b.String())
 }
@@ -131,14 +130,13 @@ type jsonLine struct {
 	Host    string    `json:"host"`
 	Project string    `json:"project,omitempty"`
 	Jail    string    `json:"jail,omitempty"`
-	App     string    `json:"app,omitempty"`
 	File    string    `json:"file"`
 	Line    string    `json:"line"`
 }
 
 // FormatJSON renders e as one line of a webhook batch (JSON, newline-terminated).
 func FormatJSON(e Entry, hostname string) []byte {
-	b, _ := json.Marshal(jsonLine{Time: e.Time.UTC(), Host: hostname, Project: e.Project, Jail: e.Jail, App: e.App, File: e.File,
+	b, _ := json.Marshal(jsonLine{Time: e.Time.UTC(), Host: hostname, Project: e.Project, Jail: e.Jail, File: e.File,
 		Line: Escape(e.Line)})
 	return append(b, '\n')
 }

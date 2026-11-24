@@ -6,7 +6,6 @@ import { dataVersion } from '@jailops/shared/composables/events'
 import { projectState } from '@/composables/project'
 import { shortAddr } from '@jailops/shared/lib/format'
 import { entry, type Entry } from '@/lib/search'
-import { LABEL_APP } from '@/lib/apps'
 import type { NavItem } from '@jailops/shared/components/AppShell.vue'
 import type { Jail } from '@jailops/shared/api/types'
 
@@ -41,12 +40,11 @@ export function saveAllProjects(v: boolean): void {
 
 export function jailEntry(j: Jail, project: string | undefined, showProject: boolean): Entry {
   const addrs = (j.status.addresses ?? []).map(shortAddr)
-  const app = j.metadata.labels?.[LABEL_APP]
-  const sub = [showProject && project ? s.search.inProject(project) : '', j.spec.image, addrs.join(', '), app ? s.search.runsApp(app) : ''].filter(Boolean).join(' · ')
+  const sub = [showProject && project ? s.search.inProject(project) : '', j.spec.image, addrs.join(', ')].filter(Boolean).join(' · ')
   return entry({
     kind: 'jail', id: `jail:${project ?? ''}:${j.metadata.name}`, title: j.metadata.name, sub, to: `/jails/${encodeURIComponent(j.metadata.name)}`,
-    icon: 'box', project, state: j.status.power, labels: j.metadata.labels ?? {}, app,
-    extra: [j.spec.image, ...(j.status.addresses ?? []), ...addrs, app ?? '', showProject ? project ?? '' : '', j.spec.notes ?? ''],
+    icon: 'box', project, state: j.status.power, labels: j.metadata.labels ?? {},
+    extra: [j.spec.image, ...(j.status.addresses ?? []), ...addrs, showProject ? project ?? '' : '', j.spec.notes ?? ''],
   })
 }
 
@@ -65,13 +63,11 @@ async function jailsOf(all: boolean): Promise<Entry[]> {
 
 async function others(): Promise<Entry[]> {
   const out: Entry[] = []
-  const [apps, images, networks, storage] = await Promise.all([
-    can('apps') ? api.apps.list().catch(() => []) : [],
+  const [images, networks, storage] = await Promise.all([
     can('images') ? api.images.list().catch(() => []) : [],
     can('networks') ? api.networks.list().catch(() => []) : [],
     can('storage') ? api.storage.list().catch(() => []) : [],
   ])
-  for (const a of apps) if (a.valid) out.push(entry({ kind: 'app', id: `app:${a.name}`, title: a.name, sub: [a.title && a.title.toLowerCase() !== a.name ? a.title : '', a.summary].filter(Boolean).join(': '), to: `/apps/${encodeURIComponent(a.name)}`, icon: 'store', extra: [a.title ?? '', a.category ?? '', a.summary ?? ''] }))
   for (const i of images) out.push(entry({ kind: 'image', id: `image:${i.metadata.name}`, title: i.metadata.name, sub: [i.spec.release, i.spec.os].filter(Boolean).join(' · '), to: '/images', icon: 'layers', labels: i.metadata.labels, extra: [i.spec.release, i.spec.notes ?? ''] }))
   for (const n of networks) out.push(entry({ kind: 'network', id: `network:${n.metadata.name}`, title: n.metadata.name, sub: [n.spec.ipv4?.subnet, n.spec.ipv6?.subnet].filter(Boolean).join(' · '), to: '/networks', icon: 'network', labels: n.metadata.labels, extra: [n.spec.ipv4?.subnet ?? '', n.spec.ipv6?.subnet ?? '', n.spec.notes ?? ''] }))
   for (const x of storage) out.push(entry({ kind: 'storage', id: `storage:${x.metadata.name}`, title: x.metadata.name, sub: [x.spec.dataset, x.spec.comment].filter(Boolean).join(' · '), to: '/storage', icon: 'hardDrive', extra: [x.spec.dataset, x.spec.comment ?? '', x.spec.notes ?? ''] }))

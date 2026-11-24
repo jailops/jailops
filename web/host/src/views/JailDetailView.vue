@@ -8,7 +8,7 @@ import { useLoad } from '@jailops/shared/composables/load'
 import { can, hasExt } from '@jailops/shared/composables/session'
 import { askLifecycle, askDelete, isLocked, lifecycle, type Lifecycle } from '@/composables/jailActions'
 import { confirmAction } from '@jailops/shared/composables/confirm'
-import { canEditLabels, canFiles, canShell, loadJailTab, saveJailTab } from '@/composables/shell'
+import { canApply, canEditLabels, canFiles, canShell, loadJailTab, saveJailTab } from '@/composables/shell'
 import { isGlobalAdmin, projectState } from '@/composables/project'
 import { jailId, pushRecent } from '@/lib/search'
 import JailLabels from '@/components/JailLabels.vue'
@@ -38,12 +38,11 @@ import JailConfigTab from '@/components/JailConfigTab.vue'
 import JailDevicesTab from '@/components/JailDevicesTab.vue'
 import JailExecTab from '@/components/JailExecTab.vue'
 import JailFilesTab from '@/components/JailFilesTab.vue'
+import JailRecipesTab from '@/components/JailRecipesTab.vue'
 import JailUpdatesTab from '@/components/JailUpdatesTab.vue'
 import JailLogsTab from '@/components/JailLogsTab.vue'
-import JailAccessTab from '@/components/JailAccessTab.vue'
 import JailReachTab from '@/components/JailReachTab.vue'
 import NotesPanel from '@/components/NotesPanel.vue'
-import { isInstalledApp } from '@/lib/access'
 import AddrCopy from '@jailops/shared/components/AddrCopy.vue'
 import { shortAddr } from '@jailops/shared/lib/format'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
@@ -91,7 +90,7 @@ const jail = computed<Jail | undefined>(() => l.data.value?.jail)
 const snaps = computed(() => [...(l.data.value?.snaps ?? [])].sort((a, b) => (b.metadata.created_at ?? '').localeCompare(a.metadata.created_at ?? '')))
 const maxWritten = computed(() => Math.max(1, ...snaps.value.map((x) => x.status.written_bytes ?? 0)))
 
-type Tab = 'overview' | 'notes' | 'config' | 'devices' | 'updates' | 'logs' | 'reach' | 'changes' | 'access' | 'files' | 'console'
+type Tab = 'overview' | 'notes' | 'config' | 'devices' | 'updates' | 'logs' | 'reach' | 'changes' | 'files' | 'recipes' | 'console'
 const tabList = computed(() => ([
   ['overview', s.jail.overview, true],
   ['notes', s.notes.tab, true],
@@ -102,15 +101,14 @@ const tabList = computed(() => ([
   ['logs', s.logs.tab, hasExt('jail_logs')],
   // what reaches the jail and why, for every jail
   ['reach', s.reach.tab, hasExt('jail_reach')],
-  // who may connect: for the jails an app installation made
-  ['access', s.appAccess.tab, hasExt('app_access') && isInstalledApp(jail.value)],
   // files to and from a running jail: the role of the shell
   ['files', s.files.tab, canFiles(jail.value?.metadata.project)],
+  // a recipe for the jail: validated by the server, dry-run and applied as `jailops jail apply` (operator in the project)
+  ['recipes', s.recipes.tab, canApply(jail.value?.metadata.project)],
   // the console session needs the extension and operator in the project, as `jailops exec`
   ['console', s.exec.tab, canShell(jail.value?.metadata.project)],
 ] as Array<[Tab, string, boolean]>).filter((t) => t[2]).map(([key, label]) => ({ key, label })))
-// ?tab=logs&file=nginx/access.log opens a tab directly (the app pages link to a jail's log viewer). The Access tab
-// appears once the jail is known to be an app; a ?tab=access waits for it.
+// ?tab=logs&file=nginx/access.log opens a tab directly.
 const { tab } = useTabQuery<Tab>(() => tabList.value.map((t) => t.key), 'overview')
 const logFile = typeof route.query.file === 'string' ? route.query.file : ''
 const projectOf = () => jail.value?.metadata.project || projectState.current
@@ -198,11 +196,10 @@ function act(a: Lifecycle): void {
   actionError.value = null
   if (jail.value) askLifecycle(name.value, a, jail.value.status.power, l.reload)
 }
-/** Delete the jail (typed name), or uninstall it when it is an app (named, with what is lost). */
+/** Delete the jail (typed name). */
 function remove(): void {
   if (jail.value) askDelete(jail.value, snaps.value, () => void router.push('/jails'))
 }
-const isApp = computed(() => isInstalledApp(jail.value))
 const hasDrift = computed(() => !!jail.value?.status.drift?.length)
 /** A failed apply with its next step: the jail's firewall policy when pf refused the rules, else the doctor. */
 const applyFailed = computed(() => (jail.value?.status.conditions ?? []).filter((c) => c.status === 'False' && c.reason === 'ApplyFailed'))
@@ -273,7 +270,7 @@ const attentionItems = computed(() => {
               <button class="btn" type="button" data-test="jail-rename" :aria-disabled="!!renameWhy" :aria-describedby="renameWhy ? 'jail-rename-why' : undefined" @click="openRename">{{ s.rename.open(s.rename.kinds.jail) }}</button>
               <span v-if="renameWhy" id="jail-rename-why" class="why-disabled" data-test="jail-rename-why">{{ renameWhy }}</span>
             </template>
-            <button class="btn btn-danger" type="button" data-test="jail-delete" @click="remove"><Icon name="trash" />{{ isApp ? s.jails.uninstall : s.jails.delete }}</button>
+            <button class="btn btn-danger" type="button" data-test="jail-delete" @click="remove"><Icon name="trash" />{{ s.jails.delete }}</button>
           </div>
         </div>
         <JailLabels :jail="jail" @saved="l.reload" />
@@ -296,8 +293,8 @@ const attentionItems = computed(() => {
         <JailUpdatesTab v-else-if="tab === 'updates'" :jail="jail" @saved="l.reload" />
         <JailLogsTab v-else-if="tab === 'logs'" :jail="jail" :file="logFile" />
         <JailReachTab v-else-if="tab === 'reach'" :jail="jail" />
-        <JailAccessTab v-else-if="tab === 'access'" :jail="jail" />
         <JailFilesTab v-else-if="tab === 'files'" :jail="jail" />
+        <JailRecipesTab v-else-if="tab === 'recipes'" :jail="jail" />
         <JailExecTab v-else-if="tab === 'console'" :jail="jail" :connect="shellAsk" @changed="l.reload" />
         <template v-else>
         <section class="panel" aria-labelledby="svs">

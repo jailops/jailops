@@ -1,6 +1,6 @@
 $ jailops logs forward list
 NAME   TYPE     TO                FACILITY   SOURCES
-file   syslog   udp://127.0.0.1   local0     messages+apps of all jails
+file   syslog   udp://127.0.0.1   local0     messages of all jails
 ! jailops: the list of jailopsd.yaml (logging.forward) is in force
 
 $ jailops logs forward create logs --url tls://logs.example.com:6514 --facility local3 --jail web -l tier=front
@@ -25,10 +25,10 @@ log-sink/lan added (syslog udp://192.0.2.10)
 
 $ jailops logs forward list
 NAME    TYPE      TO                                  FACILITY   SOURCES
-file    syslog    udp://127.0.0.1                     local0     messages+apps of all jails
-logs    syslog    tls://logs.example.com:6514         local3     messages+apps of jails=web tier=front
+file    syslog    udp://127.0.0.1                     local0     messages of all jails
+logs    syslog    tls://logs.example.com:6514         local3     messages of jails=web tier=front
 hooks   webhook   https://hooks.example.com/jailops   -          audit
-lan     syslog    udp://192.0.2.10                    local0     messages+apps of all jails
+lan     syslog    udp://192.0.2.10                    local0     messages of all jails
 ! jailops: the list stored through the API is in force (generation 3); 'logs forward reset' returns to jailopsd.yaml
 
 $ jailops logs forward set logs --facility local5 --file messages --file auth.log
@@ -130,6 +130,6 @@ log-forward reset: jailopsd.yaml is in force again (1 sink)
 
 $ jailops logs forward list
 NAME   TYPE     TO                FACILITY   SOURCES
-file   syslog   udp://127.0.0.1   local0     messages+apps of all jails
+file   syslog   udp://127.0.0.1   local0     messages of all jails
 ! jailops: the list of jailopsd.yaml (logging.forward) is in force
 

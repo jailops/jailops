@@ -43,7 +43,7 @@ trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/bin"
 cp "$bin"/* "$stage/bin/"
 tar cf "$stage/files.tar" scripts/vm-clean.sh scripts/pkg-build.sh scripts/gen-share.sh scripts/ci-freebsd-e2e.sh scripts/ci-freebsd-pf.sh \
-	scripts/e2e-workflows.sh internal/render/testdata internal/apps/testdata packaging test version.txt README.md LICENSE.md docs/design.md \
+	scripts/e2e-workflows.sh internal/render/testdata packaging test version.txt README.md LICENSE.md docs/design.md \
 	-C "$stage" bin
 sshv 'rm -rf /tmp/jopsci && mkdir -p /tmp/jopsci && tar xf - -C /tmp/jopsci' < "$stage/files.tar" || { say "environment: the tree could not be copied to the VM"; exit 1; }
 release=$(sshv 'freebsd-version -u' | sed 's/-p[0-9]*$//')

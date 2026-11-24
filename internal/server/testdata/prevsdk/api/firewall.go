@@ -11,8 +11,7 @@ type FirewallPolicy struct {
 
 // FirewallPolicyStatus says who uses a policy. A policy no jail uses renders nowhere.
 type FirewallPolicyStatus struct {
-	// UsedBy are the jails of the project that name the policy (their own, through a profile, or the managed policy of app
-	// access), by name.
+	// UsedBy are the jails of the project that name the policy (their own or through a profile), by name.
 	UsedBy []string `json:"used_by"`
 	// Mandatory is true for a mandatory policy of the project: every jail of the project has it.
 	Mandatory bool `json:"mandatory"`

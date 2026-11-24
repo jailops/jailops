@@ -5,7 +5,14 @@
 # Only an interactive shell (sh or bash) sets the prompt; scripts, sh -c and bash -c are not affected.
 case "$-" in
 *i*)
+	case "${JAILOPS_JAIL-}" in *[!abcdefghijklmnopqrstuvwxyz0123456789-]*) JAILOPS_JAIL= ;; esac
+	case "${JAILOPS_PROJECT-}" in *[!abcdefghijklmnopqrstuvwxyz0123456789-]*) JAILOPS_PROJECT= ;; esac
+	case "${JAILOPS_HOST-}" in *[!abcdefghijklmnopqrstuvwxyz0123456789-]*) JAILOPS_HOST= ;; esac
 	_jailops_where="${JAILOPS_PROJECT-}${JAILOPS_PROJECT:+${JAILOPS_HOST:+/}}${JAILOPS_HOST-}"
-	PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '
+	if [ -n "$_jailops_where" ]; then
+		if [ -n "${BASH_VERSION-}" ]; then _jailops_tag=$(printf ' \001\033[38;5;245m\002[%s]\001\033[0m\002' "$_jailops_where")
+		else _jailops_tag=$(printf ' \001\033[38;5;245m\001[%s]\001\033[0m\001' "$_jailops_where"); fi
+	else _jailops_tag=""; fi
+	PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]'"${_jailops_tag}"':\w\$ '
 	;;
 esac

@@ -1,17 +1,5 @@
 ACMEChallenge http-01
 ACMEChallenge tls-alpn-01
-AppCategory communication
-AppCategory database
-AppCategory devops
-AppCategory monitoring
-AppCategory network
-AppCategory other
-AppCategory security
-AppCategory storage
-AppCategory tools
-AppCategory web
-AppSource catalog
-AppSource local
 BackupKeyStatus.status: none present escrowed
 CertificateSource acme
 CertificateSource configured
@@ -51,7 +39,6 @@ JailLogKind active
 JailLogKind rotated
 JailReach.via: uplink forward none
 Kind AddressSet
-Kind AppAccess
 Kind Backup
 Kind BackupPolicy
 Kind BackupTarget

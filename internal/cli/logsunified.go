@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -18,14 +17,12 @@ import (
 type unifiedOpts struct {
 	jails       []string
 	labels      []string
-	app         string
-	appLogs     bool
 	allProjects bool
 	file        string
 }
 
 func (u unifiedOpts) any() bool {
-	return len(u.jails) > 0 || len(u.labels) > 0 || u.app != "" || u.appLogs || u.allProjects || u.file != ""
+	return len(u.jails) > 0 || len(u.labels) > 0 || u.allProjects || u.file != ""
 }
 
 // logsCmd is the top-level 'logs': with a jail name it is 'jail logs';
@@ -41,12 +38,11 @@ func (a *app) logsCmd(d *kindDesc[api.Jail]) *cobra.Command {
 jail of the project and merge the lines into one stream ordered by their
 timestamps. Each line starts with jail/file (project/jail/file with
 --all-projects), coloured per jail on a terminal. --jail (repeatable), -l
-KEY=VALUE (repeatable) and --app narrow the jails; --app-logs adds the log files
-installed apps declare. --limit, --since and --grep apply to every file before
-the merge. A line without a timestamp of its own (a continued line) stays
+KEY=VALUE (repeatable) narrow the jails. --limit, --since and --grep apply to
+every file before the merge. A line without a timestamp of its own (a continued line) stays
 after the line before it. At most 50 files are read and 2000 lines printed;
 -f follows all of them. -o json prints one JSON object per line: time,
-project, jail, app, file and line. Files that cannot be read (a jail that is
+project, jail, file and line. Files that cannot be read (a jail that is
 not mounted) are named on standard error.
 
 With NAME, the logs of that one jail, as 'jailops jail logs':
@@ -58,7 +54,6 @@ A jail named forward is read with 'jailops jail logs forward'.`
 jailops logs -f
 jailops logs --jail web --jail db --since 15m
 jailops logs -l tier=front --grep error
-jailops logs --app postgresql --app-logs
 jailops logs --all-projects --limit 20 -o json
 jailops logs web messages
 jailops logs forward status`
@@ -66,7 +61,7 @@ jailops logs forward status`
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 || u.any() {
 			if len(args) > 0 {
-				return usagef("a jail name and --jail, --selector, --app, --app-logs, --all-projects or --file do not go together: name the jails with --jail")
+				return usagef("a jail name and --jail, --selector, --all-projects or --file do not go together: name the jails with --jail")
 			}
 			if o.events {
 				return usagef("--events needs a jail name")
@@ -86,19 +81,9 @@ jailops logs forward status`
 	f := cmd.Flags()
 	f.StringArrayVar(&u.jails, "jail", nil, "merge the logs of this jail (repeatable; default every jail)")
 	f.StringArrayVarP(&u.labels, "selector", "l", nil, "merge the logs of the jails with these labels KEY=VALUE (repeatable)")
-	f.StringVar(&u.app, "app", "", "merge the logs of the jails installed from this app")
-	f.BoolVar(&u.appLogs, "app-logs", false, "add the log files the installed apps declare below /var/log")
 	f.BoolVar(&u.allProjects, "all-projects", false, "read every project you may use, not only the current one")
 	f.StringVar(&u.file, "file", "", "the file to read of every jail (default messages)")
 	_ = cmd.RegisterFlagCompletionFunc("jail", completeKind(a, d))
-	_ = cmd.RegisterFlagCompletionFunc("app", a.completeNames(func(ctx context.Context, c *sdk.Client) ([]string, error) {
-		l, err := c.Apps().List(ctx)
-		var n []string
-		for _, s := range l {
-			n = append(n, s.Name)
-		}
-		return n, err
-	}))
 	_ = cmd.RegisterFlagCompletionFunc("file", completeNone)
 	cmd.AddCommand(a.logForwardCmd())
 	return cmd
@@ -125,7 +110,7 @@ func (a *app) readUnified(ctx context.Context, u unifiedOpts, o logOpts) error {
 	if _, err := api.ParseLogSince(o.since, a.env.Now()); err != nil {
 		return usagef("--since takes an RFC 3339 time or a duration such as 15m, 2h or 1d")
 	}
-	q := api.LogsQuery{Jails: u.jails, App: u.app, AppLogs: u.appLogs, File: u.file, Limit: o.limit, Since: o.since, Grep: o.grep}
+	q := api.LogsQuery{Jails: u.jails, File: u.file, Limit: o.limit, Since: o.since, Grep: o.grep}
 	for _, l := range u.labels {
 		k, v, ok := strings.Cut(l, "=")
 		if !ok || k == "" {

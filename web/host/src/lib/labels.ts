@@ -58,7 +58,7 @@ export function labelsProblem(l: Labels): LabelProblem {
   return ''
 }
 
-/** Labels JailOps sets itself (jailops.app and its version and hash): shown, but not offered for editing. */
+/** Labels JailOps sets itself (the jailops. prefix): shown, but not offered for editing. */
 export function isSystemLabel(k: string): boolean {
   return k.startsWith('jailops.')
 }

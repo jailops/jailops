@@ -8,26 +8,6 @@ export type ACMEChallenge =
 
 export const ACMEChallengeValues: readonly ACMEChallenge[] = ['http-01', 'tls-alpn-01']
 
-export type AppCategory =
-  | "database"
-  | "web"
-  | "tools"
-  | "devops"
-  | "storage"
-  | "monitoring"
-  | "communication"
-  | "network"
-  | "security"
-  | "other"
-
-export const AppCategoryValues: readonly AppCategory[] = ['database', 'web', 'tools', 'devops', 'storage', 'monitoring', 'communication', 'network', 'security', 'other']
-
-export type AppSource =
-  | "catalog"
-  | "local"
-
-export const AppSourceValues: readonly AppSource[] = ['catalog', 'local']
-
 export type CertificateSource =
   | "self-signed"
   | "configured"
@@ -47,6 +27,7 @@ export type Code =
   | "busy"
   | "internal"
   | "interrupted"
+  | "step_failed"
   | "ip_conflict"
   | "pool_exhausted"
   | "image_in_use"
@@ -67,7 +48,7 @@ export type Code =
   | "locked"
   | "bad_passphrase"
 
-export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'precondition_failed', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'interrupted', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired', 'not_managed', 'locked', 'bad_passphrase']
+export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'precondition_failed', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'interrupted', 'step_failed', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired', 'not_managed', 'locked', 'bad_passphrase']
 
 export type DNSSource =
   | "network"
@@ -166,7 +147,6 @@ export type OperationAction =
   | "jail.apply"
   | "jail.shell_setup"
   | "jail.restore"
-  | "app.install"
   | "rename"
   | "volume.create"
   | "volume.delete"
@@ -190,7 +170,7 @@ export type OperationAction =
   | "update.apply"
   | "update.scheduled"
 
-export const OperationActionValues: readonly OperationAction[] = ['jail.create', 'jail.delete', 'jail.start', 'jail.stop', 'jail.restart', 'jail.configure', 'jail.copy', 'jail.upgrade', 'jail.rollback', 'jail.snapshot', 'jail.snapshot_delete', 'jail.import', 'jail.apply', 'jail.shell_setup', 'jail.restore', 'app.install', 'rename', 'volume.create', 'volume.delete', 'volume.snapshot', 'volume.snapshot_delete', 'volume.rollback', 'volume.attach', 'volume.detach', 'volume.lock', 'volume.unlock', 'volume.passphrase', 'volume.restore', 'image.build', 'image.upgrade', 'image.generation_delete', 'image.auto_upgrade', 'backup.run', 'backup.verify', 'backup.delete', 'update.check', 'update.apply', 'update.scheduled']
+export const OperationActionValues: readonly OperationAction[] = ['jail.create', 'jail.delete', 'jail.start', 'jail.stop', 'jail.restart', 'jail.configure', 'jail.copy', 'jail.upgrade', 'jail.rollback', 'jail.snapshot', 'jail.snapshot_delete', 'jail.import', 'jail.apply', 'jail.shell_setup', 'jail.restore', 'rename', 'volume.create', 'volume.delete', 'volume.snapshot', 'volume.snapshot_delete', 'volume.rollback', 'volume.attach', 'volume.detach', 'volume.lock', 'volume.unlock', 'volume.passphrase', 'volume.restore', 'image.build', 'image.upgrade', 'image.generation_delete', 'image.auto_upgrade', 'backup.run', 'backup.verify', 'backup.delete', 'update.check', 'update.apply', 'update.scheduled']
 
 export type OperationStatus =
   | "pending"
@@ -326,231 +306,10 @@ export interface AddressSetSpec {
   addresses: AddressEntry[]
 }
 
-export interface App {
-  version: number
-  name: string
-  title: string
-  summary: string
-  description?: string
-  category: AppCategory
-  homepage?: string
-  license?: string
-  icon?: string
-  image: AppImage
-  packages: AppPackage[]
-  services?: AppService[]
-  ports?: AppPort[]
-  data?: AppPath[]
-  config?: AppConfig[]
-  logs?: AppLog[]
-  setup?: string[][]
-  sysvipc?: boolean
-  stop_timeout?: number
-  health?: AppHealth
-  resources?: AppResources
-  notes?: string
-  access?: AppAccessDef
-}
-
-export interface AppAccess {
-  jail: string
-  project: string
-  app: string
-  type?: string
-  policy: string
-  closed: boolean
-  ports: string[]
-  grants: AppAccessGrant[]
-  warnings?: string[]
-}
-
-export interface AppAccessDef {
-  type: string
-  port: string
-  service: string
-  hba_file: string
-}
-
-export interface AppAccessGrant {
-  source: string
-  source_kind: string
-  addresses?: string[]
-  ports: string[]
-  database?: string
-  role?: string
-  role_created?: boolean
-  database_created?: boolean
-  rules: string[]
-  pf?: string[]
-  hba?: string[]
-  created_at: string
-  updated_at?: string
-  created_by?: string
-  problems?: string[]
-}
-
-export interface AppAllow {
-  source: string
-  ports?: string[]
-  database?: string
-  rotate?: boolean
-  dry_run?: boolean
-}
-
-export interface AppAllowResult {
-  jail: string
-  grant: AppAccessGrant
-  changed: boolean
-  connection_string?: string
-  sql?: string[]
-  steps?: string[]
-  notes?: string[]
-  dry_run?: boolean
-}
-
-export interface AppConfig {
-  path: string
-  description?: string
-  restart?: string
-}
-
-export interface AppDeny {
-  source: string
-  drop_role?: boolean
-  dry_run?: boolean
-}
-
-export interface AppDenyResult {
-  jail: string
-  removed: AppAccessGrant
-  changed: boolean
-  sql?: string[]
-  steps?: string[]
-  notes?: string[]
-  dry_run?: boolean
-}
-
-export interface AppDetail {
-  definition: App
-  hash: string
-  file: string
-  icon?: string
-  source: AppSource
-  overrides?: AppSource
-}
-
-export interface AppDraft {
-  jail: string
-  definition: App
-  todo?: Record<string, string>
-  findings: string[]
-}
-
-export interface AppHTTPCheck {
-  port: number
-  path: string
-  status?: number
-}
-
-export interface AppHealth {
-  tcp?: number
-  http?: AppHTTPCheck
-  exec?: string[]
-  wait_seconds?: number
-}
-
-export interface AppImage {
-  os: string
-  release_min: string
-}
-
-export interface AppInstall {
-  jail?: string
-  project?: string
-  network?: string
-  storage?: string
-  image?: string
-  limits?: Resources
-  dry_run?: boolean
-}
-
-export interface AppInstallResult {
-  app: string
-  hash: string
-  version?: string
-  jail: Jail
-  addresses?: string[]
-  ports?: AppInstalledPort[]
-  data?: AppPath[]
-  config?: AppConfig[]
-  logs?: AppLog[]
-  notes?: string
-  snapshot?: string
-  steps: string[]
-  dry_run?: boolean
-}
-
-export interface AppInstalledPort {
-  name: string
-  port: number
-  proto: string
-  endpoint?: string
-  expose: boolean
-  description?: string
-}
-
-export interface AppLog {
-  name: string
-  path: string
-  description?: string
-}
-
-export interface AppPackage {
-  name: string
-  repo: string
-  version?: string
-}
-
-export interface AppPath {
-  path: string
-  description?: string
-}
-
-export interface AppPort {
-  name: string
-  port: number
-  proto: string
-  description?: string
-  expose: boolean
-}
-
-export interface AppResources {
-  memory?: string
-  disk?: string
-  cpu?: string
-}
-
-export interface AppService {
-  name: string
-  rc?: Record<string, string>
-  start?: boolean
-}
-
-export interface AppSummary {
-  name: string
-  title?: string
-  summary?: string
-  category?: AppCategory
-  version?: string
-  valid: boolean
-  error?: string
-  source: AppSource
-  overrides?: AppSource
-}
-
 export interface ApplyRequest {
   recipe: Recipe
   dry_run?: boolean
+  sensitive?: boolean
 }
 
 export interface ApplyResult {
@@ -1025,7 +784,6 @@ export interface FirewallTestRule {
   stage: string
   policy?: string
   project_policy?: boolean
-  managed?: boolean
   rule?: number
   name?: string
   comment?: string
@@ -1419,6 +1177,8 @@ export interface JailFileStat {
   type: string
   size_bytes?: number
   mode?: string
+  uid?: number
+  gid?: number
   modified_at?: string
   link?: string
 }
@@ -1579,7 +1339,6 @@ export interface LogEntry {
   time?: string
   project: string
   jail: string
-  app?: string
   file: string
   line: string
 }
@@ -1631,7 +1390,6 @@ export interface LogSinkSource {
   exclude_jails?: string[]
   exclude_labels?: Record<string, string>
   files?: string[]
-  no_app_logs?: boolean
   no_jails?: boolean
   audit?: boolean
 }
@@ -1655,7 +1413,6 @@ export interface LogSource {
   key: string
   project: string
   jail: string
-  app?: string
   file: string
   next_offset: number
   rotated?: boolean
@@ -1963,6 +1720,13 @@ export interface Recipe {
   steps: RecipeStep[]
 }
 
+export interface RecipeDir {
+  path: string
+  mode?: string
+  owner?: string
+  group?: string
+}
+
 export interface RecipeFile {
   path: string
   source?: string
@@ -1981,12 +1745,23 @@ export interface RecipeService {
 export interface RecipeStep {
   package?: string[]
   file?: RecipeFile
+  dir?: RecipeDir
   sysrc?: Record<string, string>
   in?: string
   service?: RecipeService
   run?: string[]
   creates?: string
   unless?: string[]
+}
+
+export interface RecipeValidateRequest {
+  recipe: Recipe
+  sensitive?: boolean
+}
+
+export interface RecipeValidateResult {
+  valid: boolean
+  steps: number
 }
 
 export interface Remote {
@@ -2932,4 +2707,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'jail_apply', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'firewall_applied', 'jail_export', 'jail_files', 'volume_from_dir', 'top', 'jail_audit', 'jail_base']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'jail_apply', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'jail_logs', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'firewall_applied', 'jail_export', 'jail_files', 'volume_from_dir', 'top', 'jail_audit', 'jail_base', 'recipe_validate']

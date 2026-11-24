@@ -17,17 +17,6 @@
 # JAILOPS_E2E_POOL_SIZE  size of the file-backed scratch pool (default 8G)
 # The test host needs kern.racct.enable=1 in /boot/loader.conf (a boot tunable: reboot after adding it): the block on resource
 # limits checks the rctl rules, which the kernel accepts only with it.
-# JAILOPS_E2E_APPS   more apps of the catalog to install after nginx, space separated: postgresql, valkey,
-#                   prometheus, forgejo, nsd, mail, isms (default none; CI does not set it). Each one is installed,
-#                   checked in its own way, its logs listed, and stopped. An installed app is closed, so the host is
-#                   allowed in first (jailops app allow NAME --from host) for the checks that connect from the host.
-#                   isms needs the jailops package repository in the host's pkg configuration (docs/install.md) and
-#                   installs a postgresql jail of its own, isms-db, which it is allowed to reach with app allow.
-#                   postgresql-access is not an app but a block: a postgresql jail (pgacc) and two client jails
-#                   (pgc1, pgc2) with the PostgreSQL client; pgc1 is allowed and runs select 1 with the connection
-#                   string allow printed, pgc2 is refused, and after the deny pgc1 is refused too.
-# JAILOPS_E2E_CATALOG  the catalog directory to install from (default: the reference copy internal/apps/testdata/catalog;
-#                   for a change of the catalog itself, main/jailops-apps/apps of a packages repository checkout)
 # JAILOPS_E2E_LINUX  1 builds an Alpine image from its minirootfs (it downloads from dl-cdn.alpinelinux.org) and checks what a
 #                   Linux process of a Linux jail sees: a volume attached to the running jail and after a restart, /proc, and
 #                   that a detach takes the volume away (also the mounts of a volume in the root and below compat/linux, a
@@ -74,17 +63,8 @@ case $part in all | e2e | pf | scale | soak | workflows | prepare | linux) ;; *)
 shard=${JAILOPS_E2E_SHARD:-all}
 case $shard in all | 1 | 2 | 3) ;; *) echo "JAILOPS_E2E_SHARD must be all, 1, 2 or 3" >&2; exit 2 ;; esac
 shard_on() { [ "$shard" = all ] || [ "$shard" = "$1" ]; }
-# kern.racct.enable decides which checks of the limits run; shard 1 and the apps of any shard read it
+# kern.racct.enable decides which checks of the limits run; shard 1 and the workflow walkthrough read it
 racct=$(sysctl -n kern.racct.enable 2>/dev/null || echo 0)
-e2e_apps=${JAILOPS_E2E_APPS:-}
-for a in $e2e_apps; do
-	case $a in postgresql | valkey | prometheus | forgejo | nsd | mail | isms | postgresql-access) ;; *) echo "JAILOPS_E2E_APPS: no check for $a (postgresql, valkey, prometheus, forgejo, nsd, mail, isms, postgresql-access)" >&2; exit 2 ;; esac
-	# isms is installed with pkg -r ROOT install -r jailops: say so now, not after the setup of the whole machine
-	if [ "$a" = isms ] && ! pkg -vv | grep -Eq '^[[:space:]]+jailops:[[:space:]]*\{'; then
-		echo "JAILOPS_E2E_APPS: isms comes from the jailops package repository, which the pkg configuration of this host does not have (docs/install.md)" >&2
-		exit 2
-	fi
-done
 poolfile=/tmp/$pool.img
 work=/tmp/jailops-e2e
 mount=/jopsci
@@ -180,9 +160,6 @@ check_net() { # check_net DESCRIPTION COMMAND...: like check, for a command that
 wait_counts() { # wait_counts PROJECT V4PREFIX V6PREFIX WANT: until net_counts says WANT, for up to 90 s (the caller then checks it and says what is wrong)
 	end=$(( $(date +%s) + 90 ))
 	until [ "$(net_counts "$1" "$2" "$3")" = "$4" ] || [ "$(date +%s)" -ge "$end" ]; do sleep 0.5; done # sleep-ok: the poll of wait_counts
-}
-json_field() { # json_field NAME: the string value of a top-level field of the indented JSON on standard input
-	sed -n "s/^  \"$1\": \"\([^\"]*\)\",*\$/\1/p" | head -1
 }
 
 rm -rf "$work"; mkdir -p "$work"
@@ -911,7 +888,7 @@ check "project create" $J project create demo
 check "project grant" sh -c "$J network grant lan --project demo && $J storage grant default --project demo"
 if [ "$part" = linux ]; then run_linux; echo "OK: the Linux jail test passed"; exit 0; fi # its own VM in CI (linux-e2e.yml): no FreeBSD image is built
 # before any image exists the CLI names the two commands that make the base image, and a create with an image that does not
-# exist names the one it was asked for (the catalog is configured later, so this does not go through an app install)
+# exist names the one it was asked for
 out=$($J image list 2>&1) || true
 printf '%s\n' "$out" | grep -F -q "jailops image create $host_img --release $host_release, then jailops image build $host_img" ||
 	{ echo "$out" >&2; fail "the empty image list names the commands that make the base image"; }
@@ -1119,12 +1096,14 @@ webroot=$mount/projects/demo/jails/web/root
 # the short name of the host as the daemon writes it into the prompt: the first label, lower case, letters, digits, hyphens
 shorthost=$(hostname | cut -d. -f1 | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9-' | sed 's/^-*//; s/-*$//')
 # DefaultPS1: user@jail in the colour, the grey tag [project/host] from the variables the prompt file derives it from, :dir and # or $, a space
-ps1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '
+ps1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_tag}:\w\$ '
 expect "a new jail names no shell of its own: the host's default (sh)" 'not set' sh -c "$J config get --project demo web shell 2>&1; true"
 expect "a new jail's prompt is the default" '^default$' $J config get --project demo web prompt
 expect_refused "nothing installed bash into a new jail" test -e "$webroot/usr/local/bin/bash"
+check "a new jail has sysrc, the tool an administrator reaches for first" test -x "$webroot/usr/sbin/sysrc"
 expect "jailops shell of a jail that names no shell runs sh" 'sh-shell=/bin/sh' sh -c "printf 'echo sh-shell=\$0; exit\n' | $J shell --project demo web"
-check_retry "the prompt file is JailOps'" grep -F -x "	PS1='$ps1'" "$webroot/usr/local/etc/profile.d/jailops-prompt.sh"
+# FreeBSD's sh on 15.1 expands nothing in PS1 when it shows the prompt (a reference stays as the text; a newer sh may expand a plain ${name}): the file puts the tag in the text when it is read
+check_retry "the prompt file is JailOps'" grep -F -x "	PS1='\\[\\e[38;5;39m\\]\\u@\\h\\[\\e[0m\\]'\"\${_jailops_tag}\"':\\w\\\$ '" "$webroot/usr/local/etc/profile.d/jailops-prompt.sh"
 check_retry "the variables script is JailOps'" grep -F "sysctl -n security.jail.env" "$webroot/usr/local/etc/profile.d/jailops-env.sh"
 check "the variables script holds no name of the project" sh -c '! grep -q demo "$1"' sh "$webroot/usr/local/etc/profile.d/jailops-env.sh"
 # where the jail is comes from the parameters env.jailops_* of its jail.conf: the jail reads them as a sysctl
@@ -1136,10 +1115,14 @@ for f in profile bash.bashrc; do
 done
 # sh: root's .shrc sets FreeBSD's PS1, so the block that sources the prompt file is at its end
 expect_retry "root's .shrc ends with the JailOps block" '^# END jailops shell$' tail -n 1 "$webroot/root/.shrc"
+check "the block of root's .shrc sources the variables script too (a non-login sh does not read profile.d)" grep -F -x 'if [ -r /usr/local/etc/profile.d/jailops-env.sh ]; then . /usr/local/etc/profile.d/jailops-env.sh; fi' "$webroot/root/.shrc"
 check "the block of root's .shrc sources the prompt file" grep -F -x 'if [ -r /usr/local/etc/profile.d/jailops-prompt.sh ]; then . /usr/local/etc/profile.d/jailops-prompt.sh; fi' "$webroot/root/.shrc"
 # jailops shell starts root's sh with ENV=/root/.shrc, so the prompt shows as in a login
 (sleep 2; printf 'echo "SHPS1=[$PS1]"\n'; sleep 1; printf 'exit\n'; sleep 1) | TERM=xterm timeout -s KILL 60 script -q "$work/shell-sh.out" $J shell --project demo web >/dev/null 2>&1 || true
-grep -a -q -F "SHPS1=[$ps1]" "$work/shell-sh.out" || { cat -v "$work/shell-sh.out" >&2; fail "jailops shell (sh) has the JailOps prompt"; }
+cat -v "$work/shell-sh.out" | grep -q 'SHPS1=\[.*\\u@\\h.*\[demo/'"$shorthost"'\].*:\\w\\\$ \]' || { cat -v "$work/shell-sh.out" >&2; fail "jailops shell (sh) has the JailOps prompt"; }
+# the prompt as sh shows it: whatever the sh expands, the tag and the values must already be text, so no reference is left in it
+if grep -a -F -q '${_jailops' "$work/shell-sh.out"; then cat -v "$work/shell-sh.out" >&2; fail "jailops shell (sh) shows an unexpanded reference in its prompt"; fi
+cat -v "$work/shell-sh.out" | grep -q "root@web.*\[demo/$shorthost\]" || { cat -v "$work/shell-sh.out" >&2; fail "jailops shell (sh) shows the tag [demo/$shorthost] in its prompt"; }
 # bash is never installed by JailOps: the administrator installs it, and the prompt files written at the first start apply to it
 # jailops pkg install lets the bootstrapper fetch pkg itself in a jail that has none yet (ASSUME_ALWAYS_YES=yes)
 check_net "install bash in the jail by hand" $J pkg install web --project demo -- bash
@@ -1158,13 +1141,18 @@ same() { # same DESCRIPTION WANT COMMAND...: standard output must be exactly WAN
 	[ "$out" = "$want" ] || { printf 'got:  %s\nwant: %s\n' "$out" "$want" >&2; fail "$desc"; }
 }
 last_line() { "$@" | tail -n 1; } # a login reads ~/.profile, whose resizewin prints before the command
-same "an interactive bash has the prompt" "PS1=[$ps1]" in_pty web /usr/local/bin/bash -ic 'echo "PS1=[$PS1]"'
-same "an interactive login bash has the prompt" "PS1=[$ps1]" last_line in_pty web /usr/local/bin/bash -lic 'echo "PS1=[$PS1]"'
+has_prompt() { # has_prompt DESCRIPTION COMMAND...: the PS1 the command prints is the default prompt with the tag [project/host] in it
+	desc=$1; shift
+	out=$("$@" 2>/dev/null | tail -n 1 | cat -v) || true
+	case $out in *'\u@\h'*"[demo/$shorthost]"*':\w\$ ]') ;; *) printf 'got: %s\n' "$out" >&2; fail "$desc" ;; esac
+}
+has_prompt "an interactive bash has the prompt" in_pty web /usr/local/bin/bash -ic 'echo "PS1=[$PS1]"'
+has_prompt "an interactive login bash has the prompt" in_pty web /usr/local/bin/bash -lic 'echo "PS1=[$PS1]"'
 same "an interactive bash has the variables" "JAILOPS=[demo web $shorthost]" in_pty web /usr/local/bin/bash -ic 'echo "JAILOPS=[$JAILOPS_PROJECT $JAILOPS_JAIL $JAILOPS_HOST]"'
 same "an interactive login bash has the variables" "JAILOPS=[demo web $shorthost]" last_line in_pty web /usr/local/bin/bash -lic 'echo "JAILOPS=[$JAILOPS_PROJECT $JAILOPS_JAIL $JAILOPS_HOST]"'
 same "a bash script is not affected" "PS1=[unset]" $J exec --project demo web -- /usr/local/bin/bash -c 'echo "PS1=[${PS1-unset}]"'
 same "a login bash running a command is not affected" "PS1=[unset]" $J exec --project demo web -- /usr/local/bin/bash -lc 'echo "PS1=[${PS1-unset}]"'
-same "a login sh of root has the prompt (the end of root's .shrc)" "PS1=[$ps1]" last_line in_pty web env HOME=/root sh -lic 'echo "PS1=[$PS1]"'
+has_prompt "a login sh of root has the prompt (the end of root's .shrc)" in_pty web env HOME=/root sh -lic 'echo "PS1=[$PS1]"'
 # the prompt as a terminal shows it: jailops shell (bash, the jail's shell) in a pseudo-terminal, typed into once bash
 # is up (bash drops what was typed before it set the terminal up)
 (sleep 3; printf 'echo "E2E PATH=$PATH HOME=$HOME"\n'; sleep 2; printf 'exit\n'; sleep 1) | TERM=xterm timeout -s KILL 60 script -q "$work/shell.out" $J shell --project demo web >/dev/null 2>&1 || true
@@ -1414,7 +1402,7 @@ n=0; until $J logs forward list >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] 
 expect "the sink is listed" '^ci-tcp +syslog +tcp://127\.0\.0\.1:15514 +local3' $J logs forward list
 # the sink starts at the end of the files: log the line again until one arrives
 expect_retry "a line logged in the jail arrives with the jail in the structured data" \
-	"\\[jailops project=\"demo\" jail=\"web\" app=\"\" file=\"messages\"\\] .*$marker" \
+	"\\[jailops project=\"demo\" jail=\"web\" file=\"messages\"\\] .*$marker" \
 	sh -c "$J exec --project demo web -- logger -t citest $marker >/dev/null 2>&1; grep -a -o '<15[0-9]>1 [^<]*$marker' '$work/syslog.out'"
 expect "the unified view shows it as web/messages" "^web/messages +.*$marker" $J logs --project demo --grep "$marker"
 expect "-o json carries the jail" "\"jail\":\"web\".*$marker" $J logs --project demo --jail web --grep "$marker" -o json
@@ -1785,7 +1773,7 @@ n=0; until $J host show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail 
 
 fi
 
-if shard_on 3; then # shard 3: generations, in-place upgrades, image upgrades, devices and the apps of the catalog
+if shard_on 3; then # shard 3: generations, in-place upgrades, image upgrades, devices and the rules that name a jail
 step "a second jail, and a second generation of its image: new jails are copied from it, no jail moves to it"
 expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image "$img" --start
 check "a file that must survive" $J exec --project demo up -- sh -c 'echo ci-keep > /root/keep'
@@ -1916,146 +1904,24 @@ check "rename the image: its run history comes along" $J image rename "$img" e2e
 expect "the nightly runs moved with it" 'Automatic upgrades' $J image show e2e-hist
 check "rename it back" $J image rename e2e-hist "$img" -y
 
-step "an app from the catalog (nginx: a jail, pkg -r from the host, rc.conf, service, health check, snapshot)"
-# the catalog is a directory of local files: the reference copy (or JAILOPS_E2E_CATALOG), copied where the daemon may read it
-appdir=$work/apps
-catalog=${JAILOPS_E2E_CATALOG:-internal/apps/testdata/catalog}
-[ -d "$catalog" ] || fail "JAILOPS_E2E_CATALOG: $catalog is not a directory"
-rm -rf "$appdir"; cp -R "$catalog" "$appdir"; chmod -R a+rX "$appdir"
-cat >> /usr/local/etc/jailops/jailopsd.yaml <<YAML
-apps:
-  catalog_dir: $appdir
-YAML
-check "restart jailopsd with the catalog" service jailopsd restart
-n=0; until $J app list >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
-expect "the catalog lists nginx as valid" '^nginx .*valid' $J app list -o wide
-expect "a dry run lists the steps" 'install-packages-ports: pkg -r .* install -y nginx' $J app install nginx --project demo --network lan --storage default --dry-run
-expect "an app's jail gets the shell and the prompt like any new jail" 'set-up-shell: ' $J app install nginx --project demo --network lan --storage default --dry-run
-check "install nginx" $J app install nginx --project demo --network lan --storage default
-expect "the app's jail names no shell of its own: the host's default (sh)" 'not set' sh -c "$J config get --project demo nginx shell 2>&1; true"
-check "the prompt is in the app's jail" grep -F -q "PS1='" "$mount/projects/demo/jails/nginx/root/usr/local/etc/profile.d/jailops-prompt.sh"
-expect "the jail runs and carries the labels" 'jailops.app=nginx' $J label --project demo nginx
-expect "the app is listed as installed" 'nginx +nginx +[^ ]+ +running' $J app installed --project demo
-addr=$($J app installed --project demo | awk '$1 == "nginx" {print $5}' | head -1 | cut -d, -f1)
-[ -n "$addr" ] || fail "no address for the nginx jail"
-# an installed app is closed, to the host too, until a source is allowed
-expect_refused_retry "a fresh app is closed to the host" curl -sS --max-time 3 "http://$addr/"
-expect "the closed app has no grant" 'No grants' $J app access nginx --project demo
-check "allow the host to reach nginx" $J app allow nginx --from host --project demo
-expect_retry "nginx answers from the host" 'Welcome to nginx' curl -sS --max-time 5 "http://$addr/"
-expect "the grant is listed" '^host \(host\)' $J app access nginx --project demo
-expect "the service is enabled in the jail's rc.conf" 'nginx_enable="YES"' $J exec --project demo nginx -- cat /etc/rc.conf
-expect "the snapshot of the fresh installation exists" 'app-installed' $J jail snapshot list nginx --project demo
-# the authoring path: a draft of the running jail has its package, its service and its port, and still carries TODO markers
-$J app export nginx --project demo --file "$work/nginx-draft.yaml" >"$work/export.out" 2>&1 || { cat "$work/export.out" >&2; fail "export a draft of the nginx jail"; }
-expect "-o json prints the draft as data" '"definition"' $J app export nginx --project demo -o json
-grep -q 'name: nginx' "$work/nginx-draft.yaml" || { cat "$work/nginx-draft.yaml" >&2; fail "the draft names the nginx package"; }
-grep -q 'port: 80' "$work/nginx-draft.yaml" || { cat "$work/nginx-draft.yaml" >&2; fail "the draft has port 80"; }
-grep -q 'TODO' "$work/nginx-draft.yaml" || fail "the draft has TODO markers"
-if $J app validate "$work/nginx-draft.yaml" >"$work/validate.out" 2>&1; then fail "validate accepts a draft with TODO markers"; fi
-grep -q 'replace TODO' "$work/validate.out" || { cat "$work/validate.out" >&2; fail "validate names the TODO lines"; }
-if ! $J stop nginx --project demo >"$work/stop.out" 2>&1; then # show what holds the root when the unmount stays busy
-	cat "$work/stop.out" >&2
-	echo "--- holders of the jail root:" >&2; fstat -f /jopsci/projects/demo/jails/nginx/root >&2 2>&1 || true
-	echo "--- processes:" >&2; ps -axo pid,jid,etimes,command | grep -E 'nginx|syslogd|cron|jexec' | grep -v grep >&2 || true
-	fail "stop the app jail"
-fi
-
-# one block per app of JAILOPS_E2E_APPS: install, the app's own check, the logs, stop
-app_check() { # app_check NAME ADDRESS
-	case $1 in
-	postgresql)
-		expect "postgresql answers a query" '^1$' $J exec --project demo postgresql -- su -l postgres -c "psql -tA -c 'select 1'"
-		# it was installed under the limits its definition hints at (1G, one core) and runs under them
-		[ "$racct" != 1 ] || {
-			expect "the hinted memory limit is on the running jail" 'jail:demo_postgresql:swapuse:deny=1073741824' sh -c 'rctl 2>&1'
-			expect "the hinted CPU limit is on the running jail" 'jail:demo_postgresql:pcpu:deny=100' sh -c 'rctl 2>&1'
-			expect "an allocation far beyond the limit fails in the jail" 'out of (memory|space)' sh -c "$J exec --project demo postgresql -- /usr/bin/awk 'BEGIN{s=\"x\"; for(i=0;i<29;i++) s=s s; print length(s)}' 2>&1 | head -c 300; true"
-			expect "postgresql answers after it" '^1$' $J exec --project demo postgresql -- su -l postgres -c "psql -tA -c 'select 1'"
-		} ;;
-	valkey) expect "valkey answers" '^PONG$' $J exec --project demo valkey -- /usr/local/bin/valkey-cli ping ;;
-	prometheus) expect_retry "prometheus is ready" 'Ready' curl -sS --max-time 5 "http://$2:9090/-/ready" ;;
-	forgejo) expect_retry "forgejo answers (the web installer or a redirect to it)" '^(200|302|303)$' curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "http://$2:3000/" ;;
-	nsd) # the starter zone, from the host, over UDP and TCP
-		expect_retry "nsd answers for example.com over UDP" 'IN[[:space:]]+SOA[[:space:]]+ns1\.example\.com\.' drill @"$2" example.com SOA
-		expect "nsd answers for example.com over TCP" 'IN[[:space:]]+SOA[[:space:]]+ns1\.example\.com\.' drill -t @"$2" example.com SOA
-		check "the configuration passes nsd-checkconf" $J exec --project demo nsd -- /usr/local/sbin/nsd-checkconf /usr/local/etc/nsd/nsd.conf ;;
-	mail) # the greetings: the command is sent after a second, Postfix refuses commands that arrive before its greeting
-		expect_retry "postfix greets on port 25" '^220 ' sh -c "(sleep 1; printf 'QUIT\r\n') | nc -w 5 $2 25"
-		expect "dovecot greets on port 143" '^\* OK' sh -c "(sleep 1; printf 'a1 LOGOUT\r\n') | nc -w 5 $2 143"
-		expect "mailer.conf hands /usr/sbin/sendmail to postfix" '^sendmail[[:space:]]+/usr/local/sbin/sendmail$' $J exec --project demo mail -- cat /usr/local/etc/mail/mailer.conf ;;
-	isms) isms_check "$2" ;;
-	esac
-}
-isms_check() { # isms_check ADDRESS: the steps of the definition's notes with a postgresql jail of its own, then HTTP
-	check "install postgresql for isms" $J app install postgresql isms-db --project demo --network lan --storage default
-	db=$($J app installed --project demo | awk '$1 == "isms-db" {print $5}' | head -1 | cut -d, -f1)
-	[ -n "$db" ] || fail "no address for the isms-db jail"
-	# the role, the database, the pg_hba.conf line, listen_addresses and the firewall rule, in one allow; the
-	# connection string is in its answer only (never printed here: it holds the password)
-	$J app allow isms-db --from jail:isms --db isms --project demo -o json >"$work/isms-allow.json" 2>&1 || { sed 's/postgres:\/\/[^@]*@/postgres:\/\/***@/' "$work/isms-allow.json" >&2; fail "allow isms to reach isms-db"; }
-	url=$(json_field connection_string <"$work/isms-allow.json")
-	rm -f "$work/isms-allow.json"
-	case $url in "postgres://isms:"*"@$db:5432/isms?sslmode=disable") ;; *) fail "app allow printed no connection string for isms" ;; esac
-	env=/usr/local/etc/isms/server.env
-	check "server.env: database, base URL, signing address" $J exec --project demo isms -- sh -c "sed -i '' \
-		-e 's|^DATABASE_URL=.*|DATABASE_URL=\"$url\"|' \
-		-e 's|^ISMS_BASE_URL=.*|ISMS_BASE_URL=http://$1:8080|' -e 's|^ISMS_SIGNING_EMAIL=.*|ISMS_SIGNING_EMAIL=e2e@example.com|' $env"
-	check "server.env: the master secret" $J exec --project demo isms -- sh -c "sed -i '' \"s|^ISMS_SECRET=.*|ISMS_SECRET=\$(openssl rand -hex 32)|\" $env"
-	check "server.env: owner and mode" $J exec --project demo isms -- sh -c "chown isms:isms $env && chmod 600 $env"
-	check "the signing key" $J exec --project demo isms -- su -m isms -c '/usr/local/bin/ssh-keygen -q -t ed25519 -N "" -C e2e@example.com -f /var/db/isms/private/isms_key'
-	check "the schema" $J exec --project demo isms -- env ISMS_SERVER_ENV=$env su -m isms -c '/usr/local/bin/isms server migrate'
-	check "start isms" $J exec --project demo isms -- service isms start
-	# UNVERIFIED: port 8080 and what / answers; curl retries while the program starts
-	expect "isms answers on port 8080" '^[23][0-9][0-9]$' curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 --retry 30 --retry-connrefused --retry-delay 1 "http://$1:8080/"
-	check "stop isms-db" $J stop isms-db --project demo
-}
-pg_access_check() { # postgresql-access: who may connect to a database, from the jails' side
-	check "install postgresql as pgacc" $J app install postgresql pgacc --project demo --network lan --storage default
-	for c in pgc1 pgc2; do
-		check "create the client jail $c" $J create "$c" --project demo --image "$img" --network lan --storage default --start
-		# the PostgreSQL client into the running jail, inside it, as package updates do
-		check_net "psql in $c" pkg -j "demo_$c" install -y postgresql18-client
-		check "the library cache of $c" $J exec --project demo "$c" -- /sbin/ldconfig -m /usr/local/lib
-	done
-	expect "a dry run shows the rule, the pg_hba line and the SQL without a password" 'CREATE ROLE "pgc1" LOGIN PASSWORD .<generated' \
-		$J app allow pgacc --from jail:pgc1 --project demo --dry-run
-	$J app allow pgacc --from jail:pgc1 --project demo -o json >"$work/pg-allow.json" 2>&1 || { sed 's/postgres:\/\/[^@]*@/postgres:\/\/***@/' "$work/pg-allow.json" >&2; fail "allow pgc1 to reach pgacc"; }
-	url=$(json_field connection_string <"$work/pg-allow.json")
-	rm -f "$work/pg-allow.json"
-	case $url in postgres://pgc1:*@*:5432/pgc1?sslmode=disable) ;; *) fail "app allow printed no connection string for pgc1" ;; esac
-	# a connection that the firewall drops must not wait for the default timeout
-	url="$url&connect_timeout=3"
-	expect_retry "pgc1 runs a query with the connection string" '^1$' $J exec --project demo pgc1 -- /usr/local/bin/psql "$url" -tAc 'select 1'
-	expect_refused "pgc2 (not allowed) cannot connect" $J exec --project demo pgc2 -- /usr/local/bin/psql "$url" -tAc 'select 1'
-	expect "app access lists the grant with its pg_hba line" 'host pgc1 pgc1 [0-9.]+/32 scram-sha-256' $J app access pgacc --project demo
-	expect "allowing again changes nothing and prints no password" 'may already reach' $J app allow pgacc --from jail:pgc1 --project demo
-	expect "the source of a grant is not deleted: the rule names it" 'jailops app deny pgacc --from jail:pgc1' \
-		sh -c "$J delete --stop --confirm-data-loss pgc1 --project demo 2>&1; true"
-	check "deny pgc1" $J app deny pgacc --from jail:pgc1 --project demo
-	expect_refused_retry "pgc1 cannot connect after the deny" $J exec --project demo pgc1 -- /usr/local/bin/psql "$url" -tAc 'select 1'
-	expect "the grant is gone" 'No grants' $J app access pgacc --project demo
-	url=
-	for j in pgc1 pgc2 pgacc; do check "stop $j" $J stop "$j" --project demo; done
-}
-for a in $e2e_apps; do
-	if [ "$a" = postgresql-access ]; then
-		step "who may connect to a database (app allow and deny)"
-		pg_access_check
-		continue
-	fi
-	step "the app $a from the catalog"
-	check "install $a" $J app install "$a" --project demo --network lan --storage default
-	expect "$a is listed as installed" "^$a +$a +[^ ]+ +running" $J app installed --project demo
-	addr=$($J app installed --project demo | awk -v a="$a" '$1 == a {print $5}' | head -1 | cut -d, -f1)
-	[ -n "$addr" ] || fail "no address for the $a jail"
-	# the checks that connect from the host need it allowed (postgresql and valkey are checked inside the jail)
-	case $a in prometheus | forgejo | nsd | mail | isms) check "allow the host to reach $a" $J app allow "$a" --from host --project demo ;; esac
-	app_check "$a" "$addr"
-	expect "the log files of $a are listed" 'messages' $J jail logs "$a" --project demo
-	check "stop $a" $J stop "$a" --project demo
-done
-
+step "a rule that names a jail (jail:NAME): only that jail reaches the port; another jail and the host are refused"
+for j in fwa fwb fwc; do check "create $j" $J create "$j" --project demo --image "$img" --start; done
+for j in fwa fwb fwc; do waitfor "$j runs" 30 $J exec --project demo "$j" -- true; done
+fwb_addr=$($J exec --project demo fwb -- ifconfig -a | awk '$1 == "inet" && $2 ~ /^10\.77\./ {print $2; exit}')
+[ -n "$fwb_addr" ] || fail "no address for the jail fwb"
+check "a service of fwb on tcp 5678" $J exec --project demo fwb -- daemon -f nc -4 -k -l 5678
+# the open project first: the listener of fwb answers to a jail and to the host, so a refusal below cannot be a listener
+# that was not up yet
+waitfor "fwc reaches the port of fwb before a policy is attached" 30 $J exec --project demo fwc -- nc -4 -z -w 2 "$fwb_addr" 5678
+waitfor "the host reaches the port of fwb before a policy is attached" 30 nc -4 -z -w 2 "$fwb_addr" 5678
+check "a policy that closes inbound" $J firewall policy create fwclosed --project demo --default-in deny
+check "a rule that lets fwa in on 5678" $J firewall rule add fwclosed in --project demo --action allow --proto tcp --port 5678 --from jail:fwa --comment "the e2e jail rule"
+check "attach the policy to fwb" $J firewall policy attach fwclosed fwb --project demo
+waitfor "the policy is loaded into the anchor of fwb" 60 sh -c "pfctl -a jailops/demo/fwb -sr | grep -q 5678"
+waitfor "fwa reaches the port of fwb" 30 $J exec --project demo fwa -- nc -4 -z -w 2 "$fwb_addr" 5678
+expect_refused_retry "fwc (another jail) does not reach it once the policy is loaded" $J exec --project demo fwc -- nc -4 -z -w 2 "$fwb_addr" 5678
+expect_refused_retry "the host does not reach it" nc -4 -z -w 2 "$fwb_addr" 5678
+for j in fwa fwb fwc; do check "stop $j" $J stop "$j" --project demo; done
 fi
 
 if shard_on 2; then

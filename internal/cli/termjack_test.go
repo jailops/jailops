@@ -63,17 +63,16 @@ func hostileHarness(t *testing.T) *harness {
 	h.seed()
 	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "web", Project: "main", Labels: map[string]string{"role": "x" + esc}},
 		Spec: api.JailSpec{Image: "freebsd-15", Hostname: "web" + esc}})
-	h.srv.SeedApp(api.App{Name: "evil", Description: "nice app" + esc, Notes: "notes" + esc})
 	return h
 }
 
 // Every string a server returns reaches the terminal cleaned: tables, show and get, errors and hints, the audit
-// log, doctor, labels and the catalog.
+// log, doctor, and labels.
 func TestServerTextCannotDriveTheTerminal(t *testing.T) {
 	h := hostileHarness(t)
 	for _, args := range [][]string{
 		{"jail", "list"}, {"jail", "list", "-o", "wide"}, {"jail", "list", "-o", "csv"}, {"jail", "list", "-o", "name"},
-		{"jail", "show", "web"}, {"jail", "show", "boom"}, {"audit"}, {"audit", "-o", "wide"}, {"doctor"}, {"app", "info", "evil"},
+		{"jail", "show", "web"}, {"jail", "show", "boom"}, {"audit"}, {"audit", "-o", "wide"}, {"doctor"},
 	} {
 		out, errs, _ := h.run("", args...)
 		if !terminalSafe(out) || !terminalSafe(errs) {

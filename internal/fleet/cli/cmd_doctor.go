@@ -127,7 +127,7 @@ Exit status 1 when any check fails.`,
 				check("host "+h, err, fmt.Sprintf("%s, api %s, %d extensions", info.Hostname, info.APIVersion, len(info.APIExtensions)))
 			}
 			if len(f.Projects) > 0 {
-				pl := plan.Compute(cmd.Context(), s, plan.Options{Hosts: hs})
+				pl := plan.Compute(cmd.Context(), s, plan.Options{Hosts: hs, NoRecipes: true})
 				for _, ph := range pl.ProjectHosts {
 					if ph.Offline {
 						failed++

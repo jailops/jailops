@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"jailops.net/jailops/internal/apps"
 	"net/netip"
 	"path"
 	"strings"
@@ -219,7 +218,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 			}
 		}
 	}
-	// Firewall anchor: the project's policies first, then the managed access policy, then the jail's own.
+	// Firewall anchor: the project's policies first, then the jail's own.
 	var projectPols, ownPols []object[api.FirewallPolicySpec]
 	for _, pn := range j.Spec.Firewall.Policies {
 		pol, err := s.polKind.p(project).get(pn)
@@ -268,16 +267,6 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 				in.Policies = append(in.Policies, render.PFPolicy{Name: p.Meta.Name, Project: true, Policy: p.Spec, AllowRaw: true})
 				specs = append(specs, namedSpec{name: p.Meta.Name, project: true, spec: p.Spec})
 			}
-			// The grants of app access (the managed policy app-<jail>) come after the project's policies and before the
-			// jail's own; an app's jail it closes (its policy says default_in deny) stays closed whatever the jail's own
-			// policies say.
-			if acc, ok := s.accessSpecFor(project, j.Metadata.Name); ok {
-				name := apps.AccessPolicyName(j.Metadata.Name)
-				if len(acc.Rules) > 0 {
-					in.Policies = append(in.Policies, render.PFPolicy{Name: name, Managed: true, Policy: api.FirewallPolicySpec{Rules: acc.Rules}})
-				}
-				specs = append(specs, namedSpec{name: name, managed: true, spec: acc})
-			}
 			for _, p := range ownPols {
 				in.Policies = append(in.Policies, render.PFPolicy{Name: p.Meta.Name, Policy: p.Spec, AllowRaw: true})
 				specs = append(specs, namedSpec{name: p.Meta.Name, spec: p.Spec})
@@ -288,8 +277,6 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 				switch {
 				case p.project:
 					src = "project"
-				case p.managed:
-					src = "managed"
 				}
 				b.reach.policies = append(b.reach.policies, api.ReachPolicy{Name: p.name, Source: src, Rules: len(p.spec.Rules), DefaultIn: p.spec.DefaultIn, DefaultOut: p.spec.DefaultOut})
 			}

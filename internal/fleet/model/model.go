@@ -11,9 +11,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/netip"
-	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -61,22 +58,9 @@ var Kinds = []KindInfo{
 	{Kind: api.KindJail, Dir: "jails", HostOnly: true, ProjectLevel: true, Extension: "jails"},
 }
 
-// KindApp is an app of the catalog installed as a jail (jailops app install).
-const KindApp api.Kind = "App"
-
-// AppKinds are the kinds sync manages through the application catalog, not as
-// stored objects: an App is installed (never changed or deleted), and an
-// AppAccess is the list of sources allowed to reach an installed app. They
-// come after every kind of Kinds: an app needs its project, network, storage
-// and image, and a grant needs the app and its source jails.
-var AppKinds = []KindInfo{
-	{Kind: KindApp, Dir: "apps", HostOnly: true, ProjectLevel: true, Extension: "app_install"},
-	{Kind: api.KindAppAccess, Dir: "app-access", HostOnly: true, ProjectLevel: true, Extension: "app_access"},
-}
-
 // KindOf returns the info of a managed kind.
 func KindOf(k api.Kind) (KindInfo, bool) {
-	for _, ki := range append(slices.Clone(Kinds), AppKinds...) {
+	for _, ki := range Kinds {
 		if ki.Kind == k {
 			return ki, true
 		}
@@ -86,139 +70,12 @@ func KindOf(k api.Kind) (KindInfo, bool) {
 
 // Order returns the dependency rank of a managed kind (-1 when unmanaged).
 func Order(k api.Kind) int {
-	for i, ki := range append(slices.Clone(Kinds), AppKinds...) {
+	for i, ki := range Kinds {
 		if ki.Kind == k {
 			return i
 		}
 	}
 	return -1
-}
-
-// AppSpec is the spec of an App document: what `jailops app install` is given.
-// The jail is metadata.name; the project is the directory's.
-type AppSpec struct {
-	// App is the name of the definition in the host's catalog.
-	App string `json:"app"`
-	// Network and Storage default to the project's only grant of a kind.
-	Network string `json:"network,omitempty"`
-	Storage string `json:"storage,omitempty"`
-	// Image defaults to the FreeBSD image of the highest release the host runs.
-	Image string `json:"image,omitempty"`
-	// Limits replace the definition's resource hints.
-	Limits *api.Resources `json:"limits,omitempty"`
-}
-
-// AppAccessSpec is the spec of an AppAccess document: every source allowed to
-// reach the installed app named by metadata.name.
-type AppAccessSpec struct {
-	Grants []AppGrant `json:"grants"`
-}
-
-// AppGrant is one source of an AppAccess document.
-type AppGrant struct {
-	// Source is @jail, @address-set, an address or a prefix, or host.
-	Source string `json:"source"`
-	// Ports are "N" or "N/proto"; empty means the definition's ports.
-	Ports []string `json:"ports,omitempty"`
-	// Database names the database and role of a postgresql grant (default: the
-	// source jail's name). Its password is made on the host when the grant is
-	// applied, printed once, and never written anywhere by sync.
-	Database string `json:"database,omitempty"`
-}
-
-var (
-	dbNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
-)
-
-// CanonicalSource is the form the host stores a grant under, so a declared
-// source and a live grant compare: host, jail:NAME, set:NAME, an address, or a masked prefix.
-func CanonicalSource(s string) (string, error) {
-	switch {
-	case s == "host":
-		return s, nil
-	case strings.HasPrefix(s, "@"):
-		n := s[1:]
-		return "", fmt.Errorf("source %q: @ is not used: write jail:%s or set:%s", s, n, n)
-	case strings.HasPrefix(s, "jail:"):
-		if !api.IsName(s[5:], 29) {
-			return "", fmt.Errorf("source %q: jail: is followed by the name of a jail of the project", s)
-		}
-		return s, nil
-	case strings.HasPrefix(s, "set:"):
-		if !api.IsName(s[4:], 29) {
-			return "", fmt.Errorf("source %q: set: is followed by the name of an address set of the project", s)
-		}
-		return s, nil
-	case s == "" || s == "any" || strings.HasPrefix(s, "tag:"):
-		return "", fmt.Errorf("source %q: name a jail (jail:web), an address set (set:office), an address or a prefix, or host", s)
-	}
-	if strings.Contains(s, "/") {
-		p, err := netip.ParsePrefix(s)
-		if err != nil || p.Addr().Zone() != "" || p.Addr().Is4In6() {
-			return "", fmt.Errorf("source %q is not an address or a prefix", s)
-		}
-		p = p.Masked()
-		if p.Bits() == p.Addr().BitLen() {
-			return p.Addr().String(), nil
-		}
-		return p.String(), nil
-	}
-	a, err := netip.ParseAddr(s)
-	if err != nil || a.Zone() != "" || a.Is4In6() {
-		return "", fmt.Errorf("source %q is not an address, a prefix, jail:NAME, set:NAME or host", s)
-	}
-	return a.String(), nil
-}
-
-// NormalizePorts turns "N" and "N/proto" into "N/proto", sorted and without repeats.
-func NormalizePorts(in []string) ([]string, error) {
-	var out []string
-	for _, s := range in {
-		num, proto, ok := strings.Cut(s, "/")
-		if !ok {
-			proto = "tcp"
-		}
-		n, err := strconv.Atoi(num)
-		if err != nil || n < 1 || n > 65535 || (proto != "tcp" && proto != "udp") {
-			return nil, fmt.Errorf("port %q must be N or N/tcp or N/udp, with N from 1 to 65535", s)
-		}
-		out = append(out, strconv.Itoa(n)+"/"+proto)
-	}
-	slices.Sort(out)
-	return slices.Compact(out), nil
-}
-
-// Validate checks an App spec.
-func (s AppSpec) Validate() error {
-	if !api.IsName(s.App, 29) {
-		return fmt.Errorf("spec.app %q must name an app of the catalog (^[a-z][a-z0-9-]{0,62}$)", s.App)
-	}
-	return nil
-}
-
-// Validate checks an AppAccess spec in a project: sources, ports, databases, no source twice.
-func (s AppAccessSpec) Validate() error {
-	seen := map[string]bool{}
-	for i, g := range s.Grants {
-		c, err := CanonicalSource(g.Source)
-		if err != nil {
-			return fmt.Errorf("grants[%d]: %w", i, err)
-		}
-		if seen[c] {
-			return fmt.Errorf("grants[%d]: source %s is listed twice", i, c)
-		}
-		seen[c] = true
-		if _, err := NormalizePorts(g.Ports); err != nil {
-			return fmt.Errorf("grants[%d]: %w", i, err)
-		}
-		if g.Database != "" {
-			if !dbNameRe.MatchString(g.Database) || g.Database == "postgres" || g.Database == "public" ||
-				g.Database == "template0" || g.Database == "template1" || strings.HasPrefix(g.Database, "pg_") {
-				return fmt.Errorf("grants[%d]: database %q must match ^[a-z][a-z0-9_]{0,62}$ and not be a name PostgreSQL reserves", i, g.Database)
-			}
-		}
-	}
-	return nil
 }
 
 // File is the envelope of every YAML document in the repository.
@@ -236,9 +93,13 @@ type File struct {
 	// Build builds the first generation of an Image when the host has none (a fresh host has none, and a jail
 	// cannot be created from an image without one). It is never re-applied once a generation exists.
 	Build bool `yaml:"build,omitempty"`
-	// After lists typed hooks run once after a Jail is created.
-	After []Hook         `yaml:"after,omitempty"`
-	Spec  map[string]any `yaml:"spec"`
+	// Recipes are applied to a Jail, in order, once it exists and runs: configuration inside the jail.
+	Recipes []RecipeRef `yaml:"recipes,omitempty"`
+	// Needs lists jails of the same host and project whose recipes must be settled before this jail's recipes run.
+	Needs []string `yaml:"needs,omitempty"`
+	// Vars are values for the variables of every recipe of the Jail that declares the name.
+	Vars map[string]string `yaml:"vars,omitempty"`
+	Spec map[string]any    `yaml:"spec"`
 }
 
 // Meta is fleet.yaml.
@@ -248,6 +109,9 @@ type Meta struct {
 	ID string `yaml:"id"`
 	// Hub, when set, is the hub through which hosts with via_hub are reached.
 	Hub *Endpoint `yaml:"hub,omitempty"`
+	// DriftInterval is how often sync looks inside a running jail again to see whether a recipe still holds
+	// (a duration such as 30m; default 1h). A manual plan or drift always looks.
+	DriftInterval string `yaml:"drift_interval,omitempty"`
 }
 
 // Endpoint says how to reach a daemon.
@@ -274,52 +138,15 @@ type HostGroupSpec struct {
 	Selector map[string]string `json:"selector,omitempty"`
 }
 
-// Hook is one typed action run after a Jail is created. Hooks are data, not
-// shell: each action maps to one SDK call.
-type Hook struct {
-	// Action is start, restart, snapshot or exec.
-	Action string `yaml:"action" json:"action"`
-	// Name names the snapshot for action snapshot.
-	Name string `yaml:"name,omitempty" json:"name,omitempty"`
-	// Argv is the command for action exec. It is never passed to a shell.
-	Argv []string `yaml:"argv,omitempty" json:"argv,omitempty"`
-}
-
-// Hook actions.
-const (
-	HookStart    = "start"
-	HookRestart  = "restart"
-	HookSnapshot = "snapshot"
-	HookExec     = "exec"
-)
-
-// Validate checks a hook.
-func (h Hook) Validate() error {
-	switch h.Action {
-	case HookStart, HookRestart:
-		if h.Name != "" || len(h.Argv) > 0 {
-			return fmt.Errorf("hook %s takes no name or argv", h.Action)
-		}
-	case HookSnapshot:
-		if len(h.Argv) > 0 {
-			return fmt.Errorf("hook snapshot takes no argv")
-		}
-		if h.Name != "" {
-			if err := CheckName(h.Name); err != nil {
-				return fmt.Errorf("hook snapshot name: %w", err)
-			}
-		}
-	case HookExec:
-		if len(h.Argv) == 0 || h.Argv[0] == "" {
-			return fmt.Errorf("hook exec needs a non-empty argv")
-		}
-		if h.Name != "" {
-			return fmt.Errorf("hook exec takes no name")
-		}
-	default:
-		return fmt.Errorf("unknown hook action %q (want start, restart, snapshot or exec)", h.Action)
-	}
-	return nil
+// RecipeRef names a recipe directory of the repository for a jail and the values of its variables.
+type RecipeRef struct {
+	// Path is the recipe directory (recipe.yaml and the files beside it), relative to the repository root.
+	Path string `yaml:"path"`
+	// Vars are the values of the plain variables of the recipe.
+	Vars map[string]string `yaml:"vars,omitempty"`
+	// Secrets give the secret variables of the recipe as references into the secret store (secrets/NAME.age, or a
+	// dotted path of the SOPS file). A secret is never written in a fleet file.
+	Secrets map[string]string `yaml:"secrets,omitempty"`
 }
 
 // TemplateSpec is the spec of a JailTemplate document.
@@ -327,8 +154,6 @@ type TemplateSpec struct {
 	Comment string `json:"comment,omitempty"`
 	// Jail is a fragment of a JailSpec merged under every jail using the template.
 	Jail map[string]any `json:"jail,omitempty"`
-	// After hooks run, in order, after a jail using the template is created.
-	After []Hook `json:"after,omitempty"`
 }
 
 // RolloutSpec is the spec of a Rollout document: a staged operation over jails.
@@ -524,16 +349,6 @@ func decodeSpec(kind api.Kind, raw map[string]any) (any, error) {
 		return s, err
 	case api.KindWireGuard:
 		var s api.WireGuardSpec
-		err := DecodeStrict(raw, &s)
-		return s, err
-	case KindApp:
-		var s AppSpec
-		if err := DecodeStrict(raw, &s); err != nil {
-			return s, err
-		}
-		return s, s.Validate()
-	case api.KindAppAccess:
-		var s AppAccessSpec
 		err := DecodeStrict(raw, &s)
 		return s, err
 	}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/sdk/api"
@@ -92,6 +93,9 @@ func (d dirJailFiles) JailStat(_ context.Context, q service.JailStatReq) (api.Ja
 	mt := st.ModTime().UTC()
 	out.ModifiedAt = &mt
 	out.Mode = fmt.Sprintf("%04o", st.Mode().Perm())
+	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+		out.Uid, out.Gid = int(sys.Uid), int(sys.Gid)
+	}
 	switch {
 	case st.Mode()&fs.ModeSymlink != 0:
 		out.Type = api.FileTypeSymlink

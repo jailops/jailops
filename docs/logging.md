@@ -19,10 +19,6 @@ below the jail root; at most 1 MiB from the end of a file per read. That is all 
 
 - **The default file is `messages`**: what the jail's own `syslogd` writes. Another file with `--file` (the view) or
   `sources.files` (a sink).
-- **Logs of installed apps**: a catalog app declares its log files ([apps.md](apps.md), `logs:`). Those below `/var/log`
-  are added with `--app-logs` in the view and by default for a sink (`no_app_logs: true` leaves them out). A declared
-  directory stands for the files being written in it. Declared paths below `/var/db` or `/usr/local` cannot be read
-  through the helper and are left out.
 - **A stopped jail** has its root mounted only while it runs: its files are not readable then. The view names it
   ("not mounted", with the dataset to mount); a sink reads it again from where it stopped once it is mounted.
 - **Rotated copies** (`messages.0`) are readable one by one with `jail logs`; compressed ones (`messages.1.gz`) are not.
@@ -35,12 +31,11 @@ below the jail root; at most 1 MiB from the end of a file per read. That is all 
     jailops logs -f                              and what is written afterwards, until interrupted
     jailops logs --jail web --jail db --since 15m
     jailops logs -l tier=front --grep error      jails with that label, lines containing "error"
-    jailops logs --app postgresql --app-logs     the jails installed from an app, with the app's own files
     jailops logs --all-projects -o json          every project you may use, one JSON object per line
 
 Each line starts with `jail/file` (`project/jail/file` with `--all-projects`), coloured per jail on a terminal
 (`NO_COLOR` turns it off). `--limit`, `--since` and `--grep` apply to every file before the merge. `-o json` prints
-`{"time", "project", "jail", "app", "file", "line"}` per line; `time` is absent for a line without a timestamp.
+`{"time", "project", "jail", "file", "line"}` per line; `time` is absent for a line without a timestamp.
 
 **Ordering.** A line's timestamp is read from its start: RFC 3339 and the RFC 5424 form (`<PRI>1 2026-11-01T09:30:00Z`
 or without the `<PRI>1`), `2026-11-01 09:30:00`, the classic syslog form (`Nov  1 09:30:00`) and the bracketed web
@@ -115,11 +110,10 @@ host (`logs` for `logs.example.com`).
 | `sources.projects`, `jails`, `labels` | only these jails (all must match when several are given); all jails when none |
 | `sources.exclude_jails`, `exclude_labels` | leave these out (a jail with any one of the labels) |
 | `sources.files` | the files of every jail instead of `messages` (names below `/var/log`, at most 8) |
-| `sources.no_app_logs` | leave out the files installed apps declare |
 | `sources.audit`, `no_jails` | add the audit log; with `no_jails` send nothing else |
 
 The CLI flags are the same: `--from-project`, `--jail`, `-l/--selector`, `--exclude-jail`, `--exclude-selector`, `--file`,
-`--no-app-logs`, `--audit`, `--audit-only`, `--queue`, `--ca`, `--token-file`. Reading and changing the list, its
+`--audit`, `--audit-only`, `--queue`, `--ca`, `--token-file`. Reading and changing the list, its
 status and the test need a **global administrator**; every change and test is in the audit log. The test answers whether
 the line was delivered and, when it was not, a short class of the failure (`connection refused`, `timeout`,
 `dns lookup failed`, `tls handshake failed`, `certificate not trusted`, `HTTP 503`, `target refused: loopback`, ...),
@@ -127,28 +121,27 @@ never what the receiver answered; a webhook's answer body is not kept anywhere.
 
 ### What is sent
 
-**Syslog** is RFC 5424. A line of `messages` of the jail `nginx` (installed from the app `nginx`) in the project `web`,
+**Syslog** is RFC 5424. A line of `messages` of the jail `nginx` in the project `web`,
 with `facility: local3`, on a host named `host1.example.com`:
 
-    <158>1 2026-11-01T09:30:00.000000Z host1.example.com jailops - log [jailops project="web" jail="nginx" app="nginx" file="messages"] Nov  1 09:30:00 nginx sshd[42]: Accepted publickey for deploy
+    <158>1 2026-11-01T09:30:00.000000Z host1.example.com jailops - log [jailops project="web" jail="nginx" file="messages"] Nov  1 09:30:00 nginx sshd[42]: Accepted publickey for deploy
 
 - PRI is facility × 8 + 6: every line is sent as *informational*; a log line carries no severity JailOps could trust.
 - TIMESTAMP is the line's own when it has one (the forms of the view), otherwise when it was read. HOSTNAME is the host's
   name, APP-NAME `jailops`, PROCID `-`, MSGID `log` (or `audit` for the audit log).
-- The structured data `[jailops project="" jail="" app="" file=""]` says where the line comes from (`app` is empty for a
-  jail that was not installed from the catalog; the audit log has `jail=""` and `file="audit"`). `"`, `\` and `]` in
+- The structured data `[jailops project="" jail="" file=""]` says where the line comes from (the audit log has `jail=""` and `file="audit"`). `"`, `\` and `]` in
   a value are escaped with a backslash. The SD-ID is `jailops` without an enterprise number; a receiver that insists
   on RFC 5424's `name@number` form for private IDs may reject it.
 - MSG is the line as it is in the file, as data: control characters become `\t`, `\n`, `\r`, `\xHH` or `\u00HH`,
   invalid UTF-8 becomes U+FFFD, and the result is cut at 8 KiB. A jail cannot forge a second message or a header.
 - Over **udp** one message per datagram. Over **tcp** and **tls** octet-counted frames (RFC 6587 and RFC 5425): the
-  length in decimal, a space, the message; the sample above travels as `193 <158>1 2026-...`. The connection is kept
+  length in decimal, a space, the message; the sample above travels as `181 <158>1 2026-...`. The connection is kept
   open, checked before each batch and dialled again after an error.
 
 **Webhook**: `POST` of `application/x-ndjson`, one JSON object per line, up to 200 lines per request, with
 `Authorization: Bearer <token>` when `token_file` is set:
 
-    {"time":"2026-11-01T09:30:00Z","host":"host1.example.com","project":"web","jail":"nginx","app":"nginx","file":"messages","line":"Nov  1 09:30:00 nginx sshd[42]: Accepted publickey for deploy"}
+    {"time":"2026-11-01T09:30:00Z","host":"host1.example.com","project":"web","jail":"nginx","file":"messages","line":"Nov  1 09:30:00 nginx sshd[42]: Accepted publickey for deploy"}
 
 `line` is escaped as above. A 2xx answer is a delivery; a redirect, another status or no answer within 10 seconds is a
 failure.

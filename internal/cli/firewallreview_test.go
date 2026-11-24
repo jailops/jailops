@@ -70,7 +70,7 @@ func TestValidateReviewWithAServer(t *testing.T) {
 	h.srv.SeedImage(api.Image{Metadata: api.ObjectMeta{Name: "freebsd-151"},
 		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}})
 	h.srv.SeedGeneration("freebsd-151")
-	if o, e, code := h.run("", "app", "install", "nginx", "web", "--image", "freebsd-151"); code != 0 {
+	if o, e, code := h.run("", "jail", "create", "web", "--image", "freebsd-151", "--network", "lan", "--storage", "default"); code != 0 {
 		t.Fatalf("%s %s", o, e)
 	}
 	out, _, code := h.run(reviewDoc, "firewall", "validate", "-f", "-", "--review")

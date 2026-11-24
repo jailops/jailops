@@ -218,8 +218,8 @@ beyond the limit. `vmemoryuse` counts every mapping, shared libraries and sparse
 summed over the processes, so the pages that processes share are counted for each of them, and the kernel does not
 refuse an allocation for it (`deny` is not enforced; the action `sigkill` kills the process that is over). The limit is
 therefore the memory the jail's programs reserve, not the size of a single process: a server with many processes, such
-as PostgreSQL with twenty busy connections, reserves more than the value it needs when idle, and a limit set to the
-catalog's hint of the application (1G for PostgreSQL) leaves room for a small server and no more. Raise
+as PostgreSQL with twenty busy connections, reserves more than the value it needs when idle, and a limit set to
+1G for PostgreSQL leaves room for a small server and no more. Raise
 `resources.memory` for a busy one. `resources.disk` is a `quota`, so snapshots count against it; a `refquota` would leave them
 out, and the jail could then fill the pool with what its snapshots keep.
 
@@ -295,7 +295,7 @@ in the log of `jailopsd` under that id, and nowhere in the API, for any role:
 
 (`jailopsd` tag, level `ERROR`, message `operation failed`, fields `op`, `description`, `project` and `err`.) An error with a
 code of its own, such as `busy`, `invalid`, `pool_exhausted` or `quota_exceeded`, carries its message and hint to the reader.
-A failed app installation names the step and whether the jail was kept; the cause is in the same log. The audit trail records
+The audit trail records
 the code of the failure, not its text.
 
 ## One command on many jails
@@ -323,8 +323,7 @@ the summary; a stopped jail you named yourself is a failure. `--parallel N` boun
 `jailops pkg install|upgrade|remove|info [NAME...] [-l KEY=VALUE | --all] -- PACKAGE...` is exec of the jail's own
 `pkg`, nothing more: `jailops pkg install -l role=web -- nginx` is `jailops exec -l role=web -- pkg install -y nginx`.
 `install` also sets `ASSUME_ALWAYS_YES=yes`, so FreeBSD's bootstrapper `/usr/sbin/pkg` fetches pkg itself in a jail that
-does not have it yet. Jails whose packages JailOps manages (the base of a jail, an app) are changed by `jailops update`
-and `jailops app`. These commands are for FreeBSD jails; a Linux jail is not part of a selection and manages its own
+does not have it yet. Jails whose packages JailOps manages (the base of a jail) are changed by `jailops update`. These commands are for FreeBSD jails; a Linux jail is not part of a selection and manages its own
 packages, and one you name is refused.
 
 The console does the same: select jails in the jail list and choose Run a command. Each jail gets its own block with
@@ -359,7 +358,7 @@ A transfer is limited to `limits.file_copy_bytes` of the daemon (2 GiB by defaul
 directory levels. It needs the role that may exec in the project and is audited with the jail, the direction, the
 paths and the bytes. A running jail always works; a stopped jail works only while its root dataset is mounted on the
 host, otherwise the answer is `busy` and names the dataset to mount. While an operation has the jail (an upgrade, a
-stop, a start) or a package update or app installation holds it, a copy answers `busy` and names what holds it; copy
+stop, a start) or a package update holds it, a copy answers `busy` and names what holds it; copy
 again when it has ended (`jailops op list` shows it).
 
 The console has the same for one file at a time: the Files tab of a running jail sends a file from the browser and

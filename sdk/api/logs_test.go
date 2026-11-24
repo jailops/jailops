@@ -72,10 +72,10 @@ func TestMergeLogs(t *testing.T) {
 }
 
 func TestLogsQuery(t *testing.T) {
-	q := LogsQuery{Jails: []string{"web", "db"}, Labels: map[string]string{"tier": "front", "a": "b"}, App: "nginx", AppLogs: true,
+	q := LogsQuery{Jails: []string{"web", "db"}, Labels: map[string]string{"tier": "front", "a": "b"},
 		File: "auth.log", Limit: 50, Since: "1h", Grep: "x", Cursor: map[string]int64{"p/web/auth.log": 42}}
 	v := q.Values()
-	if v.Encode() != "app=nginx&app_logs=true&cursor=%7B%22p%2Fweb%2Fauth.log%22%3A42%7D&file=auth.log&grep=x&jail=web&jail=db&label=a%3Db&label=tier%3Dfront&limit=50&since=1h" {
+	if v.Encode() != "cursor=%7B%22p%2Fweb%2Fauth.log%22%3A42%7D&file=auth.log&grep=x&jail=web&jail=db&label=a%3Db&label=tier%3Dfront&limit=50&since=1h" {
 		t.Fatalf("%s", v.Encode())
 	}
 	back, err := ParseLogsQuery(v)
@@ -87,7 +87,7 @@ func TestLogsQuery(t *testing.T) {
 		t.Fatalf("%+v %v", d, err)
 	}
 	for _, bad := range []string{"limit=0", "limit=5001", "cursor=%5B%5D", "cursor=%7B%22x%22%3A1%7D", "cursor=%7B%22a%2Fb%2Fc%22%3A-1%7D", "label=x",
-		"jail=Web", "app=..", "file=..%2Fx", "file=messages.0.gz", "app_logs=yes", "since=later"} {
+		"jail=Web", "file=..%2Fx", "file=messages.0.gz", "since=later"} {
 		v, _ := url.ParseQuery(bad)
 		if _, err := ParseLogsQuery(v); !IsCode(err, CodeInvalid) {
 			t.Errorf("%s: %v", bad, err)

@@ -9,16 +9,17 @@ import type {
   Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ShellSetupResult,
   BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, BackupKeyImport, BackupKeyImported, ExecRequest,
   Project, ProjectAggregate, Storage, TrustTokenRequest, TrustToken, Session, Identity,
-  JailReach, JailImportPreflight, JailImportRequest, JailImported, Exposed, ExposeRequest, ExposeResult, UnexposeRequest, AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
+  JailReach, JailImportPreflight, JailImportRequest, JailImported, Exposed, ExposeRequest, ExposeResult, UnexposeRequest, JailLogFile, JailLogRead,
   HostIdentity, HostIdentityApply, HostChange, HostSnapshot, HostRestore,
   HostFirewall, HostFirewallApply, HostPending,
   WireGuard, WireGuardJoin, WireGuardKeys, WireGuardPeerAdd, WireGuardPeerCreated,
-  AppAccess, AppAllow, AppAllowResult, AppDeny, AppDenyResult,
   LogsRead, LogForward, LogForwardSpec, LogForwardTestResult,
   HostCertificate, HostCertificateUpload, ACMESpec, SetupStatus, SetupRequest, SetupResult,
   Rename, RenameResult,
   Volume, VolumeCreate, VolumeUnlock, VolumePassphraseChange, VolumeSnapshot, VolumeRollback, VolumeAttachRequest, Top,
 } from '@jailops/shared/api/types'
+import type { ApplyRequest, ApplyResult } from '@jailops/shared/api/types'
+import type { RecipeValidateRequest, RecipeValidateResult } from '../types'
 import type { SnapshotBody, ExecSessionInfo, ConfigResult } from '../types'
 import type { JailFileStat, JailFileCopy } from '@jailops/shared/api/types'
 import { logQuery, type LogQuery } from '@/lib/logs'
@@ -75,7 +76,7 @@ export const api = {
     action: (n: string, a: JailAction) => c().mutate('PUT', `/jails/${e(n)}/state`, a),
     /** A merge patch of the labels only (admin in the project): a value sets a key, null removes it, the rest stays. */
     patchLabels: (n: string, labels: Record<string, string | null>) => c().mutate<Jail>('PATCH', `/jails/${e(n)}`, { metadata: { labels } }),
-    /** Async: the jail and its snapshots are destroyed; the volumes it attached stay (an installed app is uninstalled this way). */
+    /** Async: the jail and its snapshots are destroyed; the volumes it attached stay. */
     remove: (n: string) => c().mutate('DELETE', `/jails/${e(n)}`),
     snapshots: (n: string) => c().list<JailSnapshot>(`/jails/${e(n)}/snapshots`),
     snapshot: (n: string, b: SnapshotBody) => c().mutate('POST', `/jails/${e(n)}/snapshots`, b),
@@ -102,13 +103,6 @@ export const api = {
     snapshot: (n: string, b: { metadata: { name?: string }; spec: { volume: string; comment?: string } }) => c().mutate('POST', `/volumes/${e(n)}/snapshots`, b),
     removeSnapshot: (n: string, snap: string) => c().mutate('DELETE', `/volumes/${e(n)}/snapshots/${e(snap)}`),
     rollback: (n: string, b: VolumeRollback) => c().mutate<Volume>('POST', `/volumes/${e(n)}/rollback`, b),
-  },
-  apps: {
-    /** Extension apps: the catalog is readable by any identity, it belongs to no project. */
-    list: () => c().list<AppSummary>('/apps'),
-    get: (n: string) => c().get<AppDetail>(`/apps/${e(n)}`),
-    /** Extension app_install: async, operator in the project. The project travels in the query like every project request. */
-    install: (n: string, b: AppInstall, project: string) => c().mutate<AppInstallResult>('POST', `/apps/${e(n)}/install${project ? `?project=${e(project)}` : ''}`, b),
   },
   host: {
     /** Extension host_identity: the values read from the host and the management state (readable when not managed). */
@@ -175,13 +169,6 @@ export const api = {
       const qs = q.toString()
       return c().upload<JailImported>(`/jail-imports${qs ? '?' + qs : ''}`, file, 'application/vnd.jailops.export')
     },
-  },
-  appAccess: {
-    /** Extension app_access: who may connect to an installed app (readonly in the project). */
-    get: (n: string) => c().get<AppAccess>(`/jails/${e(n)}/access`),
-    /** Operator in the project; answered at once, not as an operation: a connection string is in this answer only. */
-    allow: (n: string, b: AppAllow) => c().mutate<AppAllowResult>('POST', `/jails/${e(n)}/access/allow`, b),
-    deny: (n: string, b: AppDeny) => c().mutate<AppDenyResult>('POST', `/jails/${e(n)}/access/deny`, b),
   },
   logs: {
     /** Extension jail_logs: the files below /var/log of the jail (operator in the project). */
@@ -308,6 +295,12 @@ export const api = {
     check: (b: UpdateCheckRequest) => c().mutate<UpdateReport[]>('POST', '/updates/check', b),
     apply: (b: UpdateApplyRequest) => c().mutate<UpdateRecord[]>('POST', '/updates/apply', b),
     history: (n: string) => c().list<UpdateRecord>(`/jails/${e(n)}/updates`),
+  },
+  /** Extensions jail_apply and recipe_validate: a recipe the console has rendered (operator). Validate needs no jail and
+   *  answers at once; apply is an operation whose metadata is the result per step, and a dry run changes nothing. */
+  recipes: {
+    validate: (b: RecipeValidateRequest) => c().mutate<RecipeValidateResult>('POST', '/recipes/validate', b),
+    apply: (n: string, b: ApplyRequest) => c().mutate<ApplyResult>('POST', `/jails/${e(n)}/apply`, b),
   },
   /** Extension jail_files: a file of a running jail, to and from the browser (operator in the project). */
   files: {

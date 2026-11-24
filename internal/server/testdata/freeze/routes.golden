@@ -26,8 +26,6 @@ DELETE /api/v1/volumes/{name}/snapshots/{snapshot}
 DELETE /api/v1/wireguard/{name}
 DELETE /api/v1/wireguard/{name}/peers/{peer}
 GET /api/v1
-GET /api/v1/apps
-GET /api/v1/apps/{name}
 GET /api/v1/audit
 GET /api/v1/auth/session
 GET /api/v1/backup-policies
@@ -59,8 +57,6 @@ GET /api/v1/images/{name}/generations
 GET /api/v1/images/{name}/generations/{gen}
 GET /api/v1/jails
 GET /api/v1/jails/{name}
-GET /api/v1/jails/{name}/access
-GET /api/v1/jails/{name}/app-draft
 GET /api/v1/jails/{name}/audit
 GET /api/v1/jails/{name}/base
 GET /api/v1/jails/{name}/console/{id}/output
@@ -124,7 +120,6 @@ PATCH /api/v1/storage/{name}
 PATCH /api/v1/users/{name}
 PATCH /api/v1/volumes/{name}
 PATCH /api/v1/wireguard/{name}
-POST /api/v1/apps/{name}/install
 POST /api/v1/auth/login
 POST /api/v1/auth/logout
 POST /api/v1/auth/password
@@ -158,8 +153,6 @@ POST /api/v1/images/{name}/rename
 POST /api/v1/images/{name}/upgrade
 POST /api/v1/jail-imports
 POST /api/v1/jails
-POST /api/v1/jails/{name}/access/allow
-POST /api/v1/jails/{name}/access/deny
 POST /api/v1/jails/{name}/apply
 POST /api/v1/jails/{name}/config
 POST /api/v1/jails/{name}/console
@@ -182,6 +175,7 @@ POST /api/v1/profiles
 POST /api/v1/profiles/{name}/rename
 POST /api/v1/projects
 POST /api/v1/projects/{name}/rename
+POST /api/v1/recipes/validate
 POST /api/v1/remotes
 POST /api/v1/restores
 POST /api/v1/setup

@@ -149,3 +149,21 @@ func TestPkgBaseBuildWritesTheChosenKeys(t *testing.T) {
 	}
 	t.Fatal("no write-repo-conf step")
 }
+
+// A new image has sysrc: in FreeBSD-bsdconfig on 15 (the minimal jail set lacks it), in FreeBSD-rc on 16 (the set holds it).
+func TestDefaultSetsHaveSysrc(t *testing.T) {
+	has := func(release string) bool {
+		for _, s := range (PkgBase{}).sets(api.ImageSpec{Release: release}) {
+			if s == "FreeBSD-bsdconfig" {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("15.1-RELEASE") || !has("15.2-STABLE") {
+		t.Error("a 15 image has no FreeBSD-bsdconfig, so no sysrc")
+	}
+	if has("16.0-CURRENT") {
+		t.Error("a 16 image names FreeBSD-bsdconfig: sysrc is in FreeBSD-rc, which the minimal jail set holds")
+	}
+}

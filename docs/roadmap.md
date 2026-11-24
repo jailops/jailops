@@ -8,7 +8,7 @@ says it should, and a release only claims what has run on a host ([CHANGELOG.md]
 1.0 is standalone hosts, the hub and the Git fleet, with the API and the stored state promised in [1.0.md](1.0.md): a frozen
 API surface, in-place upgrades that keep what a host holds, the FreeBSD releases of
 [supported-versions.md](supported-versions.md), and the release gates. It does not contain a cluster, a move of a jail to
-another host or automatic failover.
+another host as one command or automatic failover, and none of them is planned (see below).
 
 ## Long-term roadmap
 
@@ -28,14 +28,18 @@ After 1.0, in this order. The order matters more than the dates, and there are n
    and `jailops monitor` to follow what happens.
 4. **One console for every host.** From the console of one host (the hub) see and manage the jails, projects, images and updates
    of all the hosts it knows, and run the move of item 1 from there.
-5. **A cluster for a bounded set of logical metadata, when the need is confirmed.** Cluster mode is an additive mode beside
-   standalone (design section 11): projects, policies, address sets, users and tokens replicated by a log, three nodes, no
-   promise of failover. It needs the separations of design section 11.2 first, a routing domain with one writer
-   ([networking.md](networking.md#networks-belong-to-a-host)) where hosts share address space, and join, leave, schema
-   versions, mixed-version upgrades and quorum-loss recovery as a new contract.
-6. **Automatic failover, last and only with fencing.** Promoting a replica without a person needs a rule for who may promote,
-   a way to be sure the old host is down (fencing of execution, routing and storage), and a way back. No stateful jail is ever
-   promoted automatically without all three ([design.md](design.md), section 8.6).
+
+## Not planned
+
+JailOps provides the primitives, not the orchestration: **centralized management, independent hosts.** Each host stands on its own, and the Git
+fleet ([fleet-sync.md](fleet-sync.md)) holds the definition they share. Therefore, and by decision, these are not on the roadmap:
+
+- **Cluster mode** (a replicated log of metadata, quorum, join and leave).
+- **Automatic failover** and any automatic placement or scheduling of jails.
+- **Distributed state** between hosts.
+
+Moving a service to another host is done by the administrator with the building blocks that exist (snapshots, replication, `jail export` and
+`jail import`, recipes, Sync), with a decision about the data and the downtime in each case.
 
 ## With FreeBSD 16
 

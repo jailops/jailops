@@ -40,7 +40,6 @@ const projectChoice = computed({
   set: (v: string) => { f.all = v === '*'; f.project = v === '*' ? '' : v },
 })
 const jailNames = computed(() => [...new Set(jails.value.map((j) => j.metadata.name))].sort())
-const appNames = computed(() => [...new Set(jails.value.map((j) => j.metadata.labels?.['jailops.app']).filter((x): x is string => !!x))].sort())
 // the jails of the lines, with their colour: a legend that also names what the colours mean
 const legend = computed(() => [...new Set(st.value.lines.map((l) => sourceLabel(l, f.all)))].sort())
 const hueOf = (label: string) => jailHue(label.split('/')[f.all ? 1 : 0])
@@ -137,7 +136,7 @@ watch(follow, (on) => {
     timer = setInterval(() => void poll(), UNIFIED_FOLLOW_MS)
   }
 })
-watch(() => [f.all, f.project], () => { f.jails = []; f.app = ''; void loadJails() })
+watch(() => [f.all, f.project], () => { f.jails = []; void loadJails() })
 watch(f, () => {
   void router.replace({ query: { ...(route.query.tab ? { tab: route.query.tab } : {}), ...filterToQuery(f, projectState.current) } })
   void read()
@@ -169,8 +168,6 @@ onBeforeUnmount(() => {
               <option v-for="p in projectState.projects" :key="p.metadata.name" :value="p.metadata.name">{{ p.metadata.name }}</option>
               <option v-if="f.project && !projectState.projects.some((p) => p.metadata.name === f.project)" :value="f.project">{{ f.project }}</option>
             </select></div>
-          <div class="ul-ctl"><label for="ul-app">{{ s.ulogs.app }}</label>
-            <select id="ul-app" v-model="f.app" data-test="ul-app"><option value="">{{ s.ulogs.anyApp }}</option><option v-for="a in appNames" :key="a" :value="a">{{ a }}</option></select></div>
           <div class="ul-ctl"><label for="ul-since">{{ s.ulogs.since }}</label>
             <select id="ul-since" v-model="f.since" data-test="ul-since"><option v-for="x in UNIFIED_SINCE" :key="x" :value="x">{{ s.ulogs.sinceOpt[x] }}</option></select></div>
           <div class="ul-ctl ulogs-file"><label for="ul-file">{{ s.ulogs.file }}</label>
@@ -184,7 +181,6 @@ onBeforeUnmount(() => {
           <button v-for="n in jailNames" :key="n" type="button" class="lchip lchip-btn" :style="{ '--h': jailHue(n) }" :aria-pressed="f.jails.includes(n)" :data-jail="n" @click="toggleJail(n)">{{ n }}</button>
           <span class="hint">{{ s.ulogs.jailsHint }}</span>
         </fieldset>
-        <label class="check"><input v-model="f.appLogs" type="checkbox" data-test="ul-app-logs" />{{ s.ulogs.appLogs }}</label>
       </form>
 
       <section class="panel ulogs-viewer" aria-labelledby="ul-view-h">

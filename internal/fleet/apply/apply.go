@@ -20,7 +20,6 @@ import (
 	"strings"
 
 	"jailops.net/jailops/internal/fleet/applylog"
-	"jailops.net/jailops/internal/fleet/model"
 	"jailops.net/jailops/internal/fleet/plan"
 	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
@@ -46,6 +45,8 @@ type Outcome struct {
 // Result of an apply.
 type Result struct {
 	Outcomes []Outcome
+	// Recipes are the outcomes of the recipes, in the order they ran.
+	Recipes []RecipeOutcome
 }
 
 // Failed returns the failed outcomes.
@@ -143,20 +144,6 @@ func Run(ctx context.Context, s *plan.Session, p *plan.Plan, opt Options) (Resul
 			if err := ctx.Err(); err != nil {
 				return res, err
 			}
-			if ch, ok := it.Spec.(plan.AppChange); ok {
-				once, err := applyApp(ctx, s, it, ch)
-				if err != nil {
-					res.add(opt, it, "failed", err)
-					stopped = true
-					continue
-				}
-				res.add(opt, it, "ok", nil)
-				for _, l := range once {
-					// to the person running sync only: never to the apply log
-					fmt.Fprintln(opt.Out, l)
-				}
-				continue
-			}
 			if err := applyItem(ctx, s, it, me); err != nil {
 				res.add(opt, it, "failed", err)
 				stopped = true
@@ -185,12 +172,17 @@ func Run(ctx context.Context, s *plan.Session, p *plan.Plan, opt Options) (Resul
 			res.add(opt, post, "ok", nil)
 		}
 	}
+	applyRecipes(ctx, s, p, opt, &res)
 	failed := res.Failed()
-	opt.Log.Write(applylog.KindApplyEnd, map[string]any{"fleet": p.FleetID, "summary": p.Summary(), "failed": len(failed)})
-	if len(failed) > 0 {
+	failedRecipes := res.FailedRecipes()
+	opt.Log.Write(applylog.KindApplyEnd, map[string]any{"fleet": p.FleetID, "summary": p.Summary(), "failed": len(failed) + len(failedRecipes)})
+	if len(failed)+len(failedRecipes) > 0 {
 		var errs []error
 		for _, f := range failed {
 			errs = append(errs, fmt.Errorf("%s %s on %s (%s): %w", f.Item.Kind, f.Item.Name, f.Item.Host, f.Item.Action, f.Err))
+		}
+		for _, f := range failedRecipes {
+			errs = append(errs, fmt.Errorf("recipe %s on %s: %w", f.Item.Ref(), f.Item.Host, f.Err))
 		}
 		return res, errors.Join(errs...)
 	}
@@ -258,6 +250,7 @@ func applyItem(ctx context.Context, s *plan.Session, it plan.Item, me string) er
 		}
 		meta := it.Meta
 		meta.UUID = "" // the server keeps the identity it assigned
+		meta.Labels = keepRecipeLabels(meta.Labels, live.Meta.Labels)
 		if err := ad.Update(ctx, c, meta, it.Spec, etag); err != nil {
 			return err
 		}
@@ -307,101 +300,18 @@ func buildImage(ctx context.Context, c *sdk.Client, name string) error {
 	return nil
 }
 
-// afterCreate runs a new jail's start flag and typed hooks, in order.
+// afterCreate starts a new jail that is declared with start: true. It is the only start sync ever does: a jail that exists
+// and was stopped is never started again.
 func afterCreate(ctx context.Context, c *sdk.Client, it plan.Item) error {
-	o := it.Desired
-	run := func(what string, op *sdk.Operation[api.Jail], err error) error {
-		if err == nil {
-			_, err = op.Wait(ctx)
-		}
-		if err != nil {
-			return fmt.Errorf("jail created, but %s failed: %w", what, err)
-		}
+	if !it.Desired.Start {
 		return nil
 	}
-	if o.Start {
-		op, err := c.Jails().Start(ctx, it.Name)
-		if err := run("start", op, err); err != nil {
-			return err
-		}
+	op, err := c.Jails().Start(ctx, it.Name)
+	if err == nil {
+		_, err = op.Wait(ctx)
 	}
-	for i, h := range o.After {
-		what := fmt.Sprintf("hook %d (%s)", i, h.Action)
-		switch h.Action {
-		case model.HookStart:
-			op, err := c.Jails().Start(ctx, it.Name)
-			if err := run(what, op, err); err != nil {
-				return err
-			}
-		case model.HookRestart:
-			op, err := c.Jails().Restart(ctx, it.Name)
-			if err := run(what, op, err); err != nil {
-				return err
-			}
-		case model.HookSnapshot:
-			op, err := c.Jails().Snapshots(it.Name).Create(ctx, h.Name, "created by jailops-sync")
-			if err == nil {
-				_, err = op.Wait(ctx)
-			}
-			if err != nil {
-				return fmt.Errorf("jail created, but %s failed: %w", what, err)
-			}
-		case model.HookExec:
-			// Typed argv, never a shell.
-			sess, err := c.Jails().Exec(ctx, it.Name, h.Argv, sdk.ExecOptions{})
-			if err != nil {
-				return fmt.Errorf("jail created, but %s failed: %w", what, err)
-			}
-			code, err := sess.Run(nil, nil, nil)
-			if err == nil && code != 0 {
-				err = fmt.Errorf("exit status %d", code)
-			}
-			if err != nil {
-				return fmt.Errorf("jail created, but %s failed: %w", what, err)
-			}
-		}
+	if err != nil {
+		return fmt.Errorf("jail created, but start failed: %w", err)
 	}
 	return nil
-}
-
-// applyApp installs an app or changes who may reach it. The lines it returns
-// are for the person running sync and nothing else: a connection string with
-// the password of a new database role, which the host keeps nowhere and sync
-// writes nowhere.
-func applyApp(ctx context.Context, s *plan.Session, it plan.Item, ch plan.AppChange) ([]string, error) {
-	c, err := s.Client(ctx, it.Host)
-	if err != nil {
-		return nil, err
-	}
-	c = c.Project(it.Project)
-	switch {
-	case ch.Install != nil:
-		op, err := c.Apps().Install(ctx, ch.App, *ch.Install)
-		if err == nil {
-			_, err = op.Wait(ctx)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("install app %s as jail %s: %w", ch.App, ch.Jail, err)
-		}
-		return nil, nil
-	case ch.Allow != nil:
-		allow := *ch.Allow
-		allow.Rotate, allow.DryRun = false, false // re-applying never makes a new password
-		r, err := c.Apps().Allow(ctx, ch.Jail, allow)
-		if err != nil {
-			return nil, err
-		}
-		if r.ConnectionString == "" {
-			return nil, nil
-		}
-		return []string{
-			fmt.Sprintf("    connection string for %s on %s/%s (shown once, stored nowhere; `jailops app allow %s --from %s --rotate` makes a new one):",
-				allow.Source, it.Project, ch.Jail, ch.Jail, allow.Source),
-			"      " + r.ConnectionString,
-		}, nil
-	case ch.Deny != nil:
-		_, err := c.Apps().Deny(ctx, ch.Jail, *ch.Deny)
-		return nil, err
-	}
-	return nil, fmt.Errorf("nothing to do for %s", it.Ref())
 }

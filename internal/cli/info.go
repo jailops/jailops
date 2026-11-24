@@ -196,7 +196,7 @@ as structured data.`,
 }
 
 // infoPolicy is a firewall policy of a jail; Source says where it comes from when it is not the jail's own: "project"
-// for a mandatory policy of the project, "managed" for the policy app access keeps.
+// for a mandatory policy of the project.
 type infoPolicy struct {
 	Name   string `json:"name"`
 	Source string `json:"source,omitempty"`
@@ -290,10 +290,6 @@ func (a *app) gatherJailInfo(ctx context.Context, c *sdk.Client, j api.Jail) jai
 		for _, n := range pr.Spec.FirewallPolicies {
 			info.FirewallPolicies = append(info.FirewallPolicies, infoPolicy{Name: n, Source: "project"})
 		}
-	}
-	// an app's jail has the policy that app access keeps for it
-	if p, err := c.Firewall().Policies().Get(ctx, "app-"+m.Name); err == nil && p.Metadata.ManagedBy != "" {
-		info.FirewallPolicies = append(info.FirewallPolicies, infoPolicy{Name: p.Metadata.Name, Source: "managed"})
 	}
 	for _, n := range s.Firewall.Policies {
 		info.FirewallPolicies = append(info.FirewallPolicies, infoPolicy{Name: n})

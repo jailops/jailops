@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path"
 	"slices"
-	"strings"
 	"time"
 
 	"jailops.net/jailops/internal/logfwd"
@@ -18,8 +17,8 @@ var _ logfwd.Reader = LogReader(nil)
 
 // logJailRef is a jail whose logs a unified read or the forwarder takes.
 type logJailRef struct {
-	key, project, name, app string
-	labels                  map[string]string
+	key, project, name string
+	labels             map[string]string
 }
 
 // logJails lists the registry's jails that keep returns true for, sorted by key.
@@ -30,53 +29,13 @@ func (s *Service) logJails(keep func(project string) bool) []logJailRef {
 	for _, k := range sortedKeys(s.jails) {
 		m := s.jails[k].jail.Metadata
 		if keep(m.Project) {
-			out = append(out, logJailRef{key: k, project: m.Project, name: m.Name, app: m.Labels[api.LabelApp], labels: m.Labels})
+			out = append(out, logJailRef{key: k, project: m.Project, name: m.Name, labels: m.Labels})
 		}
 	}
 	return out
 }
 
-// appLogFiles are the files below /var/log that the app of a jail declares,
-// as names relative to /var/log. A declared directory stands for the active
-// files in it, which needs the jail's root mounted; paths elsewhere (below
-// /var/db or /usr/local) are not readable through the helper and left out.
-func (s *Service) appLogFiles(ctx context.Context, key, app string) []string {
-	if app == "" {
-		return nil
-	}
-	e, ok, err := s.findApp(app)
-	if err != nil || !ok || e.Err != nil {
-		return nil
-	}
-	var listing []api.JailLogFile
-	listed := false
-	var out []string
-	for _, l := range e.App.Logs {
-		rel, ok := strings.CutPrefix(l.Path, "/var/log/")
-		if !ok || api.ValidLogFileName(rel) != nil {
-			continue
-		}
-		if !listed {
-			listed = true
-			listing, _, _ = s.d.Logs.ListLogs(ctx, JailLogDir(s.rootMount(key)))
-		}
-		dir := false
-		for _, f := range listing {
-			if strings.HasPrefix(f.Name, rel+"/") && f.Kind == api.JailLogActive {
-				dir = true
-				out = append(out, f.Name)
-			}
-		}
-		if !dir {
-			out = append(out, rel)
-		}
-	}
-	slices.Sort(out)
-	return slices.Compact(out)
-}
-
-// ReadLogs reads the end of one file (default messages, plus the logs of
-// installed apps with q.AppLogs) of every selected jail of the request's
+// ReadLogs reads the end of one file (default messages) of every selected jail of the request's
 // project, or of every project the caller may use when the request names
 // none, and merges the lines by time. At most api.MaxLogSources files are
 // read, each at most api.MaxLogReadBytes from its end (or from the offset
@@ -104,20 +63,10 @@ func (s *Service) ReadLogs(ctx context.Context, q api.LogsQuery) (api.LogsRead, 
 	}
 	var srcs []src
 	for _, j := range jails {
-		if (len(q.Jails) > 0 && !slices.Contains(q.Jails, j.name)) || !MatchLabels(j.labels, q.Labels) || (q.App != "" && j.app != q.App) {
+		if (len(q.Jails) > 0 && !slices.Contains(q.Jails, j.name)) || !MatchLabels(j.labels, q.Labels) {
 			continue
 		}
-		files := []string{q.File}
-		if q.AppLogs {
-			files = append(files, s.appLogFiles(ctx, j.key, j.app)...)
-		}
-		seen := map[string]bool{}
-		for _, f := range files {
-			if !seen[f] {
-				seen[f] = true
-				srcs = append(srcs, src{j, f})
-			}
-		}
+		srcs = append(srcs, src{j, q.File})
 	}
 	if len(srcs) > api.MaxLogSources {
 		srcs, out.Truncated = srcs[:api.MaxLogSources], true
@@ -126,7 +75,7 @@ func (s *Service) ReadLogs(ctx context.Context, q api.LogsQuery) (api.LogsRead, 
 	var merged []api.LogSourceLines
 	for _, sr := range srcs {
 		key := api.LogSourceKey(sr.j.project, sr.j.name, sr.file)
-		ls := api.LogSource{Key: key, Project: sr.j.project, Jail: sr.j.name, App: sr.j.app, File: sr.file}
+		ls := api.LogSource{Key: key, Project: sr.j.project, Jail: sr.j.name, File: sr.file}
 		offset := q.Cursor[key]
 		data, start, size, err := s.d.Logs.TailFile(ctx, path.Join(JailLogDir(s.rootMount(sr.j.key)), sr.file), offset, api.MaxLogReadBytes)
 		if err != nil {
@@ -148,7 +97,7 @@ func (s *Service) ReadLogs(ctx context.Context, q api.LogsQuery) (api.LogsRead, 
 		for i, l := range r.Lines {
 			lines[i] = l.Text
 		}
-		merged = append(merged, api.LogSourceLines{Project: sr.j.project, Jail: sr.j.name, App: sr.j.app, File: sr.file, Lines: lines})
+		merged = append(merged, api.LogSourceLines{Project: sr.j.project, Jail: sr.j.name, File: sr.file, Lines: lines})
 	}
 	var cut bool
 	out.Lines, cut = api.MergeLogs(merged, api.MaxLogMergedLines, now)
@@ -161,7 +110,7 @@ func (s *Service) ReadLogs(ctx context.Context, q api.LogsQuery) (api.LogsRead, 
 // within logAuditWindow: a follower asks every two seconds.
 func (s *Service) auditUnified(ctx context.Context, q api.LogsQuery, sources int) {
 	a := ActorFrom(ctx)
-	sel := fmt.Sprintf("project=%q jails=%v labels=%v app=%q file=%s app_logs=%v", ProjectFrom(ctx), q.Jails, q.Labels, q.App, q.File, q.AppLogs)
+	sel := fmt.Sprintf("project=%q jails=%v labels=%v file=%s", ProjectFrom(ctx), q.Jails, q.Labels, q.File)
 	id := a.Kind + ":" + a.Name + "|unified|" + sel
 	if !s.logAud.due(id, s.now()) {
 		return

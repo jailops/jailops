@@ -4,8 +4,10 @@ import (
 	"archive/tar"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -403,5 +405,101 @@ func TestCreateByteLimit(t *testing.T) {
 	write(t, filepath.Join(src, "f"), strings.Repeat("x", 5000), 0o644)
 	if _, err := Create(sr, "f", "", io.Discard, CreateOpts{Limits: Limits{MaxBytes: 100}}); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestChownFailedIsReturnedExceptForANonRoot(t *testing.T) {
+	if chownFailed(nil) {
+		t.Fatal("no error is a failure")
+	}
+	if !chownFailed(syscall.EIO) {
+		t.Fatal("an I/O error was ignored")
+	}
+	if got, want := chownFailed(syscall.EPERM), os.Geteuid() == 0; got != want {
+		t.Fatalf("EPERM: %v, want %v", got, want)
+	}
+}
+
+// names of the files in dir
+func names(t *testing.T, dir string) []string {
+	t.Helper()
+	es, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range es {
+		out = append(out, e.Name())
+	}
+	return out
+}
+
+// An ordinary failure of a write (the body is shorter than its header says) removes the temporary file at once and leaves
+// the file that was there.
+func TestAFailedWriteRemovesItsTemporaryFileAtOnce(t *testing.T) {
+	d, r := root(t)
+	write(t, filepath.Join(d, "a.conf"), "old\n", 0o644)
+	var b bytes.Buffer
+	tw := tar.NewWriter(&b)
+	tw.WriteHeader(&tar.Header{Name: "a.conf", Mode: 0o600, Size: 100, Typeflag: tar.TypeReg})
+	tw.Write([]byte("short"))
+	// no tw.Close: the stream ends in the middle of the body
+	if _, err := Extract(r, &b, ExtractOpts{}); err == nil {
+		t.Fatal("a damaged archive was accepted")
+	}
+	if got := names(t, d); len(got) != 1 || got[0] != "a.conf" || read(t, filepath.Join(d, "a.conf")) != "old\n" {
+		t.Fatalf("after the failure: %v", got)
+	}
+}
+
+// A writer that was killed leaves its temporary file: exclusive and 0600, owned by the writer. The next write in the same
+// directory removes it, and only it: not a file of another name, not a directory, not the file of a writer that lives.
+func TestALeftoverOfAKilledWriterIsSweptAtTheNextWrite(t *testing.T) {
+	d, r := root(t)
+	// a process that is gone: its id is not in use
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	dead := cmd.ProcessState.Pid()
+	left := fmt.Sprintf(".jailops-cp-%d-1700000000000000000-0", dead)
+	fi, err := os.OpenFile(filepath.Join(d, left), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi.WriteString("half of a secret")
+	fi.Close()
+	// what must stay
+	keep := []string{
+		".jailops-cp-notapid",                          // another name
+		".jailops-cp-1-1700000000000000000-0",          // pid 1 lives: another writer
+		fmt.Sprintf(".jailops-cp-%d-1-0", os.Getpid()), // this writer
+		"user-file",
+	}
+	for _, k := range keep {
+		write(t, filepath.Join(d, k), "x", 0o600)
+	}
+	if err := os.Mkdir(filepath.Join(d, fmt.Sprintf(".jailops-cp-%d-2-0", dead)), 0o700); err != nil { // a directory is not a temporary file
+		t.Fatal(err)
+	}
+	// before the sweep: the leftover is there, 0600 and ours
+	st, err := os.Lstat(filepath.Join(d, left))
+	if err != nil || st.Mode().Perm() != 0o600 || !st.Mode().IsRegular() {
+		t.Fatalf("the leftover before the sweep: %v %v", st, err)
+	}
+	if sys, ok := st.Sys().(*syscall.Stat_t); !ok || int(sys.Uid) != os.Geteuid() {
+		t.Fatalf("the owner of the leftover: %+v", st.Sys())
+	}
+	// the next write in the directory
+	if _, err := Extract(r, archive(t, &tar.Header{Name: "new.conf", Mode: 0o644, Typeflag: tar.TypeReg}, "new\n"), ExtractOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(d, left)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the leftover is still there: %v", err)
+	}
+	for _, k := range append(keep, "new.conf", fmt.Sprintf(".jailops-cp-%d-2-0", dead)) {
+		if _, err := os.Lstat(filepath.Join(d, k)); err != nil {
+			t.Errorf("%s was touched: %v", k, err)
+		}
 	}
 }

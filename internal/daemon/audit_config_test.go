@@ -55,3 +55,16 @@ func TestPruneAuditFollowsTheClock(t *testing.T) {
 		t.Fatalf("%d entries left", len(l))
 	}
 }
+
+// A jailopsd.yaml of 0.9.4 may carry the keys of the removed application logs; the daemon still starts.
+func TestConfigDropsRemovedAppLogKeys(t *testing.T) {
+	for _, v := range []string{"true", "false"} {
+		in := "pool: tank\napps:\n  catalog_dir: /x\nlogging:\n  forward:\n    - name: a\n      type: syslog\n      to: \"tls://h:6514\"\n      sources:\n        no_app_logs: " + v + "\n"
+		if _, err := daemon.Decode(strings.NewReader(in)); err != nil {
+			t.Errorf("no_app_logs %s: %v", v, err)
+		}
+	}
+	if _, err := daemon.Decode(strings.NewReader("pool: tank\nlogging:\n  forward:\n    - name: a\n      type: syslog\n      to: \"tls://h:6514\"\n      sources:\n        bogus: 1\n")); err == nil {
+		t.Error("an unknown key under sources was accepted")
+	}
+}

@@ -11,7 +11,7 @@ head='| ID | A jail admin expects to | Command | Rating | Ref | Step |
 |---|---|---|---|---|---|'
 good_script='row make "make"
 row_pending upgrade "upgrade"
-row_elsewhere apps "apps"'
+row_elsewhere sample "sample"'
 good_roadmap='# Roadmap
 
 ## Gaps found by the workflow walkthrough
@@ -21,7 +21,7 @@ good_roadmap='# Roadmap
 good_table="$head
 | make | make a jail | \`jailops create A\\|B\` | OK | - | make |
 | upgrade | upgrade a jail | none | MISSING | W-upgrade | upgrade |
-| apps | install an app | \`jailops app install\` | OK | - | apps |
+| sample | do a thing | \`jailops sample\` | OK | - | sample |
 | two | do two things | a, then b | MORE STEPS | W-two-steps | - |"
 
 # case NAME WANT-RC WANT-MESSAGE TABLE SCRIPT ROADMAP
@@ -37,13 +37,13 @@ repl() { printf "%s\n" "$1" | sed "s@$2@$3@"; }
 
 run "rows, steps and gaps that agree" 0 "" "$good_table" "$good_script" "$good_roadmap"
 run "an OK row without a step" fail "an OK row needs 'row make'" "$good_table" "row_pending upgrade \"x\"
-row_elsewhere apps \"a\"" "$good_roadmap"
+row_elsewhere sample \"a\"" "$good_roadmap"
 run "an OK row whose step is pending" fail "an OK row needs 'row make'" "$good_table" "row_pending make \"x\"
 row_pending upgrade \"x\"
-row_elsewhere apps \"a\"" "$good_roadmap"
+row_elsewhere sample \"a\"" "$good_roadmap"
 run "a MISSING row without a pending step" fail "a MISSING row needs 'row_pending upgrade'" "$good_table" "row make \"m\"
 row upgrade \"u\"
-row_elsewhere apps \"a\"" "$good_roadmap"
+row_elsewhere sample \"a\"" "$good_roadmap"
 run "a MISSING row without a Ref" fail "needs a Ref W-name" "$(repl "$good_table" 'MISSING | W-upgrade' 'MISSING | -')" "$good_script" "$good_roadmap"
 run "a Ref that is not in the roadmap" fail "W-gone is not an entry" "$(repl "$good_table" 'W-upgrade' 'W-gone')" "$good_script" "$good_roadmap"
 run "a gap of the roadmap that no row names" fail "the gap W-extra is the Ref of no row" "$good_table" "$good_script" "$good_roadmap
@@ -53,7 +53,7 @@ run "a step that has no row" fail "step orphan has no row" "$good_table" "$good_
 row orphan \"o\"" "$good_roadmap"
 run "an ID used twice" fail "the ID is used twice" "$good_table
 | make | again | x | OK | - | make |" "$good_script" "$good_roadmap"
-run "a rating that does not exist" fail "the rating is OK, MORE STEPS or MISSING" "$(repl "$good_table" '| OK | - | apps' '| FINE | - | apps')" "$good_script" "$good_roadmap"
+run "a rating that does not exist" fail "the rating is OK, MORE STEPS or MISSING" "$(repl "$good_table" '| OK | - | sample' '| FINE | - | sample')" "$good_script" "$good_roadmap"
 run "a row with the wrong number of cells" fail "a row needs six cells" "$good_table
 | half | row |" "$good_script" "$good_roadmap"
 run "an ID that is not lowercase words" fail "the ID is lowercase words" "$(repl "$good_table" '| make |' '| Make_It |')" "$good_script" "$good_roadmap"

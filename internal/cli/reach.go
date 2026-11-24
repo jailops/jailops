@@ -308,14 +308,12 @@ func attachHint(jail string) string {
 	return "attach one: jailops firewall policy attach POLICY " + jail
 }
 
-// policyLabel is the name of a policy with where it comes from: the project's mandatory ones and the one that app access
-// keeps are marked, the jail's own are not.
+// policyLabel is the name of a policy with where it comes from: the project's mandatory ones are marked, the jail's own
+// are not.
 func policyLabel(p api.ReachPolicy) string {
 	switch p.Source {
 	case "project":
 		return p.Name + " (project)"
-	case "managed":
-		return p.Name + " (managed)"
 	}
 	return p.Name
 }

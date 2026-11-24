@@ -243,7 +243,7 @@ const imgCheck = useFormCheck(() => {
   const p = imageProblems(imf, imgRun.created.value === imf.name ? [] : img.taken)
   return Object.fromEntries(Object.entries(imgIds).map(([k, id]) => [id, p[k as keyof typeof p] ?? '']))
 })
-/** Whether apps have an image to start from: the Done step's way on depends on it. */
+/** Whether jails have an image to start from: the Done step's way on depends on it. */
 const hasImage = ref(false)
 const imgEditing = computed(() => imgRun.phase.value === 'idle' || (imgRun.phase.value === 'failed' && imgRun.failedAt.value === 'create'))
 async function makeImage(): Promise<void> {
@@ -252,7 +252,7 @@ async function makeImage(): Promise<void> {
     dfDone.value.push(s.setup.madeImage(imf.name, imf.release, imf.auto ? imf.at : ''))
     next()
   } else if (imgRun.created.value) {
-    hasImage.value = true // defined, the build failed or was cancelled: the first install builds it too
+    hasImage.value = true // defined, the build failed or was cancelled: the first jail builds it too
   }
 }
 const imageSubmit = () => (imgEditing.value ? imgCheck.submit(makeImage) : makeImage())
@@ -455,9 +455,8 @@ const nothingToMake = computed(() => have.loaded && !make.storage && !make.proje
           <Callout v-if="!hasImage" tone="warn" data-test="setup-done-no-image">{{ s.setup.doneNoImage }}</Callout>
           <ul v-if="dfDone.length" class="setup-list"><li v-for="d in dfDone" :key="d">{{ d }}</li></ul>
           <div class="row">
-            <router-link v-if="hasImage" class="btn btn-primary" to="/apps" data-test="setup-apps">{{ s.setup.toApps }}</router-link>
-            <router-link v-else class="btn btn-primary" to="/images?create=1" data-test="setup-image-link">{{ s.setup.toImage }}</router-link>
-            <router-link class="btn" to="/" data-test="setup-overview">{{ s.setup.toOverview }}</router-link>
+            <router-link v-if="!hasImage" class="btn btn-primary" to="/images?create=1" data-test="setup-image-link">{{ s.setup.toImage }}</router-link>
+            <router-link class="btn" :class="{ 'btn-primary': hasImage }" to="/" data-test="setup-overview">{{ s.setup.toOverview }}</router-link>
           </div>
         </div>
         <p v-if="skippable(step)" class="faint">{{ s.setup.later }}</p>
