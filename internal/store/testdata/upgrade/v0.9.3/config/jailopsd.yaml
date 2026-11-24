@@ -1,0 +1,163 @@
+# jailopsd.yaml, installed as /usr/local/etc/jailops/jailopsd.yaml
+# Unknown keys are an error. Every uncommented value below is the default except `pool`,
+# which has none and must be set. Commented keys show the optional ones.
+
+hub: false            # true: keep a registry of remotes and forward ?host= requests over pinned mTLS
+
+pool: tank
+# dataset: tank/jailops          # default <pool>/jailops
+# mount_base: /usr/local/jailops
+# state_dir: /var/db/jailops/state   # default <data_dir>/state; outside the storage root, where "jailops-priv init" mounts it
+# data_dir: /var/db/jailops      # SQLite database, seal key, TLS material, operation journal
+# conf_dir: /usr/local/etc/jailops/jails   # must equal conf_dir of jailops-priv
+# work_dir: /var/tmp/jailops
+
+listen:
+  unix:
+    path: /var/run/jailops/jailops.sock
+    mode: 0666                  # safe: only root (uid 0) is recognised on the socket, as the host's recovery access; every
+                                # other local user is anonymous, exactly like an unauthenticated remote client, and signs
+                                # in with a JailOps user, API token or client certificate. Unix users and groups map to nothing.
+  https:
+    address: ""                 # for example ":39110"; empty disables the network listener. Always TLS 1.3; there is no plain-http TCP listener
+    # names: [jail1.example.org, 192.0.2.10]   # extra names of the generated certificate
+    # cert: /etc/ssl/jailops/fullchain.pem     # your certificate (give cert and key together; must exist, never generated over).
+    # key: /etc/ssl/jailops/privkey.pem        # a renewed pair is picked up without a restart (checked at most every 15s)
+    #                                          # default <data_dir>/tls/server.{crt,key}: self-signed, generated on first start
+    # A certificate from a public CA with ACME (docs/exposure.md), obtained and renewed by the daemon; not together
+    # with cert and key. A choice made on the console's Host page (stored in <data_dir>/tls/choice.json) replaces it.
+    acme:
+      enabled: false
+      # email: admin@example.com             # optional contact of the account
+      # domains: [console.example.com]       # DNS names that point at this host; no wildcards (they need dns-01)
+      # directory_url: https://acme-v02.api.letsencrypt.org/directory
+      #                                      # staging, for trying: https://acme-staging-v02.api.letsencrypt.org/directory
+      # challenge: http-01                   # or tls-alpn-01; the host redirects port 80 (or 443) to the daemon
+      # accept_tos: false                    # must be true: you agree to the CA's terms of service
+      # challenge_address: ":39080"          # the plain-http listener of http-01 challenges (it serves nothing else)
+
+web:
+  enabled: false                # true: serve the embedded web console on the listeners (it is always in the binary); the API is the same either way
+
+priv:
+  socket: /var/run/jailops-priv/priv.sock   # the helper's socket; the former /var/run/jailops/priv.sock means this path
+
+log:
+  level: info                   # debug, info, warn, error
+  format: text                  # text (key=value lines for syslog) or json
+
+reconcile:
+  interval: 60s
+  autostart: true               # start jails with boot.autostart on the first pass
+
+zfs:
+  compat_file: ""               # for example openzfs-2.2-freebsd; empty skips the compatibility check
+  # compat_dir: /usr/share/zfs/compatibility.d
+
+limits:
+  max_body_bytes: 4194304
+  request_timeout: 60s
+  # file_copy_bytes: 2147483648  # the most bytes one jailops cp transfer or console upload may carry
+  # exec_sessions_per_jail: 8
+  # exec_idle: 30m
+  # exec_max: 12h
+  # auth_failure_threshold: 5     # failed authentications from one source before it is locked out
+
+# Dedicated networks for `jailops project create NAME --new-network`: each project gets a subnet carved from this pool.
+# Without a pool that option answers "unsupported".
+projects:
+  # network_pool: 10.64.0.0/12    # an IPv4 prefix
+  # network_bits: 24              # size of each project subnet
+  # uplink: em0                   # uplink and NAT of those networks
+  # nat: true
+
+# Managed updates: how often update schedules are evaluated. Updates stay off for a jail until its update mode is set.
+updates:
+  # tick: 1m
+  # project_files_dir: /var/db/jailops/state/project-files   # provisioning files, one directory per project
+
+# What a new FreeBSD jail gets when its request and its profiles do not say (docs/shell.md): the shell started by
+# `jailops shell` and the console, and a coloured prompt: every user's bash, and root's sh, where it applies through a
+# marked block at the end of /root/.shrc (read after ~/.profile). An existing jail gets them only through
+# `jailops jail shell-setup NAME`. Linux jails are left alone.
+jails:
+  # shell: sh            # sh (FreeBSD's own shell; nothing is installed), or bash (installed at the jail's first start)
+  # prompt: default      # default (user@jail [project/host]:dir), short (without the tag), none, or a PS1 text
+  # prompt_color: 39     # 256-colour number of user@jail (39 light blue, 40 green, 196 red: one colour per kind of host)
+  # max_states: 10000    # pf states each pass rule of a jail may create when its resources.states is 0 (0: no limit)
+
+# The application catalog (docs/apps.md): one YAML definition per file, installed by the jailops-apps package. The daemon
+# reads these local files only and never fetches anything; a missing directory is an empty catalog. local_dir holds the
+# host's own definitions (NAME.yaml and its icon), read with the catalog; one of the same name as a packaged one wins.
+# Both must be readable by the user jailops.
+apps:
+  # catalog_dir: /usr/local/share/jailops/apps
+  # local_dir: /usr/local/etc/jailops/apps
+
+# Host management (appliance mode, docs/appliance.md): the parts of the host JailOps itself changes. Empty (the
+# default): JailOps never changes the host, and GET /api/v1/host/identity only reads. "identity" is the host name, the
+# resolvers and NTP; "firewall" is /etc/pf.conf, written whole, and every change of it reverts unless confirmed.
+# priv.conf must list the same modules (host-manage = identity, firewall). jailops_appliance="YES" in /etc/rc.conf adds
+# the modules of jailops_appliance_modules (default all) to this list and to the helper's (docs/appliance.md).
+host:
+  manage:
+    modules: []
+
+# The audit log (docs/security-model.md): once a day the daemon deletes the entries older than the retention and the
+# oldest beyond max_entries. The newest 1000 entries are never deleted.
+audit:
+  retention: 90d        # at least 1d; whole days as "90d", or hours as "2160h"
+  max_entries: 1000000  # at least 1000
+
+# Log forwarding (docs/logging.md): send the jails' logs, and the audit log when asked, to syslog servers (RFC 5424
+# over udp, tcp or tls) or https webhooks. This list is in force until an administrator stores one with
+# 'jailops logs forward' or the console, which then replaces it (delete that with 'jailops logs forward reset').
+# A sink starts at the end of the files: it sends what is written from now on. Files the daemon reads (ca_file,
+# token_file) must be owned by root and not writable by others; the token file 0640 root:jailops. A list stored
+# through the API may name files only directly in secrets_dir, and no receiver on this host or the link-local network.
+logging:
+  secrets_dir: /usr/local/etc/jailops/sinks   # root:jailops 0750
+  forward: []
+  # - name: central
+  #   type: syslog
+  #   to: tls://logs.example.com:6514   # udp://HOST[:514], tcp://HOST[:514] or tls://HOST[:6514]
+  #   facility: local3                  # local0 (default) to local7
+  #   ca_file: /usr/local/etc/jailops/logs-ca.pem   # verify the receiver with this CA; default: the host's roots
+  #   queue: 10000                      # lines held while the receiver is away; the oldest are dropped beyond it
+  #   sources:
+  #     projects: [web]                 # all projects when empty
+  #     jails: []                       # all jails when empty
+  #     labels: {tier: front}           # jails with all of these labels
+  #     exclude_jails: [scratch]
+  #     exclude_labels: {logs: "off"}
+  #     files: [messages]               # below /var/log of every jail (default: messages)
+  #     no_app_logs: false              # true: leave out the logs installed apps declare
+  #     no_jails: false                 # true: no jail logs (with audit: the audit log only)
+  #     audit: false                    # true: add the daemon's audit log
+  # - name: alerts
+  #   type: webhook
+  #   to: https://hooks.example.com/jailops
+  #   token_file: /usr/local/etc/jailops/sinks/hook.token   # the bearer token, first line; never the token itself here
+
+# The kernel's notifications through devd(8): a ZFS error or a pool changing state, the link of the uplink, a resource
+# limit a jail hit. They show as events (`jailops events`, the console's Events page) and
+# `jailops doctor` says whether the daemon can read devd's socket (docs/operations.md).
+devd:
+  enable: true                      # the default is on for FreeBSD; false switches it off
+  pipe: /var/run/devd.seqpacket.pipe
+
+# Host-side backups (docs/backup-restore.md). Absent, every backup call answers "unsupported".
+# backup:
+#   key_path: /var/db/jailops/backup.key
+#   passphrase_file: ""           # wraps the key file; empty relies on the file mode, which unattended schedules need
+#   node:
+#     name: backup1
+#     address: backup1.example.org:39111
+#     fingerprint: ""             # hex SHA-256 of the node's certificate: it is pinned
+#     cert_file: /var/db/jailops/backup-client.crt
+#     key_file: /var/db/jailops/backup-client.key
+#   recovery_recipients: []       # age public keys the backup key is escrowed to
+#   allow_unescrowed: false       # run backups while the key is not escrowed (not recommended)
+#   concurrency: 2
+#   scratch_dir: ""               # where restore tests restore
+#   scratch_dataset: ""
