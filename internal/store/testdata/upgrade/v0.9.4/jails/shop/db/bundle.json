@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "metadata": {
+    "name": "db",
+    "uuid": "22222222-2222-4222-8222-222222222222",
+    "project": "shop",
+    "host": "00000000-0000-4000-8000-0000000000a1",
+    "scope": "host",
+    "generation": 1
+  },
+  "spec": {
+    "image": "freebsd-15-1",
+    "storage": "default",
+    "update": {},
+    "resources": {},
+    "network": [
+      {
+        "network": "lan",
+        "ipv4": "10.77.0.3"
+      }
+    ],
+    "firewall": {
+      "policies": [
+        "floor"
+      ]
+    },
+    "boot": {
+      "autostart": true,
+      "depends": [
+        "web"
+      ]
+    }
+  },
+  "image": {
+    "ref": "freebsd-15-1",
+    "name": "freebsd-15-1#g1",
+    "generation": 1,
+    "manifest": "manifest.json",
+    "dataset": "zroot/jailops/images/freebsd-15-1/g1"
+  },
+  "written_at": "2026-01-02T03:04:05Z"
+}
