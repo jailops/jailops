@@ -332,7 +332,9 @@ func textLines(s string) []string {
 		for _, w := range dashes(strings.Fields(sentence)) {
 			punct, ok := osWord(w)
 			if !ok {
-				seg = append(seg, w)
+				// FreeBSD inside a longer word (FreeBSD's, FreeBSD-base, a package name): mandoc -Tlint asks for the Fx
+				// macro, which cannot be glued to the rest of the word; a zero-width escape inside the name stops the remark
+				seg = append(seg, strings.ReplaceAll(w, "FreeBSD", `Free\&BSD`))
 				continue
 			}
 			out = append(out, wrap(strings.Join(seg, " "))...)

@@ -10,6 +10,10 @@ for m in $(mount -p | awk '$2 ~ /^\/jopsci\// {print $2}' | sort -r); do umount 
 zpool destroy -f jopsci 2>/dev/null; zpool destroy -f jopsfresh 2>/dev/null
 for b in $(ifconfig -l | tr ' ' '\n' | grep -E '^(jo[0-9]+|jo[a-f0-9]{8,}|wg-)'); do ifconfig $b destroy 2>/dev/null; done
 rm -rf /var/db/jailops-priv/wireguard
+# the resolver addresses the helper put on the loopback (its record lists them) stay when it is stopped: the next run's network
+# with the same subnet is refused ("overlaps ... on the host interface lo0")
+for a in $(tr -d '[]"' < /var/db/jailops-priv/host/dns-resolver-addrs.json 2>/dev/null | tr ',' ' '); do ifconfig lo0 inet6 "$a" -alias 2>/dev/null; done
+rm -f /var/db/jailops-priv/host/dns-resolver-addrs.json
 pkg delete -fy jailops jailops-client jailops-backupd >/dev/null 2>&1
 rm -rf /var/tmp/jailops-drill* /usr/local/etc/jailops /usr/local/etc/jailops-fresh /var/db/jailops /var/db/jailops-fresh /var/db/jailops-backup /var/run/jailops /var/run/jailops-backupd /var/tmp/jailops
 # the anchors of an earlier run stay in pf until they are flushed

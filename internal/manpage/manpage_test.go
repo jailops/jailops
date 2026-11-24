@@ -79,7 +79,7 @@ func TestPagesAreCompleteAndDeterministic(t *testing.T) {
 	}
 	exec, _ := os.ReadFile(filepath.Join(dir, "tool-jail-exec.1"))
 	// the operating system's name is the Fx macro, with its punctuation as arguments; "--" is two hyphens
-	for _, want := range []string{".Nm tool jail exec\n.Ar NAME \\-\\- COMMAND [ARG...]\n", ".Sh DESCRIPTION\nA jail is a\n.Fx\njail.\nIt runs on\n.Fx ,\non nothing else (FreeBSD-base is not\n.Fx ) .\nNothing runs after \\-\\- is parsed.\n"} {
+	for _, want := range []string{".Nm tool jail exec\n.Ar NAME \\-\\- COMMAND [ARG...]\n", ".Sh DESCRIPTION\nA jail is a\n.Fx\njail.\nIt runs on\n.Fx ,\non nothing else (Free\\&BSD-base is not\n.Fx ) .\nNothing runs after \\-\\- is parsed.\n"} {
 		if !strings.Contains(string(exec), want) {
 			t.Errorf("tool-jail-exec.1 lacks %q:\n%s", want, exec)
 		}
@@ -133,7 +133,7 @@ func TestSentencesAndWrapping(t *testing.T) {
 	if got := textLines("a\tb\\c"); !reflect.DeepEqual(got, []string{`a b\ec`}) {
 		t.Errorf("tab and backslash: %q", got)
 	}
-	if got := textLines("FreeBSD. On FreeBSD; FreeBSD-base, /usr/FreeBSD, -- and --x"); !reflect.DeepEqual(got, []string{".Fx .", "On", ".Fx ;", `FreeBSD-base, /usr/FreeBSD, \-\- and --x`}) {
+	if got := textLines("FreeBSD. On FreeBSD; FreeBSD-base, /usr/FreeBSD, -- and --x"); !reflect.DeepEqual(got, []string{".Fx .", "On", ".Fx ;", `Free\&BSD-base, /usr/Free\&BSD, \-\- and --x`}) {
 		t.Errorf("Fx and --: %q", got)
 	}
 	if got := literal("  " + strings.Repeat("x", 100)); len(got) != 1 {
