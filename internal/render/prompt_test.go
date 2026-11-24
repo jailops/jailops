@@ -175,7 +175,7 @@ func TestPromptFileIsInertInTheShells(t *testing.T) {
 		if err != nil {
 			continue // the sh part above holds on every system; bash is checked where it is installed
 		}
-		cmd := exec.Command(bash, "--norc", "--noprofile", "-i", "-c", `PS1=x; . "$1"; printf '%s\n' "$PS1"; printf '%s' "${PS1@P}" >/dev/null`, "bash", f)
+		cmd := bashI(t, bash, `PS1=x; . "$1"; printf '%s\n' "$PS1"; printf '%s' "${PS1@P}" >/dev/null`, "bash", f)
 		cmd.Dir = dir
 		out, err = cmd.Output()
 		if err != nil || string(out) != ps1+"\n" {
@@ -185,6 +185,21 @@ func TestPromptFileIsInertInTheShells(t *testing.T) {
 			t.Fatalf("expanding %q ran a command", ps1)
 		}
 	}
+}
+
+// bashI is `bash --norc --noprofile -i -c SCRIPT ARGS...` with its standard error on /dev/null. Without a terminal an interactive
+// bash takes its standard error for the terminal of its job control: on FreeBSD a pipe there (what Output gives it) makes it
+// stop its own process group with SIGTTIN, and the test binary in that group stops with it.
+func bashI(t testing.TB, bash, script string, args ...string) *exec.Cmd {
+	t.Helper()
+	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { null.Close() })
+	cmd := exec.Command(bash, append([]string{"--norc", "--noprofile", "-i", "-c", script}, args...)...)
+	cmd.Stderr = null
+	return cmd
 }
 
 // The escapes CheckPrompt refuses are the ones that do run a command when bash expands the prompt: the check is
@@ -200,9 +215,9 @@ func TestRefusedPromptEscapesWouldRun(t *testing.T) {
 			t.Fatalf("CheckPrompt accepts %q", ps1)
 		}
 		dir := t.TempDir()
-		cmd := exec.Command(bash, "--norc", "--noprofile", "-i", "-c", `PS1=$1; printf '%s' "${PS1@P}" >/dev/null`, "bash", ps1)
+		cmd := bashI(t, bash, `PS1=$1; printf '%s' "${PS1@P}" >/dev/null`, "bash", ps1)
 		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
+		if out, err := cmd.Output(); err != nil {
 			t.Fatalf("%q: %s %v", ps1, out, err)
 		}
 		if _, err := os.Stat(filepath.Join(dir, "MARK")); err != nil {
@@ -236,7 +251,7 @@ func FuzzPromptFile(f *testing.F) {
 		if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command(bash, "--norc", "--noprofile", "-i", "-c", `PS1=x; . "$1"; printf '%s' "$PS1"; printf '%s' "${PS1@P}" >/dev/null`, "bash", file)
+		cmd := bashI(t, bash, `PS1=x; . "$1"; printf '%s' "$PS1"; printf '%s' "${PS1@P}" >/dev/null`, "bash", file)
 		cmd.Dir = dir
 		out, err := cmd.Output()
 		if err != nil || string(out) != exp {
@@ -277,7 +292,7 @@ func TestPromptAsBashShowsIt(t *testing.T) {
 		if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command(bash, "--norc", "--noprofile", "-i", "-c", `PS1=x; . "$1"; cd /tmp; printf '%s' "${PS1@P}"`, "bash", file)
+		cmd := bashI(t, bash, `PS1=x; . "$1"; cd /tmp; printf '%s' "${PS1@P}"`, "bash", file)
 		cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir}, env...)
 		out, err := cmd.Output()
 		if err != nil {

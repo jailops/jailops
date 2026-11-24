@@ -174,16 +174,23 @@ boot() {
 update() {
 	port=${1:-}; key=${2:-}
 	[ -n "$port" ] && [ -r "$key" ] || die "usage: update PORT KEYFILE"
-	if ! out=$(sshq "$port" "$key" 'env IP_VERSION=4 pkg update -f >/dev/null 2>&1 && env ASSUME_ALWAYS_YES=yes pkg upgrade -y 2>&1' 2>&1); then
+	# the base packages of a branch carry a newer __FreeBSD_version than the kernel that runs until the reboot: without IGNORE_OSVERSION
+	# pkg refuses the whole base repository ("packages for wrong OS version") and the VM stays behind its branch
+	if ! out=$(sshq "$port" "$key" 'env IP_VERSION=4 IGNORE_OSVERSION=yes pkg update -f >/dev/null 2>&1 && env ASSUME_ALWAYS_YES=yes IGNORE_OSVERSION=yes pkg upgrade -y 2>&1' 2>&1); then
 		echo "environment: the VM did not update: $(echo "$out" | tail -1) (tested as it is)"; return 0
 	fi
 	# a new kernel runs after a reboot, and the modules of the new one do not load into the old one (pf.ko with it): two snapshots of one
 	# branch have the same version string, so freebsd-version cannot tell; the packages that were upgraded can
 	if printf '%s\n' "$out" | grep -q 'FreeBSD-kernel' ||
 		[ "$(sshq "$port" "$key" 'freebsd-version -k')" != "$(sshq "$port" "$key" 'freebsd-version -r')" ]; then
+		# ssh can answer for a while after the shutdown began: the VM is back when it answers with another boot time
+		boot0=$(sshq "$port" "$key" 'sysctl -n kern.boottime' 2>/dev/null)
 		sshq "$port" "$key" 'shutdown -r now' >/dev/null 2>&1 || true
-		sleep 20 # sleep-ok: the VM has to go down before it can be seen to come back
-		wait_ssh "$port" "$key" 300 || { echo "environment: the VM did not come back after the update within 5 minutes"; return 1; }
+		end=$(( $(date +%s) + 300 ))
+		until b=$(sshq "$port" "$key" 'sysctl -n kern.boottime' 2>/dev/null) && [ -n "$b" ] && [ "$b" != "$boot0" ]; do
+			[ "$(date +%s)" -lt "$end" ] || { echo "environment: the VM did not come back after the update within 5 minutes"; return 1; }
+			sleep 5 # sleep-ok: poll of the VM going down and coming back
+		done
 	fi
 	echo "updated: $(sshq "$port" "$key" 'freebsd-version -kru' | tr '\n' ' ')"
 }

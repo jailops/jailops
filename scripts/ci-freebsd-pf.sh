@@ -954,7 +954,14 @@ $J start r --project pfa </dev/null >/dev/null || die "start r"
 t=0; until jx pfa r true >/dev/null 2>&1; do t=$((t + 1)); [ $t -gt 60 ] && break; sleep 1; done
 R4=$(addr4 pfa r)
 [ -n "$R4" ] || die "r has no address"
-jx pfa r daemon -f nc -k -l "$R4" 8080 || die "nc server in r"
+# A jail shows as running a moment before its network is up: a listener started before it has its address exits at once and
+# never comes back, and a client started before it has its route out fails once and is not tried again. Wait for both, and
+# start the listener again until r listens.
+r_net() { jx pfa r ifconfig 2>/dev/null | grep -q "inet $R4 " && jx pfa r route -n get default >/dev/null 2>&1; }
+waitfor_ "r has its address and its default route" 60 r_net
+r_listens() { jx pfa r sockstat -4 -l -P tcp 2>/dev/null | grep -q ':8080 '; }
+r_try_listen() { r_listens && return 0; jx pfa r daemon -f nc -k -l "$R4" 8080 >/dev/null 2>&1; sleep 1; r_listens; } # sleep-ok: the bind of the listener
+waitfor_ "r listens on 8080" 60 r_try_listen || die "nc server in r"
 settle 10
 fwd_has() { pfctl -a jailops/pfa/r -sr 2>/dev/null | grep -q "$1"; }
 expect allow "r's anchor carries the redirect on the uplink" fwd_has "match in on pfupa inet proto tcp .* port = 18080 rdr-to $R4 port 8080"
