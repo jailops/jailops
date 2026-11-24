@@ -340,12 +340,17 @@ func (s *Service) planThickRollback(ctx context.Context, st *jailState, req Roll
 		Do: func(ctx context.Context) error { return z.Rollback(ctx, rootSnap, len(later) > 0) }})
 	all := st.all()
 	// best effort: the root is restored, so a snapshot that stays is no reason to fail (the retention removes the used
-	// one, it keeps its cleanup mark). A later snapshot the request named goes from every dataset of the jail, as a
-	// jail snapshot is one name across them; any other is not the rollback's to destroy.
-	pl.Add(plan.Step{Name: "drop-snapshots", Describe: "zfs destroy " + strings.Join(append([]string{snap}, laterNames(later)...), ", ") + " on " + strings.Join(all, ", ") + " (used up)",
+	// one, it keeps its cleanup mark). The used snapshot goes from every dataset of the jail (it is one name across
+	// them); a later snapshot the request named goes from the root only, the dataset that was rolled back: a snapshot
+	// of that name on another dataset is not the rollback's to destroy.
+	pl.Add(plan.Step{Name: "drop-snapshots", Describe: "zfs destroy " + snap + " on " + strings.Join(all, ", ") + " (used up)" + laterDropNote(later),
 		Do: func(ctx context.Context) error {
 			for _, d := range all {
-				for _, n := range append([]string{snap}, laterNames(later)...) {
+				names := []string{snap}
+				if d == st.Root {
+					names = append(names, laterNames(later)...)
+				}
+				for _, n := range names {
 					if ok, _ := z.Exists(ctx, d+"@"+n); ok {
 						_ = z.Destroy(ctx, d+"@"+n)
 					}
@@ -354,6 +359,14 @@ func (s *Service) planThickRollback(ctx context.Context, st *jailState, req Roll
 			return nil
 		}})
 	return pl, ur, info, nil
+}
+
+// laterDropNote is the part of the plan line that names the later snapshots the request destroys on the root.
+func laterDropNote(later []string) string {
+	if len(later) == 0 {
+		return ""
+	}
+	return "; " + strings.Join(laterNames(later), ", ") + " on the root"
 }
 
 // laterSnapshots lists the snapshots of ds taken after snap, as ds@name.

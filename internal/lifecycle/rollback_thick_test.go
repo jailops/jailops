@@ -154,12 +154,18 @@ func TestThickRollbackDestroysLaterSnapshotsWhenConfirmed(t *testing.T) {
 	if _, err := w.S.RollbackJail(bg, "alpha_web", opts, false); err != nil {
 		t.Fatal(err)
 	}
+	// the used snapshot is gone from every dataset of the jail; the later one only from the root: the snapshot of that
+	// name on the container is not the rollback's to destroy
 	for _, d := range []string{jc, jc + "/root"} {
-		for _, n := range []string{"later", "jo-pre-upgrade-100"} {
-			if ok, _ := w.Z.Exists(bg, d+"@"+n); ok {
-				t.Errorf("%s@%s left", d, n)
-			}
+		if ok, _ := w.Z.Exists(bg, d+"@jo-pre-upgrade-100"); ok {
+			t.Errorf("%s@jo-pre-upgrade-100 left", d)
 		}
+	}
+	if ok, _ := w.Z.Exists(bg, jc+"/root@later"); ok {
+		t.Errorf("%s/root@later left", jc)
+	}
+	if ok, _ := w.Z.Exists(bg, jc+"@later"); !ok {
+		t.Errorf("%s@later was destroyed with the later snapshot of the root", jc)
 	}
 }
 
