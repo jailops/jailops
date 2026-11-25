@@ -746,5 +746,142 @@
   "name": "two documents",
   "recipe": "steps:\n  - run: [echo]\n---\nsteps:\n  - run: [echo]\n",
   "error": "one document"
+ },
+ {
+  "name": "a requirement: check and message",
+  "recipe": "requirements:\n  - check: [test, -x, /usr/sbin/sshd]\n    message: sshd is not installed in the jail\nsteps:\n  - run: [echo, hello]\n",
+  "want": {
+   "requirements": [
+    {
+     "check": [
+      "test",
+      "-x",
+      "/usr/sbin/sshd"
+     ],
+     "message": "sshd is not installed in the jail"
+    }
+   ],
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "hello"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a requirement takes variables in check and message",
+  "recipe": "vars:\n  bin: {default: /usr/sbin/sshd}\nrequirements:\n  - check: [test, -x, \"${bin}\"]\n    message: \"${bin} is missing, and $${bin} stays\"\nsteps:\n  - run: [echo, hello]\n",
+  "want": {
+   "requirements": [
+    {
+     "check": [
+      "test",
+      "-x",
+      "/usr/sbin/sshd"
+     ],
+     "message": "/usr/sbin/sshd is missing, and ${bin} stays"
+    }
+   ],
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "hello"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a split variable is several words of a check",
+  "recipe": "vars:\n  tools: {default: \"a b\", split: true}\nrequirements:\n  - check: [which, \"${tools}\"]\n    message: tools are missing\nsteps:\n  - run: [echo, hello]\n",
+  "want": {
+   "requirements": [
+    {
+     "check": [
+      "which",
+      "a",
+      "b"
+     ],
+     "message": "tools are missing"
+    }
+   ],
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "hello"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a variable used only in a requirement is used",
+  "recipe": "vars:\n  who: {default: root}\nrequirements:\n  - check: [pw, usershow, \"${who}\"]\n    message: no such user\nsteps:\n  - run: [echo, hello]\n",
+  "want": {
+   "requirements": [
+    {
+     "check": [
+      "pw",
+      "usershow",
+      "root"
+     ],
+     "message": "no such user"
+    }
+   ],
+   "steps": [
+    {
+     "run": [
+      "echo",
+      "hello"
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a secret in the check of a requirement",
+  "recipe": "vars:\n  pw: {secret: true}\nrequirements:\n  - check: [test, \"${pw}\"]\n    message: x\nsteps:\n  - run: [echo, hello]\n",
+  "set_file": {
+   "pw": "correct-horse-battery"
+  },
+  "error": "requirements[0].check[1]: pw is secret"
+ },
+ {
+  "name": "a secret in the message of a requirement",
+  "recipe": "vars:\n  pw: {secret: true}\nrequirements:\n  - check: [/usr/bin/true]\n    message: \"the password is ${pw}\"\nsteps:\n  - run: [echo, hello]\n",
+  "set_file": {
+   "pw": "correct-horse-battery"
+  },
+  "error": "requirements[0].message: pw is secret"
+ },
+ {
+  "name": "an undeclared variable in a requirement",
+  "recipe": "requirements:\n  - check: [/usr/bin/true]\n    message: \"${nope}\"\nsteps:\n  - run: [echo, hello]\n",
+  "error": "requirements[0].message: ${nope} is not declared"
+ },
+ {
+  "name": "a requirement has only check and message",
+  "recipe": "requirements:\n  - check: [/usr/bin/true]\n    message: x\n    when: always\nsteps:\n  - run: [echo, hello]\n",
+  "error": "requirements[0]: unknown field \"when\""
+ },
+ {
+  "name": "requirements are a list",
+  "recipe": "requirements: {check: [/usr/bin/true]}\nsteps:\n  - run: [echo, hello]\n",
+  "error": "requirements: a list of requirements"
+ },
+ {
+  "name": "a requirement is a map",
+  "recipe": "requirements:\n  - [true]\nsteps:\n  - run: [echo, hello]\n",
+  "error": "requirements[0]: a requirement is a map"
+ },
+ {
+  "name": "the check of a requirement is a list of words",
+  "recipe": "requirements:\n  - check: true\n    message: x\nsteps:\n  - run: [echo, hello]\n",
+  "error": "requirements[0].check"
  }
 ]

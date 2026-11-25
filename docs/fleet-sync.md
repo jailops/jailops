@@ -131,6 +131,9 @@ are a different mechanism with the same purpose; sync does not create them, beca
 make the host, not git, the source of truth for every jail that lists it. The effect is the same: a changed repository profile
 shows in `plan` as a change of each jail that lists it. `adopt` tells you when a jail lists host profiles the repository does not know.
 
+A repository profile may also carry `recipes:`, `needs:` and `vars:` (written as on a jail, next to `spec:`), so that every jail that lists the
+profile gets them; see "Recipes in a profile" below.
+
 ## Commands
 
 | Command | Does |
@@ -207,6 +210,16 @@ changed, when you ask (`plan` and `drift` always do), and otherwise at most once
 of a running jail, so a change made by hand is found and put back within that time. Every dry run is an operation of the daemon (`jail.apply` with `dry_run`), pruned by age like all
 operations, which is why a run that is not asked for does not look more than once per interval. The time of the last converged look is a memory in the state directory of sync, not on the jail: if it is lost, the next run looks.
 
+**Requirements.** The `requirements:` of a recipe ([provisioning.md](provisioning.md#2-applying-a-recipe-to-a-jail)) are part of the rendered recipe, so
+they are in its hash: changing one applies the recipe again. The dry run that `plan` and `drift` make does not run them (it lists them as `not checked`)
+and a recipe is not drift because of them. A real apply runs them before the first step; when one is not met the recipe is `failed` with the message
+of the requirement, nothing was changed, no record is written, and the next run tries again, so once the administrator has fixed the jail the recipe applies by itself. Like any failed
+recipe it stops the later recipes of its jail and the jails that need it; the other jails go on.
+
+**Linux jails.** Recipes are for FreeBSD jails. A Linux jail that lists `recipes:`, or gets them from a profile, is left out of the recipe part of `plan`,
+`sync` and `drift` without an error: it has no recipe item, so it is never drift or `unknown`, and nothing is sent to it. `validate` notes it once for each such
+jail (when the file says `os: linux`; a jail whose OS comes from its image is skipped by sync all the same).
+
 **Order and `needs`.** Sync first makes every object of a host (images, networks, policies, volumes, jails), then the recipes, jails in
 the order of `needs` and recipes in list order. A policy rule that names `jail:db` is fine before the jail exists: the API only warns, and it matches
 nobody until then. A jail that is not running **waits** (`waiting: not running`): sync never starts or restarts a jail that exists, `start: true` is
@@ -231,6 +244,22 @@ file the recipe names, and marks the request sensitive: the daemon then keeps no
 
 **Shared values.** `vars:` at the top of a jail file is the shared `--vars` file of its recipes: every recipe that declares the name takes it, the entry's own `vars:` wins,
 and a name that no recipe of the jail declares is an error.
+
+**Recipes in a profile.** A `Profile` may list `recipes:` (with `vars:` and `secrets:` per entry), `needs:` and `vars:` exactly as a jail does. A jail that
+lists the profile in `spec.profiles` gets them: the recipes of its profiles run first, in the order the profiles are listed, then the jail's own;
+`needs:` are added to the jail's; `vars:` are merged in the order of the profiles and the jail's own `vars:` win. The entry's own `vars:` still win
+over all of these. A recipe is checked and hashed as the jail's own, so a changed profile shows in `plan` as a recipe to apply on each jail that lists it.
+A recipe that a profile and the jail both list is an error (a name occurs once per jail). A jail is never its own need, so a profile may say
+`needs: [db]` and also be listed by `db`. A profile's recipes are checked when a jail lists the profile, not before.
+
+    # profiles/hardened.yaml
+    apiVersion: jailops/v1
+    kind: Profile
+    metadata: {name: hardened}
+    recipes:
+      - path: recipes/hardening
+    vars: {banner: managed by sync}
+    spec: {}
 
 **Hand-made jails.** A jail that existed before sync (taken over with `adopt --claim`) has no record for a recipe. The first sync applies the whole recipe, so a file the recipe names is
 **overwritten as a whole** with what the repository says. Read `plan` first. If you change a jail with `jailops jail apply` that sync keeps, the command warns

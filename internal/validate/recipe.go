@@ -20,6 +20,8 @@ var (
 const (
 	// RecipeMaxSteps is the most steps of a recipe.
 	RecipeMaxSteps = 200
+	// RecipeMaxRequirements is the most requirements of a recipe.
+	RecipeMaxRequirements = 50
 	// RecipeFileMax and RecipeTotalMax are the bytes one file and all files of a recipe may carry.
 	RecipeFileMax  = 1 << 20
 	RecipeTotalMax = 8 << 20
@@ -58,6 +60,9 @@ func RecipePathDenied(p string) bool {
 func Recipe(r api.Recipe) error {
 	if len(r.Steps) == 0 || len(r.Steps) > RecipeMaxSteps {
 		return Invalid("steps", "a recipe has between 1 and %d steps", RecipeMaxSteps)
+	}
+	if err := recipeRequirements(r.Requirements); err != nil {
+		return err
 	}
 	total := 0
 	for i, st := range r.Steps {
@@ -232,6 +237,24 @@ func recipeRun(fld string, st api.RecipeStep) error {
 	}
 	if st.Creates != "" {
 		return AbsPath(fld+".creates", st.Creates)
+	}
+	return nil
+}
+
+// recipeRequirements checks the requirements: a check is a command (argv), a message is one non-empty line. Whether the
+// command succeeds is known only inside the jail.
+func recipeRequirements(l []api.RecipeRequirement) error {
+	if len(l) > RecipeMaxRequirements {
+		return Invalid("requirements", "a recipe has at most %d requirements", RecipeMaxRequirements)
+	}
+	for i, q := range l {
+		fld := fmt.Sprintf("requirements[%d]", i)
+		if err := recipeArgv(fld+".check", q.Check); err != nil {
+			return err
+		}
+		if strings.TrimSpace(q.Message) == "" || len(q.Message) > 500 || !utf8.ValidString(q.Message) || strings.ContainsAny(q.Message, "\n\r\x00") {
+			return Invalid(fld+".message", "%s.message: one line of text of at most 500 bytes that tells what is missing", fld)
+		}
 	}
 	return nil
 }

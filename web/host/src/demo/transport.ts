@@ -1437,7 +1437,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           if (j.status.power !== 'running') return startOp(`Apply a recipe to jail ${name}`, { jails: [src] }, 300, () => undefined, undefined, false, { code: 'busy', message: `jail "${name}" is not running; a recipe runs inside it`, hint: 'start it first' })
           const out = recipes.run(name, body.recipe, !apply, !!body.sensitive)
           return 'failure' in out
-            ? startOp(`Apply a recipe to jail ${name}`, { jails: [src] }, 900, () => undefined, undefined, false, { code: 'step_failed', message: out.failure.message, hint: out.failure.hint })
+            ? startOp(`Apply a recipe to jail ${name}`, { jails: [src] }, 900, () => undefined, undefined, false, { code: out.failure.code, message: out.failure.message, hint: out.failure.hint })
             : startOp(`${apply ? 'Apply' : 'Dry run of'} a recipe${apply ? ' to' : ' in'} jail ${name}`, { jails: [src] }, apply ? 1500 : 700, () => undefined, out.result, false)
         }
         if (seg[2] === 'shell-setup' && m === 'POST') {

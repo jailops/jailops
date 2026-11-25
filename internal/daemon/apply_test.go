@@ -677,3 +677,125 @@ func TestApplySensitiveRequestLeaksNothing(t *testing.T) {
 		t.Errorf("without the flag: %v", err)
 	}
 }
+
+func requirementRecipe() api.Recipe {
+	return api.Recipe{
+		Requirements: []api.RecipeRequirement{
+			{Check: []string{"test", "-x", "/usr/sbin/sshd"}, Message: "sshd is not installed in the jail"},
+			{Check: []string{"sysctl", "-n", "kern.ipc.shmmax"}, Message: "shared memory is not usable"},
+		},
+		Steps: []api.RecipeStep{
+			{Package: []string{"nginx"}},
+			{File: &api.RecipeFile{Path: "/usr/local/etc/a.conf", Content: str("a\n")}},
+			{Sysrc: map[string]string{"nginx_enable": "YES"}},
+			{Run: []string{"touch", "/var/db/marker"}},
+		},
+	}
+}
+
+// Every requirement is checked before the first step. One that is not met ends the apply with requirement_failed that
+// names it and the exit status of its check: no step ran and nothing in the jail changed. Once the jail meets the
+// requirement the same recipe applies, and the result lists the requirements as met.
+func TestApplyRequirementNotMetStopsBeforeAnyStep(t *testing.T) {
+	e, aj := applyEnv(t)
+	c := e.Client(api.PermOperator)
+	root := e.JailRootDir("alpha", "web")
+	aj.failOn = "sshd"
+	_, err := applyOp(t, c, requirementRecipe(), false)
+	var ae *api.Error
+	if !errors.As(err, &ae) || ae.Code != api.CodeRequirementFailed || !strings.Contains(ae.Message, "sshd is not installed in the jail") || !strings.Contains(ae.Message, "status 1") || strings.Contains(ae.Message, "\n") {
+		t.Fatalf("the error does not name the requirement and the status: %v", err)
+	}
+	if strings.Contains(ae.Message, "shared memory") {
+		t.Fatalf("a requirement that is met is reported: %v", err)
+	}
+	if !strings.Contains(ae.Hint, "nothing was changed") {
+		t.Fatalf("the hint does not say that nothing changed: %q", ae.Hint)
+	}
+	// the other check ran too (all are checked), no step did
+	if aj.ran("kern.ipc.shmmax") != 1 || aj.ran("touch") != 0 {
+		t.Fatalf("commands: %v", aj.cmds)
+	}
+	if len(e.Installed) != 0 {
+		t.Fatalf("a package was installed: %v", e.Installed)
+	}
+	for _, f := range []string{"usr/local/etc/a.conf", "etc/rc.conf"} {
+		if _, err := os.Stat(filepath.Join(root, f)); err == nil {
+			t.Fatalf("%s was written although a requirement is not met", f)
+		}
+	}
+	// all unmet requirements are reported in one go
+	aj.failOn = "s"
+	_, err = applyOp(t, c, requirementRecipe(), false)
+	if !errors.As(err, &ae) || ae.Code != api.CodeRequirementFailed || !strings.Contains(ae.Message, "2 requirements are not met") || !strings.Contains(ae.Message, "sshd is not installed") || !strings.Contains(ae.Message, "shared memory is not usable") {
+		t.Fatalf("both unmet requirements are not reported: %v", err)
+	}
+	if aj.ran("touch") != 0 || len(e.Installed) != 0 {
+		t.Fatalf("a step ran: %v", aj.cmds)
+	}
+	// the administrator fixes the jail: the recipe applies, and the report lists the requirements first
+	aj.failOn = ""
+	res, err := applyOp(t, c, requirementRecipe(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Requirements) != 2 || res.Requirements[0].Status != api.RequirementMet || res.Requirements[1].Status != api.RequirementMet || statuses(res) != "changed,changed,changed,executed" {
+		t.Fatalf("%+v %v", res.Requirements, res.Lines())
+	}
+	if l := res.Lines(); !strings.HasPrefix(l[0], "require") || !strings.Contains(l[0], "sshd is not installed in the jail") || !strings.HasSuffix(l[0], "met") {
+		t.Fatalf("%v", l)
+	}
+}
+
+// A dry run runs no command of the recipe, a requirement included: it lists it as not checked, whatever the jail has.
+func TestApplyDryRunDoesNotCheckRequirements(t *testing.T) {
+	e, aj := applyEnv(t)
+	c := e.Client(api.PermOperator)
+	aj.failOn = "s" // every check would fail
+	res, err := applyOp(t, c, requirementRecipe(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Requirements) != 2 || res.Requirements[0].Status != api.RequirementNotChecked || res.Requirements[1].Status != api.RequirementNotChecked || res.Requirements[0].Message != "sshd is not installed in the jail" {
+		t.Fatalf("%+v", res.Requirements)
+	}
+	if aj.ran("sshd") != 0 || aj.ran("shmmax") != 0 {
+		t.Fatalf("a dry run ran a check: %v", aj.cmds)
+	}
+	if len(res.Steps) != 4 {
+		t.Fatalf("the steps are still judged: %v", res.Lines())
+	}
+}
+
+// Recipes are for FreeBSD jails: the engine refuses a Linux jail, whoever asks (API, Sync, console), and runs neither a
+// requirement nor a step in it, a dry run included.
+func TestApplyRefusesALinuxJailBeforeAnyRequirement(t *testing.T) {
+	e, aj := applyEnv(t)
+	ctx := context.Background()
+	e.SeedLinux()
+	co, err := e.Admin.Jails().Create(ctx, dtest.AlpineJail("alp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := co.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	so, _ := e.Admin.Jails().Start(ctx, "alp")
+	if _, err := so.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	before := len(aj.cmds)
+	for _, dry := range []bool{false, true} {
+		op, err := e.Admin.Jails().Apply(ctx, "alp", api.ApplyRequest{Recipe: requirementRecipe(), DryRun: dry})
+		if err == nil {
+			_, err = op.Wait(ctx)
+		}
+		var ae *api.Error
+		if !errors.As(err, &ae) || ae.Code != api.CodeUnsupported || !strings.Contains(ae.Message, "Linux jail") || !strings.Contains(ae.Message, "recipe") {
+			t.Fatalf("dry run %v: %v", dry, err)
+		}
+	}
+	if len(aj.cmds) != before {
+		t.Fatalf("a command ran for a Linux jail: %v", aj.cmds[before:])
+	}
+}

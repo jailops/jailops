@@ -6,19 +6,28 @@
 // Variables (docs/provisioning.md):
 //
 //   - `vars:` at the top declares them: NAME: {default, required, secret, split}. A name is [A-Za-z_][A-Za-z0-9_]*.
+//
 //   - `${name}` is replaced in every string value of a step, except the body of a file. The body of a file (content or
 //     the text of source) is replaced only when the step says `template: true`; any other file goes byte for byte.
+//
 //   - `$${` is a literal `${`; `$$` that is not followed by `{` stays as it is. A single pass: a value is never
 //     searched for variables again.
+//
 //   - The value comes from the default, then --vars, then --set or --set-file. A name in a --vars file that the recipe
 //     does not declare is ignored (one file serves many recipes); in --set it is an error, so is a required variable
 //     without a value and a declared variable the recipe does not use.
+//
 //   - split: true cuts the value at white space where the recipe takes a list: a list word that is exactly ${name}
 //     (in package, run or unless) becomes one word per piece, and so does a package value that is exactly ${name}.
 //     Anywhere else the variable is one string.
+//
 //   - secret: true has no default and is given only by --set-file (or SetFile of a caller that holds it in memory),
 //     never on a command line. It may be used only in the content of a file step with template: true: not in an
 //     argument, a path, a name or a source.
+//
+//   - `requirements:` (before `steps:`) lists what the jail must have: each item is `check: [argv...]`, a command that
+//     runs inside the jail (exit status 0 means met), and `message:`, shown when it is not. ${name} is replaced in check
+//     (with split as in run) and in message; a secret variable may not be used in a requirement.
 //
 // An error names the step and the field (steps[2].run[1]) and the variable, never a value or the content of a file.
 package recipe
@@ -216,6 +225,10 @@ func render(data []byte, fsys fs.FS, dir string, v Values) (*Loaded, error) {
 	if err := r.resolve(decls, v); err != nil {
 		return nil, err
 	}
+	reqs, err := r.requirements(root.reqs)
+	if err != nil {
+		return nil, err
+	}
 	var steps []any
 	if root.steps != nil {
 		if err := root.steps.Decode(&steps); err != nil {
@@ -239,6 +252,9 @@ func render(data []byte, fsys fs.FS, dir string, v Values) (*Loaded, error) {
 		}
 	}
 	doc := others
+	if len(reqs) > 0 {
+		doc["requirements"] = reqs
+	}
 	doc["steps"] = steps
 	if steps == nil {
 		doc["steps"] = []any{}
@@ -250,7 +266,7 @@ func render(data []byte, fsys fs.FS, dir string, v Values) (*Loaded, error) {
 	return &Loaded{Recipe: rec, Decls: decls, Sensitive: r.secrets}, nil
 }
 
-type docNodes struct{ varsNode, steps *yaml.Node }
+type docNodes struct{ varsNode, reqs, steps *yaml.Node }
 
 // parseDoc splits the document into the vars node, the steps node and the other top-level keys (decoded, for the strict
 // check of the recipe at the end).
@@ -278,6 +294,8 @@ func parseDoc(data []byte) (docNodes, map[string]any, error) {
 		switch k.Value {
 		case "vars":
 			d.varsNode = val
+		case "requirements":
+			d.reqs = val
 		case "steps":
 			d.steps = val
 		default:
@@ -531,6 +549,48 @@ func (r *renderer) value(where string, v any) (any, error) {
 		return out, nil
 	}
 	return v, nil
+}
+
+// requirements renders the requirements: check as a word list, message as a string. A key that is not one of the two is
+// an error here, so that it names the requirement.
+func (r *renderer) requirements(n *yaml.Node) ([]any, error) {
+	if n == nil || n.Kind == yaml.ScalarNode && n.ShortTag() == "!!null" {
+		return nil, nil
+	}
+	var in []any
+	if n.Kind != yaml.SequenceNode || n.Decode(&in) != nil {
+		return nil, errors.New("requirements: a list of requirements, each with check and message")
+	}
+	out := make([]any, 0, len(in))
+	for i, e := range in {
+		where := fmt.Sprintf("requirements[%d]", i)
+		m, ok := e.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s: a requirement is a map with check and message", where)
+		}
+		res := make(map[string]any, len(m))
+		for k, v := range m {
+			w := where + "." + k
+			var err error
+			switch k {
+			case "check":
+				if l, ok := v.([]any); ok {
+					res[k], err = r.list(w, l)
+				} else {
+					res[k] = v // a wrong type is said by decodeRecipe
+				}
+			case "message":
+				res[k], err = r.value(w, v)
+			default:
+				return nil, fmt.Errorf("%s: unknown field %q (check, message)", where, k)
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, res)
+	}
+	return out, nil
 }
 
 func (r *renderer) step(where string, m map[string]any, fsys fs.FS, dir string) (map[string]any, error) {

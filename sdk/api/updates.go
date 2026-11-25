@@ -8,9 +8,19 @@ import (
 
 // Recipe is what `jailops jail apply` runs inside a running FreeBSD jail: a list of steps, in the order of the list.
 // Every step checks the state it is about and changes only what differs, so a second apply of the same recipe changes
-// nothing. There is no agent in the jail and no convergence: the operator runs it, when they want.
+// nothing. There is no agent in the jail and no convergence: the operator runs it, when they want. Requirements are
+// checked, all of them, before the first step: when one is not met no step runs and nothing is changed.
 type Recipe struct {
-	Steps []RecipeStep `json:"steps"`
+	Requirements []RecipeRequirement `json:"requirements,omitempty"`
+	Steps        []RecipeStep        `json:"steps"`
+}
+
+// RecipeRequirement is a condition of the jail a recipe needs. Check is a command (argv, never a shell) that runs inside
+// the jail with the login PATH: exit status 0 means the requirement is met. Message tells the administrator what is
+// missing when it is not. JailOps knows nothing about what the command asks.
+type RecipeRequirement struct {
+	Check   []string `json:"check"`
+	Message string   `json:"message"`
 }
 
 // RecipeStep is one step: exactly one of Package, File, Dir, Sysrc, Service and Run is set. Creates and Unless are the
@@ -83,8 +93,9 @@ type RecipeValidateRequest struct {
 // RecipeValidateResult is the answer to a recipe that is valid. An invalid one is an error of code invalid that names the
 // step and the field, never a value or the content of a file.
 type RecipeValidateResult struct {
-	Valid bool `json:"valid"`
-	Steps int  `json:"steps"`
+	Valid        bool `json:"valid"`
+	Steps        int  `json:"steps"`
+	Requirements int  `json:"requirements,omitempty"`
 }
 
 // The Status values of an ApplyStep. A dry run reports WouldChange, WouldCheck and WouldExecute in place of the
@@ -100,6 +111,19 @@ const (
 	StepWouldExecute = "would execute"
 )
 
+// The Status values of an ApplyRequirement. A dry run never runs the command of a requirement. An unmet requirement is
+// not a status of a result: it ends the apply with the error requirement_failed.
+const (
+	RequirementMet        = "met"
+	RequirementNotChecked = "not checked"
+)
+
+// ApplyRequirement is the report of one requirement.
+type ApplyRequirement struct {
+	Message string `json:"message"`
+	Status  string `json:"status"`
+}
+
 // ApplyStep is the report of one step.
 type ApplyStep struct {
 	// Kind is package, file, dir, sysrc, service or run.
@@ -112,9 +136,10 @@ type ApplyStep struct {
 
 // ApplyResult is the result of the apply operation.
 type ApplyResult struct {
-	Jail   string      `json:"jail"`
-	DryRun bool        `json:"dry_run,omitempty"`
-	Steps  []ApplyStep `json:"steps"`
+	Jail         string             `json:"jail"`
+	DryRun       bool               `json:"dry_run,omitempty"`
+	Requirements []ApplyRequirement `json:"requirements,omitempty"`
+	Steps        []ApplyStep        `json:"steps"`
 }
 
 // Lines renders the steps for a terminal, one per line, and a summary line.
@@ -122,6 +147,9 @@ func (r ApplyResult) Lines() []string {
 	var out []string
 	count := map[string]int{}
 	unguarded := 0
+	for _, rq := range r.Requirements {
+		out = append(out, fmt.Sprintf("%-8s %-38s %s", "require", rq.Message, rq.Status))
+	}
 	for _, st := range r.Steps {
 		count[st.Status]++
 		if st.Status == StepExecuted || st.Status == StepWouldExecute {

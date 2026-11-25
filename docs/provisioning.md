@@ -29,10 +29,14 @@ Keep it converged with `jailops-sync watch --once --apply` from cron, or only re
 ## 2. Applying a recipe to a jail
 
 `jailops jail apply NAME -f RECIPE` runs a **recipe** in a running FreeBSD jail: packages, files, rc variables, services and
-commands. You run it, when you want, as often as you want. Nothing runs when a jail is created or started, and the jail is never
+commands. Recipes are for FreeBSD jails only: the daemon refuses a Linux jail that is named (no requirement and no step runs), a
+selection with `-l` or `--all` leaves Linux jails out, and sync skips them ([fleet-sync.md](fleet-sync.md#recipes)). You run it, when you want, as often as you want. Nothing runs when a jail is created or started, and the jail is never
 stopped, restarted or changed in its specification. There is no agent in the jail and no convergence.
 
     # web/recipe.yaml
+    requirements:                             # optional: what the jail must already have
+      - check: [test, -x, /usr/sbin/sshd]     # a command run in the jail; exit status 0 means met
+        message: sshd is not installed in the jail
     steps:
       - package: [nginx, rsync]
       - file:
@@ -92,9 +96,21 @@ and is reported `executed`, so a reload that failed once is done by the next run
 YAML reads `[false]`, `[yes]`, `[5]` and `mode: 0644` as booleans and numbers, not text: the command line says which step and field and
 asks you to put quotes around the word (`["false"]`).
 
+**Requirements.** A recipe may start with `requirements:`, a list placed before `steps:`. Each item has `check`, a command as argv
+(never a shell) that runs inside the jail with the login PATH, where exit status 0 means the requirement is met, and `message`, one
+line that says what is missing. `${name}` is replaced in `check` (a `split` variable as in `run`) and in `message`; a `secret`
+variable may not be used in a requirement. **All requirements are checked before any step runs.** When one or more are not met the
+apply stops with the error `requirement_failed` (exit status 1, HTTP 422), which names each unmet requirement by its message and
+the exit status of its check, for example `requirement not met: sshd is not installed in the jail (the check exited with status 1)`:
+no step ran and nothing in the jail was changed. The output of a check is never shown. JailOps does not know what a check asks, it
+only runs the command: anything that can be fixed inside the jail is fixed by an ordinary step of the recipe, and what needs a change of the
+jail's parameters or of the host (a `jail.conf` key, a kernel setting) is for the administrator, who changes it and applies the recipe
+again. A requirement is part of the recipe: changing one changes the recipe's hash for sync.
+
 **Dry run.** `--dry-run` reads the state (the package list, the files, `rc.conf`, `service NAME status`, the `creates` paths) and
 reports `would change`, `unchanged` or `skipped`. It runs none of your commands, installs nothing and writes nothing: a `run` with
-`unless` is `would check` and one without a guard `would execute`. The only things it asks the jail are read-only (`service NAME
+`unless` is `would check` and one without a guard `would execute`. It runs no check of `requirements:` either: they are listed as
+`not checked`, and the dry run does not say whether the jail meets them. The only things it asks the jail are read-only (`service NAME
 status`).
 
 **Which files.** `file` refuses paths below `/etc`, `/boot`, `/bin`, `/sbin`, `/lib`, `/libexec`, `/rescue`, `/usr/bin`, `/usr/sbin`,
@@ -135,6 +151,14 @@ the console) before the request is sent: the daemon receives the finished recipe
     $ jailops jail apply web -f web/ --set site=example.test --set-file pg_pass=app.password
     $ jailops jail apply web -f web/ --vars web.vars          # lines NAME=VALUE; # starts a comment; quotes are optional
     $ jailops jail apply -f web/ --set site=example.test --set-file pg_pass=app.password --validate
+
+Many jails take the same recipe with `-l KEY=VAL` (jails with the label) or `--all` (every jail of the project), instead of a name; a Linux jail is not part of
+a selection. The recipe is rendered once and a file given with `--set-file` is read once. Each jail is done on its own, one after the other, with a block of result
+per jail; a failure on one jail is reported (`jail/NAME: failed: ...`) and the others go on, and the exit code is non-zero if any jail failed.
+`--dry-run` and `--validate` work the same way.
+
+    $ jailops jail apply --all -f hardening/ --dry-run
+    $ jailops jail apply -l tier=web -f web/ --set-file pg_pass=app.password
 
 - A name is letters, digits and `_`, not starting with a digit, in either case. A declaration has `default`, `required`, `secret` and `split`.
   A variable with neither a default nor `required` is the empty string. A default may use the variables declared before it.

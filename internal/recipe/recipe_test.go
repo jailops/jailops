@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"jailops.net/jailops/sdk/api"
 )
 
 // vector is one case of testdata/render_vectors.json. The console renders in the browser with the same file: a change of
@@ -195,5 +197,44 @@ func TestASourceThatIsNotText(t *testing.T) {
 	fsys := fstest.MapFS{"recipe.yaml": {Data: []byte("steps:\n  - file: {path: /usr/local/etc/a, source: a.bin}\n")}, "a.bin": {Data: []byte{0xff, 0xfe, 0}}}
 	if _, err := Load(fsys, ".", Values{}); err == nil || !strings.Contains(err.Error(), "a.bin is not text") {
 		t.Fatal(err)
+	}
+}
+
+func TestRequirementsAreRendered(t *testing.T) {
+	src := "vars:\n  bin: {default: /usr/sbin/sshd}\nrequirements:\n  - check: [test, -x, \"${bin}\"]\n    message: \"${bin} is missing\"\nsteps:\n  - run: [echo, hello]\n"
+	l, err := LoadBytes([]byte(src), Values{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []api.RecipeRequirement{{Check: []string{"test", "-x", "/usr/sbin/sshd"}, Message: "/usr/sbin/sshd is missing"}}
+	if !reflect.DeepEqual(l.Recipe.Requirements, want) || l.Sensitive {
+		t.Fatalf("%+v", l.Recipe.Requirements)
+	}
+	if err := l.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	// the offline check says what is wrong with a requirement, naming the field and no value
+	for name, tc := range map[string]struct{ src, want string }{
+		"no message":    {"requirements:\n  - check: [/usr/bin/true]\nsteps:\n  - run: [echo]\n", "requirements[0].message"},
+		"no check":      {"requirements:\n  - message: m\nsteps:\n  - run: [echo]\n", "requirements[0].check"},
+		"empty check":   {"requirements:\n  - check: []\n    message: m\nsteps:\n  - run: [echo]\n", "requirements[0].check"},
+		"second is bad": {"requirements:\n  - {check: [/usr/bin/true], message: m}\n  - {check: [/usr/bin/true], message: \"\"}\nsteps:\n  - run: [echo]\n", "requirements[1].message"},
+		"unknown field": {"requirements:\n  - {check: [/usr/bin/true], message: m, retry: 3}\nsteps:\n  - run: [echo]\n", "requirements[0]: unknown field \"retry\""},
+	} {
+		l, err := LoadBytes([]byte(tc.src), Values{})
+		if err == nil {
+			err = l.Validate()
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want %q", name, err, tc.want)
+		}
+	}
+	// a recipe without requirements renders as before: the field is not there at all
+	l, err = LoadBytes([]byte("steps:\n  - run: [echo]\n"), Values{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := json.Marshal(l.Recipe); strings.Contains(string(b), "requirements") {
+		t.Fatalf("%s", b)
 	}
 }

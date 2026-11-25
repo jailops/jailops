@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/netip"
 	"net/url"
 	"os"
@@ -120,6 +121,11 @@ type Profile struct {
 	Project string // "" for a shared profile
 	Spec    map[string]any
 	Origin  string
+	// Recipes, Needs and Vars are what a jail that lists the profile gets besides the spec: the recipes run before the
+	// recipes of the jail, the needs are added to its needs and the vars are values its own vars override.
+	Recipes []model.RecipeRef
+	Needs   []string
+	Vars    map[string]string
 }
 
 // Object is one API-backed object declared in the repository.
@@ -736,7 +742,8 @@ func (f *Fleet) readProfile(p, project string) (*Profile, error) {
 			return nil, fmt.Errorf("%s: a profile cannot carry %s (it needs a global admin and the host operator's approval): put it in the jail", f.rel(p), k)
 		}
 	}
-	return &Profile{Name: doc.Metadata.Name, Project: project, Spec: frag, Origin: f.rel(p)}, nil
+	return &Profile{Name: doc.Metadata.Name, Project: project, Spec: frag, Origin: f.rel(p),
+		Recipes: doc.Recipes, Needs: doc.Needs, Vars: doc.Vars}, nil
 }
 
 // loadProjects reads projects/<name>.yaml and, for each, the project
@@ -890,8 +897,9 @@ func (f *Fleet) loadObjectDir(dir string, ki model.KindInfo, scope, project stri
 			if err != nil {
 				return err
 			}
-			o.Needs, o.JailVars = doc.Needs, doc.Vars
-			if o.Recipes, err = f.loadRecipes(doc); err != nil {
+			refs, needs, vars := f.jailRecipeInputs(doc, o.Name, o.Profiles, proj)
+			o.Needs, o.JailVars = needs, vars
+			if o.Recipes, err = f.loadRecipes(refs, vars); err != nil {
 				return fmt.Errorf("%s: %w", f.rel(p), err)
 			}
 		}
@@ -974,6 +982,38 @@ func (f *Fleet) expandJail(p string, doc *model.File, project string) (map[strin
 	apply(own, "the jail")
 	model.StripAutoNames(merged)
 	return merged, profiles, prov, nil
+}
+
+// jailRecipeInputs are the recipes, needs and vars of a jail with those of its profiles: the recipes of the profiles in
+// the order the profiles are listed, then the jail's own; the needs of both (a jail is never its own need, so a profile
+// that says needs: [db] also fits the jail db); the vars of the profiles in order, then the jail's, which win.
+func (f *Fleet) jailRecipeInputs(doc *model.File, name string, profiles []string, project string) ([]model.RecipeRef, []string, map[string]string) {
+	var refs []model.RecipeRef
+	var needs []string
+	vars := map[string]string{}
+	addNeeds := func(in []string, own bool) {
+		for _, n := range in {
+			if (own || n != name) && !slices.Contains(needs, n) {
+				needs = append(needs, n)
+			}
+		}
+	}
+	for _, pn := range profiles {
+		pr := f.profileFor(project, pn)
+		if pr == nil {
+			continue
+		}
+		refs = append(refs, pr.Recipes...)
+		addNeeds(pr.Needs, false)
+		maps.Copy(vars, pr.Vars)
+	}
+	refs = append(refs, doc.Recipes...)
+	addNeeds(doc.Needs, true)
+	maps.Copy(vars, doc.Vars)
+	if len(vars) == 0 {
+		vars = nil
+	}
+	return refs, needs, vars
 }
 
 // resolveTargets expands host references and detects duplicate declarations.

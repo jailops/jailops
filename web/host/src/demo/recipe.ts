@@ -1,8 +1,8 @@
 // The demo's recipes: the validate endpoint (the checks of the real validator, in short, naming step and field and never
 // a value) and the apply of a recipe in a demo jail. A jail keeps what was applied to it, so a second apply says
 // `unchanged` as the real one does, and a dry run changes nothing. A command that is `false` fails, with its exit
-// status; a request that carries a secret (sensitive) gets the status only, never the output. Only loaded for `?demo`.
-import type { ApplyResult, ApplyStep, Recipe, RecipeStep } from '@jailops/shared/api/types'
+// status; a requirement whose check is `false` is not met (and stops the apply before any step); a request that carries a secret (sensitive) gets the status only, never the output. Only loaded for `?demo`.
+import type { ApplyRequirement, ApplyResult, ApplyStep, Recipe, RecipeStep } from '@jailops/shared/api/types'
 
 export const MAX_STEPS = 200
 const KINDS = ['package', 'file', 'dir', 'sysrc', 'service', 'run'] as const
@@ -14,6 +14,12 @@ const kindOf = (st: RecipeStep): Kind[] => KINDS.filter((k) => (st as Record<str
 export function recipeProblem(r: Recipe | undefined): string {
   const steps = r?.steps
   if (!Array.isArray(steps) || steps.length < 1 || steps.length > MAX_STEPS) return `a recipe has between 1 and ${MAX_STEPS} steps`
+  const reqs = r?.requirements ?? []
+  for (let i = 0; i < reqs.length; i++) {
+    const q = reqs[i]
+    if (!q.check?.length || q.check.some((x) => !x)) return `requirements[${i}].check: a command is a non-empty argv`
+    if (!q.message?.trim()) return `requirements[${i}].message: one line of text that tells what is missing`
+  }
   for (let i = 0; i < steps.length; i++) {
     const w = `steps[${i}]`
     const st = steps[i]
@@ -55,9 +61,20 @@ export class DemoRecipes {
   }
 
   /** The report of a recipe in a jail: a dry run reads and changes nothing; an apply stops at the first failed step. */
-  run(jail: string, r: Recipe, dry: boolean, sensitive: boolean): { result: ApplyResult } | { failure: { message: string; hint: string } } {
+  run(jail: string, r: Recipe, dry: boolean, sensitive: boolean): { result: ApplyResult } | { failure: { code: 'requirement_failed' | 'step_failed'; message: string; hint: string } } {
     const seen = this.done.get(jail) ?? new Set<string>()
     const steps: ApplyStep[] = []
+    const requirements: ApplyRequirement[] = []
+    const unmet: string[] = []
+    for (const q of r.requirements ?? []) {
+      if (dry) requirements.push({ message: q.message, status: 'not checked' })
+      else if (q.check[0] === 'false') unmet.push(`${q.message} (the check exited with status 1)`)
+      else requirements.push({ message: q.message, status: 'met' })
+    }
+    if (unmet.length) {
+      const message = unmet.length === 1 ? `requirement not met: ${unmet[0]}` : `${unmet.length} requirements are not met: ${unmet.join('; ')}`
+      return { failure: { code: 'requirement_failed', message, hint: 'No step ran and nothing was changed. Make the jail meet the requirements (a change of the jail or of the host is for the administrator) and apply the recipe again.' } }
+    }
     const total = r.steps.length
     for (let i = 0; i < total; i++) {
       const st = r.steps[i]
@@ -76,7 +93,7 @@ export class DemoRecipes {
           const why = sensitive ? 'exit status 1 (the output is withheld: the recipe carries a secret)' : 'exit status 1'
           const hint = `${done.length ? `Before it: ${done.join('; ')}. ` : ''}Nothing is undone: fix the recipe and apply it again.`
           this.done.set(jail, seen)
-          return { failure: { message: `step ${i + 1} of ${total} failed (run ${name}): ${why}`, hint } }
+          return { failure: { code: 'step_failed', message: `step ${i + 1} of ${total} failed (run ${name}): ${why}`, hint } }
         }
       } else if (seen.has(key)) {
         status = 'unchanged'
@@ -93,6 +110,6 @@ export class DemoRecipes {
       steps.push({ kind, name, status, ...(detail ? { detail } : {}) })
     }
     if (!dry) this.done.set(jail, seen)
-    return { result: { jail, ...(dry ? { dry_run: true } : {}), steps } }
+    return { result: { jail, ...(dry ? { dry_run: true } : {}), ...(requirements.length ? { requirements } : {}), steps } }
   }
 }

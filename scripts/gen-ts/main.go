@@ -51,7 +51,7 @@ var roots = []any{
 
 // enums lists the typed string constants. Keep in sync with sdk/api.
 var enums = map[reflect.Type][]string{
-	reflect.TypeFor[api.Code]():            {"invalid", "not_found", "already_exists", "precondition_failed", "unauthorized", "forbidden", "unsupported", "busy", "internal", "interrupted", "step_failed", "ip_conflict", "pool_exhausted", "image_in_use", "data_loss_unconfirmed", "version_skew", "unverified_platform", "zfs_incompatible", "chain_broken", "merge_conflict", "quota_exceeded", "rate_limited", "key_not_escrowed", "plaintext_denied", "maintenance", "missing_chunks", "lease_expired", "not_managed", "locked", "bad_passphrase"},
+	reflect.TypeFor[api.Code]():            {"invalid", "not_found", "already_exists", "precondition_failed", "unauthorized", "forbidden", "unsupported", "busy", "internal", "interrupted", "step_failed", "requirement_failed", "ip_conflict", "pool_exhausted", "image_in_use", "data_loss_unconfirmed", "version_skew", "unverified_platform", "zfs_incompatible", "chain_broken", "merge_conflict", "quota_exceeded", "rate_limited", "key_not_escrowed", "plaintext_denied", "maintenance", "missing_chunks", "lease_expired", "not_managed", "locked", "bad_passphrase"},
 	reflect.TypeFor[api.Permission]():      {string(api.PermReadonly), string(api.PermOperator), string(api.PermAdmin), string(api.PermBackupPush), string(api.PermBackupPull), string(api.PermRestore), string(api.PermBackupAdmin)},
 	reflect.TypeFor[api.Role]():            {string(api.RoleHost), string(api.RoleBackup)},
 	reflect.TypeFor[api.OS]():              {string(api.OSFreeBSD), string(api.OSLinux)},

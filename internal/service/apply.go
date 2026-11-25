@@ -24,7 +24,8 @@ import (
 // Applying a recipe (docs/provisioning.md): the steps of a recipe run in order inside a running FreeBSD jail. Every step
 // reads the state it is about and changes only what differs, so a second apply changes nothing. The steps never stop or
 // restart the jail, never change its spec, and a failed step stops the run; the steps before it stay, and running the
-// recipe again is the way to finish. A dry run reads the same state and changes nothing: it runs none of the recipe's
+// recipe again is the way to finish. Before the first step the requirements of the recipe are checked; one that is not met
+// ends the apply with nothing done. A dry run reads the same state and changes nothing: it runs none of the recipe's
 // commands.
 
 var svcVarRE = regexp.MustCompile(`[^A-Za-z0-9_]`)
@@ -53,7 +54,7 @@ func (s *Service) ValidateRecipe(req api.RecipeValidateRequest) (api.RecipeValid
 	if err := validate.Recipe(req.Recipe); err != nil {
 		return api.RecipeValidateResult{}, err
 	}
-	return api.RecipeValidateResult{Valid: true, Steps: len(req.Recipe.Steps)}, nil
+	return api.RecipeValidateResult{Valid: true, Steps: len(req.Recipe.Steps), Requirements: len(req.Recipe.Requirements)}, nil
 }
 
 // ApplyJail runs a recipe in a running FreeBSD jail as an operation.
@@ -98,6 +99,9 @@ func (s *Service) ApplyJail(ctx context.Context, name string, req api.ApplyReque
 // run runs the steps and stops at the first failure. The error is public (code step_failed): it names the step, the exit
 // status of the command and, unless the request is sensitive, the last lines of its output.
 func (a *applyRun) run(ctx context.Context, r api.Recipe) error {
+	if err := a.requirements(ctx, r.Requirements); err != nil {
+		return err
+	}
 	for i, st := range r.Steps {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -119,6 +123,42 @@ func (a *applyRun) run(ctx context.Context, r api.Recipe) error {
 		a.res.Steps = append(a.res.Steps, api.ApplyStep{Kind: o.kind, Name: o.name, Status: o.status, Detail: o.detail})
 	}
 	return nil
+}
+
+// requirements runs the checks of the recipe, all of them, before the first step. A check is a command in the jail: exit
+// status 0 means met. When any is not met the error is public (code requirement_failed) and names each one with the
+// exit status of its check; no step has run and nothing is changed. A dry run runs no command of the recipe: it lists
+// the requirements as not checked. The output of a check is never shown: only its exit status.
+func (a *applyRun) requirements(ctx context.Context, list []api.RecipeRequirement) error {
+	var unmet []string
+	for _, q := range list {
+		if a.dry {
+			a.res.Requirements = append(a.res.Requirements, api.ApplyRequirement{Message: q.Message, Status: api.RequirementNotChecked})
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		_, err := a.inJail(ctx, 2*time.Minute, q.Check...)
+		if err == nil {
+			a.res.Requirements = append(a.res.Requirements, api.ApplyRequirement{Message: q.Message, Status: api.RequirementMet})
+			continue
+		}
+		var xe *execError
+		why := "the check could not run"
+		if errors.As(err, &xe) && xe.code != 0 {
+			why = fmt.Sprintf("the check exited with status %d", xe.code)
+		}
+		unmet = append(unmet, fmt.Sprintf("%s (%s)", q.Message, why))
+	}
+	if len(unmet) == 0 {
+		return nil
+	}
+	msg := "requirement not met: " + unmet[0]
+	if len(unmet) > 1 {
+		msg = fmt.Sprintf("%d requirements are not met: %s", len(unmet), strings.Join(unmet, "; "))
+	}
+	return &publicError{ae: api.Errorf(api.CodeRequirementFailed, "%s", msg).WithHint("No step ran and nothing was changed. Make the jail meet the requirements (a change of the jail or of the host is for the administrator) and apply the recipe again."), cause: errors.New("a requirement is not met")}
 }
 
 // failure says why a step failed. A command that ran and failed is its exit status and its output; a request that

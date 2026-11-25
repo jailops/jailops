@@ -33,7 +33,7 @@ function fail(f: () => unknown): RecipeError {
 
 describe('shared vectors', () => {
   it('has the whole file', () => {
-    expect(vectors.length).toBeGreaterThanOrEqual(66)
+    expect(vectors.length).toBeGreaterThanOrEqual(77)
   })
   for (const v of vectors) {
     it(v.name, () => {

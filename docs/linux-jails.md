@@ -102,7 +102,7 @@ With an Alpine jail:
 Linux jails look after their own packages; JailOps does not update them. Run `apk upgrade` (Alpine) or `apt-get upgrade`
 (Debian) in the jail, for instance from the jail's own cron, and take a snapshot first when you want a way back
 (`jailops jail snapshot create NAME SNAPSHOT`). `jailops update`, `jailops jail upgrade`, `jailops pkg` and `jailops jail base` are for
-FreeBSD jails: a selection leaves Linux jails out, and a Linux jail named alone is refused, as is an update policy
+FreeBSD jails, and so is `jailops jail apply` with a recipe (its requirements and steps never run in a Linux jail, and sync skips them): a selection leaves Linux jails out, and a Linux jail named alone is refused, as is an update policy
 (`update.mode`, `update.schedule`, `update.packages`, `update.os`, `update.reboot`) set on one. A policy that an earlier
 release stored on a Linux jail stays in its record and is ignored; a copy, an import or a restore of the jail leaves it
 out. A new release of the distribution is a new jail from a new image.

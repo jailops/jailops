@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"jailops.net/jailops/internal/recipe"
+	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -97,7 +99,7 @@ func (a *app) jailApply(d *kindDesc[api.Jail]) *cobra.Command {
 	var rf recipeFlags
 	var validateOnly bool
 	cmd := &cobra.Command{
-		Use:   "apply [NAME] -f RECIPE [flags]",
+		Use:   "apply [NAME | -l KEY=VAL | --all] -f RECIPE [flags]",
 		Short: "Run a recipe in a running jail: packages, files, rc variables, services, commands",
 		Long: `Run a recipe in a running FreeBSD jail. A recipe is a YAML file with a list of steps that run in the
 order of the list; -f DIR means DIR/recipe.yaml. Nothing runs by itself: you run it when you want, as often as
@@ -105,6 +107,9 @@ you want. Every step looks at what the jail has and changes only what differs, s
 recipe changes nothing, and the report says so. The jail is never stopped, restarted or changed in its
 specification.
 
+  requirements:                            # optional: checked in the jail, before the first step
+    - check: [test, -x, /usr/sbin/sshd]    # argv run in the jail; exit status 0 means met
+      message: sshd is not installed in the jail   # shown when it is not met
   steps:
     - package: [nginx]                     # installs only what is missing
     - file:                                # a file beside the recipe, or inline text
@@ -126,81 +131,100 @@ the other base directories are refused, local configuration goes to /usr/local/e
 sysctl.conf, periodic.conf, ssh/sshd_config and newsyslog.conf, and rc variables go through sysrc and service).
 sysrc edits the file from the host: the jail needs no sysrc tool.
 
+Requirements are checked first, all of them, before any step: when one is not met no step runs, nothing is
+changed, and the error says which requirement and the exit status of its check. JailOps does not know what a
+check asks; what can be fixed inside the jail is fixed by an ordinary step of the recipe, a change of the jail's
+parameters or of the host is for the administrator.
+
 --dry-run reads the state (the package list, the files, rc.conf, service status) and reports what would change.
 It runs none of your commands, installs nothing and writes nothing: a run with unless is reported as 'would
-check', a run without a guard as 'would execute'.
+check', a run without a guard as 'would execute', a requirement as 'not checked'.
 
 Variables make one recipe serve many jails. A recipe declares them at the top (vars:, each with default, required,
 secret or split) and uses ${name} in the values of its steps and in files that say template: true; $${ is a literal
 ${. The values come from --set NAME=VALUE, from --set-file NAME=FILE (the text of a file: the way to give a secret or
 a value of several lines) and from --vars FILE (lines NAME=VALUE; names the recipe does not declare are ignored);
 --set beats --vars beats the default. A secret is never given on the command line. --validate renders the recipe
-and checks it, with no jail and no connection to the daemon; NAME is not needed then.`,
+and checks it, with no jail and no connection to the daemon; NAME is not needed then.
+
+One jail is named. Several are selected by label with -l, or all of the project with --all. Recipes are for FreeBSD
+jails: a Linux jail that is named is refused, with no requirement and no step run, and a Linux jail is not part of a
+selection. The recipe is rendered once, and each jail is done on its own, one after the other, with one block of
+result per jail: a failure is reported for that jail and the run goes on with the others, and the exit code is
+non-zero if any jail failed. --dry-run and --validate work with a selection as with one jail.`,
 		Example: `jailops jail apply web -f web/recipe.yaml --dry-run
 jailops jail apply web -f web/
 jailops jail apply db -f small-postgresql-server/ --vars db.vars --set-file db_password=app.password
-jailops jail apply -f web/ --set site=example.test --validate`,
+jailops jail apply -f web/ --set site=example.test --validate
+jailops jail apply --all -f hardening/ --dry-run
+jailops jail apply -l tier=web -f web/ --set-file tls_key=site.key`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeKind(a, d),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if file == "" {
-				return usagef("name the recipe: -f FILE")
+	}
+	resolve := a.jailTargetsOS(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if file == "" {
+			return usagef("name the recipe: -f FILE")
+		}
+		l, err := a.loadRecipe(file, rf)
+		if err != nil {
+			return err
+		}
+		if validateOnly {
+			// nothing is sent: the recipe was rendered and checked here
+			res := api.RecipeValidateResult{Valid: true, Steps: len(l.Recipe.Steps), Requirements: len(l.Recipe.Requirements)}
+			if a.format != fmtTable {
+				return a.emit(res, nil, nil, func() []string { return nil })
 			}
-			l, err := a.loadRecipe(file, rf)
-			if err != nil {
+			fprintf(a.env.Stdout, "recipe is valid: %d steps", res.Steps)
+			if res.Requirements > 0 {
+				fprintf(a.env.Stdout, ", %d requirements (run in the jail when the recipe is applied)", res.Requirements)
+			}
+			fprintf(a.env.Stdout, "\n")
+			return nil
+		}
+		selected := cmd.Flags().Changed("all") || cmd.Flags().Changed("selector")
+		if selected && len(args) > 0 {
+			return usagef("name one jail or select jails with -l or --all, not both")
+		}
+		if !selected && len(args) != 1 {
+			return usagef("name the jail: jailops jail apply NAME -f RECIPE, or select jails with -l key=value or --all (--validate needs no jail)")
+		}
+		names, oses := args, map[string]api.OS(nil)
+		if selected {
+			var err error
+			if names, oses, _, err = resolve(cmd.Context(), nil); err != nil {
 				return err
 			}
-			if validateOnly {
-				// nothing is sent: the recipe was rendered and checked here
-				res := api.RecipeValidateResult{Valid: true, Steps: len(l.Recipe.Steps)}
-				if a.format != fmtTable {
-					return a.emit(res, nil, nil, func() []string { return nil })
-				}
-				fprintf(a.env.Stdout, "recipe is valid: %d steps\n", res.Steps)
+			if names, err = a.freebsdJails(cmd.Context(), names, oses, true); err != nil {
+				return err
+			}
+			if len(names) == 0 {
+				fprintln(a.env.Stderr, "No jails match.")
 				return nil
 			}
-			if len(args) != 1 {
-				return usagef("name the jail: jailops jail apply NAME -f RECIPE (--validate needs no jail)")
-			}
-			c, err := a.connect(cmd.Context())
-			if err != nil {
+		}
+		c, err := a.connect(cmd.Context())
+		if err != nil {
+			return err
+		}
+		// the recipe was rendered once, above: the same request goes to every jail
+		req := l.Request(a.dryRun)
+		failed := 0
+		for _, name := range names {
+			err := a.applyRecipe(cmd.Context(), c, name, req, selected)
+			if !selected {
 				return err
 			}
-			if !a.dryRun {
-				// a jail that jailops-sync keeps (its labels say so) is put back by the next sync: the person should know
-				if j, err := c.Jails().Get(cmd.Context(), args[0]); err == nil {
-					for k := range j.Metadata.Labels {
-						if strings.HasPrefix(k, "sync.jailops.net/") {
-							fprintf(a.env.Stderr, "warning: the jail is managed by sync, the next sync may revert this\n")
-							break
-						}
-					}
-				}
-			}
-			// the global --dry-run is the dry run of the daemon here: it reads the jail and changes nothing
-			h, err := handle(c.Jails().Apply(cmd.Context(), args[0], l.Request(a.dryRun)))
 			if err != nil {
-				return err
+				failed++
+				fprintf(a.env.Stderr, "jail/%s: failed: %s\n", name, firstLine(err.Error()))
 			}
-			if !a.waiting() {
-				return a.finishOp(cmd.Context(), h, "jail", args[0], "applying the recipe", nil)
-			}
-			v, _, err := a.await(cmd.Context(), h)
-			if err != nil {
-				return err
-			}
-			res, _ := v.(api.ApplyResult)
-			if a.format != fmtTable {
-				return a.emit(res, nil, nil, func() []string { return []string{args[0]} })
-			}
-			if res.DryRun {
-				fprintf(a.env.Stdout, "jail/%s: dry run, nothing was changed\n", args[0])
-			}
-			for _, l := range res.Lines() {
-				fprintf(a.env.Stdout, "  %s\n", l)
-			}
-			return nil
-		},
+		}
+		if failed > 0 {
+			return &exitError{code: ExitFailure}
+		}
+		return nil
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "the recipe: a YAML file, a directory with recipe.yaml, or - for standard input")
 	cmd.Flags().StringArrayVar(&rf.set, "set", nil, "a value of a variable: NAME=VALUE (one line; not for a secret), repeatable")
@@ -208,4 +232,45 @@ jailops jail apply -f web/ --set site=example.test --validate`,
 	cmd.Flags().StringVar(&rf.vars, "vars", "", "a file of lines NAME=VALUE for the variables; names the recipe does not declare are ignored")
 	cmd.Flags().BoolVar(&validateOnly, "validate", false, "render and check the recipe here: no jail, no connection to the daemon")
 	return cmd
+}
+
+// applyRecipe runs the rendered recipe in one jail and says what the daemon did.
+func (a *app) applyRecipe(ctx context.Context, c *sdk.Client, name string, req api.ApplyRequest, many bool) error {
+	if !a.dryRun {
+		// a jail that jailops-sync keeps (its labels say so) is put back by the next sync: the person should know
+		if j, err := c.Jails().Get(ctx, name); err == nil {
+			for k := range j.Metadata.Labels {
+				if strings.HasPrefix(k, "sync.jailops.net/") {
+					fprintf(a.env.Stderr, "warning: jail/%s is managed by sync, the next sync may revert this\n", name)
+					break
+				}
+			}
+		}
+	}
+	// the global --dry-run is the dry run of the daemon here: it reads the jail and changes nothing
+	h, err := handle(c.Jails().Apply(ctx, name, req))
+	if err != nil {
+		return err
+	}
+	if !a.waiting() {
+		return a.finishOp(ctx, h, "jail", name, "applying the recipe", nil)
+	}
+	v, _, err := a.await(ctx, h)
+	if err != nil {
+		return err
+	}
+	res, _ := v.(api.ApplyResult)
+	if a.format != fmtTable {
+		return a.emit(res, nil, nil, func() []string { return []string{name} })
+	}
+	switch {
+	case res.DryRun:
+		fprintf(a.env.Stdout, "jail/%s: dry run, nothing was changed\n", name)
+	case many:
+		fprintf(a.env.Stdout, "jail/%s:\n", name)
+	}
+	for _, l := range res.Lines() {
+		fprintf(a.env.Stdout, "  %s\n", l)
+	}
+	return nil
 }

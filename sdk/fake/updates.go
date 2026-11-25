@@ -256,6 +256,9 @@ func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 			if j == nil {
 				return nil, notFound("jail", name)
 			}
+			if j.Spec.OS == api.OSLinux {
+				return nil, api.Errorf(api.CodeUnsupported, "jail %q is a Linux jail: a recipe is for FreeBSD jails", name).WithHint("use jailops exec and jailops cp")
+			}
 			if j.Status.Power != api.PowerRunning {
 				return nil, api.Errorf(api.CodeBusy, "jail %q is not running; a recipe runs inside it", name).WithHint("start it first")
 			}
@@ -269,6 +272,19 @@ func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 				s.apply.done[jk] = done
 			}
 			s.apply.calls = append(s.apply.calls, ApplyCall{Project: rc.project, Jail: name, Req: req})
+			// the requirements come before the first step: a dry run does not check them, a real apply fails on a seeded one
+			for _, q := range req.Recipe.Requirements {
+				if !req.DryRun {
+					if msg, ok := s.apply.unmet[jk]; ok {
+						return nil, api.Errorf(api.CodeRequirementFailed, "requirement not met: %s (the check exited with status 1)", q.Message).WithHint(msg)
+					}
+				}
+				st := api.RequirementMet
+				if req.DryRun {
+					st = api.RequirementNotChecked
+				}
+				res.Requirements = append(res.Requirements, api.ApplyRequirement{Message: q.Message, Status: st})
+			}
 			for i, st := range req.Recipe.Steps {
 				kind, label := "run", strings.Join(st.Run, " ")
 				switch {

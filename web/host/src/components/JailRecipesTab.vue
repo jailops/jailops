@@ -87,6 +87,12 @@ const cli = computed(() => `jailops jail apply ${name.value} -f DIR${project.val
       <div role="status" aria-live="polite" class="stack" data-test="r-status">
         <Callout v-if="r.problem.value" tone="danger" data-test="r-problem"><strong>{{ s.recipes.problem }}.</strong> {{ r.problem.value }}</Callout>
         <Callout v-if="r.valid.value !== null" tone="ok" data-test="r-valid">{{ s.recipes.valid(r.valid.value) }}</Callout>
+        <div v-if="r.valid.value !== null && r.requirements.value.length" class="stack" data-test="r-requirements-preview">
+          <p class="muted">{{ s.recipes.requirementsLead }}</p>
+          <ul>
+            <li v-for="(q, i) in r.requirements.value" :key="i" data-test="r-requirement-preview"><span>{{ q.message }}</span> <code class="mono faint">{{ q.check.join(' ') }}</code></li>
+          </ul>
+        </div>
         <ErrorPanel v-if="r.error.value" :error="r.error.value" />
       </div>
 
@@ -103,6 +109,17 @@ const cli = computed(() => `jailops jail apply ${name.value} -f DIR${project.val
           <h3>{{ r.last.value.dry ? s.recipes.resultDry(name) : s.recipes.resultApply(name) }}</h3>
           <p v-if="!r.last.value.result.steps.length" class="empty">{{ s.recipes.nothing }}</p>
           <template v-else>
+            <div v-if="r.last.value.result.requirements?.length" class="table-wrap">
+              <table data-test="r-requirements">
+                <thead><tr><th scope="col">{{ s.recipes.requirement }}</th><th scope="col">{{ s.recipes.status }}</th></tr></thead>
+                <tbody>
+                  <tr v-for="(q, i) in r.last.value.result.requirements" :key="i" data-test="r-requirement">
+                    <td>{{ q.message }}</td>
+                    <td><span class="pill" :class="q.status === 'met' ? 'ok' : 'info'">{{ q.status }}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             <p data-test="r-summary">{{ s.recipes.summary(changed, r.last.value.result.steps.length, r.last.value.dry) }}</p>
             <div class="table-wrap">
               <table data-test="r-steps">
@@ -118,6 +135,7 @@ const cli = computed(() => `jailops jail apply ${name.value} -f DIR${project.val
             </div>
           </template>
         </section>
+        <p v-if="r.error.value?.code === 'requirement_failed'" class="faint" data-test="r-unmet">{{ s.recipes.unmetHint }}</p>
         <p v-if="r.error.value?.code === 'step_failed'" class="faint" data-test="r-failed">{{ s.recipes.failedHint }}</p>
       </div>
 
