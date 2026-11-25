@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
-	"path"
 	"strings"
 	"time"
 
@@ -81,9 +80,6 @@ func (s *Service) JailAudit(ctx context.Context, name string, suggest bool) (api
 				in.Addresses = append(in.Addresses, ad.String())
 			}
 		}
-	}
-	if b, err := os.ReadFile(path.Join(hostPkgDir, "repos", jailopsRepo+".conf")); err == nil {
-		in.JailopsRepoURL = jailaudit.RepoURL(string(b), jailopsRepo)
 	}
 	// the jail parameters as JailOps renders them for jail(8)
 	if b, err := s.d.Files.ReadFile(ctx, s.confPath(key)); err != nil {
@@ -170,9 +166,3 @@ func (s *Service) doctorAudit(c *checkSet) {
 			fmt.Sprintf("jailops jail audit %s --project %s shows each finding and its fix", e.jail.Metadata.Name, e.jail.Metadata.Project))
 	}
 }
-
-// hostPkgDir is where the host keeps the configuration of its package repositories (docs/install.md).
-var hostPkgDir = "/usr/local/etc/pkg"
-
-// jailopsRepo is the name of the host's pkg repository configuration for pkg.jailops.net (docs/install.md).
-const jailopsRepo = "jailops"

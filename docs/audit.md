@@ -32,7 +32,7 @@ second way to root in it is ever `CRITICAL`.
 | `files.sticky_bit` | a directory anyone may write to without the sticky bit | CIS 6.3: world-writable directories have the sticky bit | WARN |
 | `files.world_writable` | a regular file anyone may write to, outside a directory with the sticky bit that anyone may write to (`/tmp`, `/var/tmp`) | CIS 6.4: no world-writable files | WARN |
 | `files.unowned` | a file or directory whose owner is no account of the jail's `/etc/master.passwd`, or whose group is not in its `/etc/group`: an account made later with that id owns it | CIS 6.7: no unowned files or directories | WARN |
-| `pkg.repositories` | an enabled repository that is not FreeBSD's (`pkg.FreeBSD.org`) or the host's JailOps repository | the jail's pkg configuration | WARN |
+| `pkg.repositories` | an enabled package repository that is neither signed (`signature_type: pubkey` or `fingerprints`) nor fetched over https: a repository you added is fine when pkg can verify what it downloads | the jail's pkg configuration | WARN |
 | `pkg.base_repository` | `FreeBSD-base` enabled inside the jail: pkg there takes base packages it cannot install ([FreeBSD bug 293817](https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=293817)), and the host upgrades the base | the jail's pkg configuration | WARN |
 | `pkg.kmods_repository` | `FreeBSD-ports-kmods` enabled inside the jail: kernel modules belong to the host's kernel, so the repository is of no use there and costs a catalogue fetch at every `pkg update` | the jail's pkg configuration | WARN |
 | `pkg.vulnerabilities` | a package with a known vulnerability: the name, the version and the first five advisory ids (CVE) of each | pkg-audit(8), Handbook, Security | WARN |
