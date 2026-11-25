@@ -200,6 +200,10 @@ func TestEveryExampleRuns(t *testing.T) {
 	h.seed()
 	h.srv.SeedProject(api.Project{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.ProjectSpec{
 		Networks: []api.ProjectNetwork{{Network: "web"}}, Storage: []api.ProjectStorage{{Storage: "default"}}}})
+	// the policy the example of `firewall policy attachments --policy` names
+	if _, errs, code := h.run("", "firewall", "policy", "create", "web-public"); code != 0 {
+		t.Fatal(errs)
+	}
 	// the remotes the examples name, all of them the fake
 	var cfg strings.Builder
 	cfg.WriteString("current: t\nremotes:\n")

@@ -22,6 +22,7 @@ func TestMachineOutputGoldens(t *testing.T) {
 		{"firewall", "show", "web"},
 		{"firewall", "policy", "list"},
 		{"firewall", "policy", "show", "ssh"},
+		{"firewall", "policy", "attachments"},
 		{"network", "list"},
 		{"network", "show", "lan"},
 		{"project", "list"},

@@ -251,6 +251,12 @@ jailops firewall exposed
 jailops firewall policy  (aliases: policies)
 jailops firewall policy attach
     --mandatory bool
+jailops firewall policy attachments
+    --columns/-c stringSlice
+    --jail stringArray
+    --policy stringArray
+    --selector/-l stringArray
+    --sort string
 jailops firewall policy create
     --comment string
     --default-in string
