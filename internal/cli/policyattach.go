@@ -13,9 +13,9 @@ import (
 )
 
 // policyAttachCmds are `firewall policy attach` and `detach`: they add or take away ONE policy of a jail (or of the
-// project's mandatory list) without writing the whole list.
+// project's mandatory list) without writing the whole list; `attachments` lists them.
 func (a *app) policyAttachCmds() []*cobra.Command {
-	return []*cobra.Command{a.policyAttach(true), a.policyAttach(false)}
+	return []*cobra.Command{a.policyAttach(true), a.policyAttach(false), a.policyAttachments()}
 }
 
 func (a *app) policyAttach(attach bool) *cobra.Command {

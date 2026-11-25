@@ -94,6 +94,10 @@ Every jail has a link of its own, so jails never share a network segment:
 
   The uplink is only ever opened by an explicit `allow in` rule with an external source, never by a default.
   `jailops firewall show JAIL` says which policy sets each default.
+  `jailops firewall policy attachments` lists every policy of every jail in the order pf renders them, with where each
+  comes from (`project`, `jail` or `profile:NAME`), its position and the defaults it states; a jail with no policy is named
+  under the table. `--policy`, `--jail` and `-l KEY=VALUE` narrow it down. A jail that is closed by the project's floor
+  because a policy was never attached shows with the floor only.
 - **There is no layer 2 between jails.** Multicast, mDNS, VRRP/CARP and other non-IP protocols do not pass from one jail to
   another. Services that need to find each other use addresses or DNS.
 

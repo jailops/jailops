@@ -88,8 +88,8 @@ jailops firewall address-set create office --comment "the office"
 jailops firewall address-set add office 192.0.2.0/24
 jailops firewall validate -f policy.yaml`, "fw")
 	pd := policyDesc()
-	pc := group("policy", "Manage firewall policies", "Create, inspect, edit and delete firewall policies, and attach one to jails or detach it, one policy at a time.",
-		"jailops firewall policy list\njailops firewall policy show web\njailops firewall policy attach web-public web", "policies")
+	pc := group("policy", "Manage firewall policies", "Create, inspect, edit and delete firewall policies, attach one to jails or detach it (one policy at a time), and list which policy is attached to which jail.",
+		"jailops firewall policy list\njailops firewall policy show web\njailops firewall policy attach web-public web\njailops firewall policy attachments", "policies")
 	crudCommands(a, pc, pd, `Create a firewall policy, empty or from a file. A policy is made of rules, added one at a time with
 'jailops firewall rule add' (or all at once from a file with -f). --comment is what the policy is for. --default-in deny
 (and --default-out deny) closes the direction for every jail that uses the policy: only what a rule allows gets through.

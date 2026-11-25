@@ -418,7 +418,7 @@ stops when its rule goes.
   (first, as its Policies section, with the rules each has and the default it states) and `jailops jail info` list them in the order they are rendered: the project's marked `(project)`, the managed one
   `(managed)`, then the jail's own. A jail names the policies of its own in `firewall.policies`, a list. One policy is added or taken out at a time:
   `jailops firewall policy attach postgres DB` (several jails may follow) appends it, `jailops firewall policy detach postgres DB` takes it out, and the others stay (the console's
-  Firewall tab does the same, one policy at a time). `jailops config set DB firewall.policies postgres,ssh-office` and `--firewall-policy` (more than once) at `jailops create` write the whole list. The mandatory list of a project
+  Firewall tab does the same, one policy at a time); `jailops firewall policy attachments` lists which policy is attached to which jail. `jailops config set DB firewall.policies postgres,ssh-office` and `--firewall-policy` (more than once) at `jailops create` write the whole list. The mandatory list of a project
   changes the same way with `--mandatory` (`jailops firewall policy attach default --mandatory --project shop`, global admins), and `jailops project set --firewall-policy` writes all of it. A jail cannot name a
   mandatory policy of the project, which is rendered for every jail already, nor a policy that something else manages
   (a hub), and it names none twice. A policy that no jail names is applied nowhere: `policy show` says `Used by: none` and `policy list` has the column USED BY (the jails by name, or `every jail (project)` for a mandatory policy).

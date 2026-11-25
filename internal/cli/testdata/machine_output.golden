@@ -494,6 +494,28 @@ status:
   used_by: null
   mandatory: false
 
+$ jailops firewall policy attachments -o json
+[
+  {
+    "project": "main",
+    "jail": "web",
+    "policy": "ssh",
+    "source": "jail",
+    "position": 1,
+    "default_in": "deny",
+    "default_out": ""
+  }
+]
+
+$ jailops firewall policy attachments -o yaml
+- project: main
+  jail: web
+  policy: ssh
+  source: jail
+  position: 1
+  default_in: deny
+  default_out: ""
+
 $ jailops network list -o json
 [
   {

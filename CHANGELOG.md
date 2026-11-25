@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`jailops firewall policy attachments` lists which policy is attached to which jail.** One row per jail and policy in the order pf renders them (the project's mandatory policies first), with the source (`project`, `jail` or `profile:NAME`), the position and the defaults the policy states; `--policy`, `--jail`, `-l`, `-c` and `--sort` select and order, `-o wide` adds the project, and a jail with no policy is named under the table. It is built from the existing reads: no new API route.
+
 ## 0.9.6 - 2026-11-25
 
 - **`jailops jail apply` takes many jails.** `-l KEY=VAL` (`--label` is the same) selects the jails that carry the labels and `--all` every jail of the project, as `jailops jail base add` does; a name and a selection exclude each other, and a Linux jail is not part of a selection. The recipe is rendered once (a file of `--set-file` is read once) and each jail is done on its own, one after the other, with one block of result per jail; a failure on one jail is reported as `jail/NAME: failed: ...` and the others go on, and the exit code is non-zero if any failed. `--dry-run` and `--validate` work with a selection. A jail that sync manages is named in the warning.
