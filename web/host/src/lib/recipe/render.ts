@@ -5,7 +5,7 @@
 // The rules in short: `vars:` declares NAME: {default, required, secret, split}; ${name} is replaced in every string of
 // a step and, with template: true, in the body of a file; $${ is a literal ${ and $$ stays as it is; the value comes
 // from the default, then a vars file, then the form; a secret has no default and goes only into the content of a
-// template file; the files beside the recipe are read into `content`.
+// template file; `requirements:` (check as a word list, message) are rendered like a run and a text; the files beside the recipe are read into `content`.
 //
 // An error names the step and the field (steps[2].run[1]) and the variable, never a value or the content of a file:
 // no message here is made from a value, and the text of a YAML error is cut to its first line (the library prints the
@@ -48,9 +48,15 @@ export interface RenderedStep {
   unless?: string[]
 }
 
+/** A condition of the jail: check is a command run in the jail (exit status 0 means met), message says what is missing. */
+export interface RenderedRequirement {
+  check: string[]
+  message: string
+}
+
 export interface Rendered {
   /** The recipe as it is sent: variables replaced, files read into content, vars: removed. */
-  recipe: { steps: RenderedStep[] }
+  recipe: { requirements?: RenderedRequirement[]; steps: RenderedStep[] }
   decls: VarDecl[]
   /** True when a secret went into the recipe: the request must say so (sensitive: true). */
   sensitive: boolean
@@ -81,6 +87,7 @@ function yamlText(e: { message: string; linePos?: Array<{ line: number }> }): st
 interface Doc {
   doc: Document.Parsed
   vars?: Node | null
+  reqs?: Node | null
   steps?: Node | null
   others: Obj
 }
@@ -99,6 +106,7 @@ function parseDoc(text: string): Doc {
   for (const p of root.items) {
     const key = text0(p.key)
     if (key === 'vars') out.vars = (p.value as Node | null) ?? null
+    else if (key === 'requirements') out.reqs = (p.value as Node | null) ?? null
     else if (key === 'steps') out.steps = (p.value as Node | null) ?? null
     else out.others[key] = isScalar(p.value) || isMap(p.value) || isSeq(p.value) ? (p.value as Node).toJS(doc) : null
   }
@@ -302,6 +310,21 @@ class Renderer {
     return v
   }
 
+  /** The requirements: check as a word list, message as a string. A key that is not one of the two is an error. */
+  requirements(where: string, list: unknown[]): Obj[] {
+    return list.map((e, i) => {
+      const w = `${where}[${i}]`
+      if (!isObj(e)) throw new RecipeError(`${w}: a requirement is a map with check and message`)
+      const out: Obj = {}
+      for (const [k, v] of Object.entries(e)) {
+        if (k === 'check') out[k] = Array.isArray(v) ? this.list(`${w}.check`, v) : v
+        else if (k === 'message') out[k] = this.value(`${w}.message`, v)
+        else throw new RecipeError(`${w}: unknown field ${JSON.stringify(k)} (check, message)`)
+      }
+      return out
+    })
+  }
+
   step(where: string, m: Obj, files: SideFiles | undefined): Obj {
     const out: Obj = {}
     for (const [k, v] of Object.entries(m)) {
@@ -413,8 +436,20 @@ function checkString(where: string, v: unknown): string {
 }
 
 /** The rendered tree as the typed recipe: what the daemon does not know is refused, as the Go decoder refuses it. */
-function typed(steps: Obj[], others: Obj): { steps: RenderedStep[] } {
+function typed(reqs: Obj[], steps: Obj[], others: Obj): { requirements?: RenderedRequirement[]; steps: RenderedStep[] } {
   for (const k of Object.keys(others)) throw new RecipeError(`unknown field ${JSON.stringify(k)}`)
+  const requirements = reqs.map((q, i) => {
+    const o: Obj = {}
+    for (const [k, v] of Object.entries(q)) {
+      const w = `requirements[${i}].${k}`
+      if (v === null) continue
+      if (k === 'check') {
+        if (!Array.isArray(v)) throw typeError(w, v, 'other')
+        o[k] = v.map((x, j) => (x === null ? '' : checkString(`${w}[${j}]`, x)))
+      } else o[k] = checkString(w, v)
+    }
+    return o as unknown as RenderedRequirement
+  })
   const out: RenderedStep[] = steps.map((st, i) => {
     const where = `steps[${i}]`
     const o: Obj = {}
@@ -449,7 +484,7 @@ function typed(steps: Obj[], others: Obj): { steps: RenderedStep[] } {
     }
     return o as RenderedStep
   })
-  return { steps: out }
+  return { ...(requirements.length ? { requirements } : {}), steps: out }
 }
 
 /**
@@ -462,6 +497,12 @@ export function render(text: string, values: Values = {}, files?: SideFiles): Re
   const decls = parseDecls(d.doc, d.vars)
   const r = new Renderer()
   r.resolve(decls, values)
+  let reqs: Obj[] = []
+  const rn = res(d.doc, d.reqs) as Node | null | undefined
+  if (!isNull(rn)) {
+    if (!isSeq(rn)) throw new RecipeError('requirements: a list of requirements, each with check and message')
+    reqs = r.requirements('requirements', (rn as Node).toJS(d.doc) as unknown[])
+  }
   let steps: unknown[] = []
   const sn = res(d.doc, d.steps) as Node | null | undefined
   if (!isNull(sn)) {
@@ -473,5 +514,5 @@ export function render(text: string, values: Values = {}, files?: SideFiles): Re
     return r.step(`steps[${i}]`, s, files)
   })
   for (const decl of decls) if (!r.used.has(decl.name)) throw new RecipeError(`vars.${decl.name}: declared and never used in the recipe`)
-  return { recipe: typed(rendered, d.others), decls, sensitive: r.secrets }
+  return { recipe: typed(reqs, rendered, d.others), decls, sensitive: r.secrets }
 }

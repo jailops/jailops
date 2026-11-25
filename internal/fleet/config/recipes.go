@@ -208,12 +208,12 @@ func (s *RecipeSource) check() error {
 }
 
 // loadRecipes reads the recipe directories a jail lists. A path stays inside recipes/ of the repository (a link out of a
-// recipe directory is refused) and a name occurs once per jail.
-func (f *Fleet) loadRecipes(doc *model.File) ([]RecipeSource, error) {
+// recipe directory is refused) and a name occurs once per jail, whether a profile or the jail lists it.
+func (f *Fleet) loadRecipes(refs []model.RecipeRef, vars map[string]string) ([]RecipeSource, error) {
 	var out []RecipeSource
 	seen := map[string]bool{}
 	declared := map[string]bool{}
-	for _, r := range doc.Recipes {
+	for _, r := range refs {
 		if !fs.ValidPath(r.Path) || path.Clean(r.Path) != r.Path || !strings.HasPrefix(r.Path, "recipes/") {
 			return nil, fmt.Errorf("recipe %q: a directory inside recipes/ of the repository, such as recipes/web", r.Path)
 		}
@@ -233,7 +233,7 @@ func (f *Fleet) loadRecipes(doc *model.File) ([]RecipeSource, error) {
 				return nil, fmt.Errorf("recipe %s: secrets.%s: %w", r.Path, k, err)
 			}
 		}
-		s := RecipeSource{Name: name, Path: r.Path, Vars: r.Vars, Secrets: r.Secrets, JailVars: doc.Vars, root: f.Path}
+		s := RecipeSource{Name: name, Path: r.Path, Vars: r.Vars, Secrets: r.Secrets, JailVars: vars, root: f.Path}
 		if err := s.check(); err != nil {
 			return nil, err
 		}
@@ -242,7 +242,7 @@ func (f *Fleet) loadRecipes(doc *model.File) ([]RecipeSource, error) {
 		}
 		out = append(out, s)
 	}
-	for _, k := range sortedKeys(doc.Vars) {
+	for _, k := range sortedKeys(vars) {
 		if !declared[k] {
 			return nil, fmt.Errorf("vars.%s: no recipe of the jail declares this variable", k)
 		}

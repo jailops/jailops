@@ -47,6 +47,13 @@ func (f *Fleet) Check() error {
 		}
 	}
 
+	// Recipes are for FreeBSD jails: sync skips them on a Linux jail, quietly. Said once, here.
+	for _, o := range f.Objects {
+		if js, ok := o.Spec.(api.JailSpec); ok && o.Kind == api.KindJail && js.OS == api.OSLinux && len(o.Recipes) > 0 {
+			note(o, "jail %s is a Linux jail: its recipes are for FreeBSD jails and sync skips them", o.Name)
+		}
+	}
+
 	errs = append(errs, f.checkNeeds()...)
 
 	// Every SOPS file needs a creation_rule, or nobody knows who may decrypt it.

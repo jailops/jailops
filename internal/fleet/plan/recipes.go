@@ -120,6 +120,10 @@ func planRecipes(ctx context.Context, c *sdk.Client, s *Session, opt Options, ho
 		if o.Kind != api.KindJail {
 			continue
 		}
+		// recipes are for FreeBSD jails: a Linux jail has no recipe items, so it is never drift or unknown
+		if isLinuxJail(o, live[o.Key()]) {
+			continue
+		}
 		all = append(all, o)
 		if len(o.Recipes) > 0 {
 			jails = append(jails, o)
@@ -223,6 +227,16 @@ func planRecipes(ctx context.Context, c *sdk.Client, s *Session, opt Options, ho
 		}
 	}
 	return out, nil
+}
+
+// isLinuxJail says whether the jail is a Linux jail: the one on the host when there is one, else the one the file declares.
+func isLinuxJail(o *config.Object, l Live) bool {
+	spec := l.Spec
+	if spec == nil {
+		spec = o.Spec
+	}
+	js, ok := spec.(api.JailSpec)
+	return ok && js.OS == api.OSLinux
 }
 
 // lookInside decides a recipe of a running jail: it compares the hash, and looks inside with a dry run when the hash

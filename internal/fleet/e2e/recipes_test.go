@@ -428,3 +428,82 @@ func TestRecipeSecretsNeverLeak(t *testing.T) {
 		t.Fatal("a re-encrypted secret did not run the recipe again")
 	}
 }
+
+const sshRequirement = "requirements:\n  - {check: [test, -x, /usr/sbin/sshd], message: sshd is not installed in the jail}\n"
+
+// A requirement of a recipe is part of its hash, a drift look does not run it, and a real apply that finds it unmet
+// leaves no record: the recipe is reported as failed, the other jails go on, and the next run applies it again.
+func TestRecipeRequirementFailureIsRetried(t *testing.T) {
+	e := recipeEnv(t, "")
+	e.Write("recipes/web/recipe.yaml", sshRequirement+webRecipe)
+	recipeJail(e, "app", "recipes:\n  - {path: recipes/web}\n")
+	recipeJail(e, "cache", "recipes:\n  - {path: recipes/web}\n")
+	srv := e.Hosts["web1"].Server
+	srv.SeedUnmetRequirement(fleettest.Project, "app", "install sshd")
+	r := mustFail(t, run(t, e, "sync", "--apply"), "sshd is not installed in the jail")
+	contains(t, r.out, "failed")
+	if labelsOf(t, e, "app")[recipeLabel+"web"] != "" {
+		t.Fatal("an unmet requirement left a record")
+	}
+	if labelsOf(t, e, "cache")[recipeLabel+"web"] == "" {
+		t.Fatal("the failure of one jail stopped another")
+	}
+	// the plan looks with a dry run, which runs no requirement: the recipe is still to apply, for the missing record
+	r = mustOK(t, run(t, e, "plan"))
+	contains(t, r.out, "no record on the jail")
+	for _, c := range srv.ApplyCalls() {
+		if c.Req.DryRun && len(c.Req.Recipe.Requirements) != 1 {
+			t.Fatalf("the dry run lost the requirement: %+v", c.Req.Recipe)
+		}
+	}
+	// the administrator fixes the jail: the next run applies the recipe and records it
+	srv.SeedUnmetRequirement(fleettest.Project, "app", "")
+	mustOK(t, run(t, e, "sync", "--apply"))
+	hash := labelsOf(t, e, "app")[recipeLabel+"web"]
+	if hash == "" {
+		t.Fatal("no record after the requirement was met")
+	}
+	// a changed requirement is a changed recipe: it is applied again
+	e.Write("recipes/web/recipe.yaml", strings.Replace(sshRequirement+webRecipe, "sshd is not installed", "the ssh daemon is missing", 1))
+	before := realApplies(e, "app")
+	mustOK(t, run(t, e, "sync", "--apply"))
+	if realApplies(e, "app") != before+1 || labelsOf(t, e, "app")[recipeLabel+"web"] == hash {
+		t.Fatal("a changed requirement did not make the recipe apply again")
+	}
+}
+
+// Recipes are for FreeBSD jails: a Linux jail that lists recipes, itself or through a profile, is left out of the plan
+// and of sync without a word: nothing is applied to it, it is never drift or unknown, and a FreeBSD jail of the same
+// recipe is done as before.
+func TestRecipesSkipALinuxJail(t *testing.T) {
+	e := recipeEnv(t, "")
+	e.Write("profiles/hardening.yaml", "apiVersion: jailops/v1\nkind: Profile\nmetadata:\n  name: hardening\nrecipes:\n  - {path: recipes/hardening}\nspec: {}\n")
+	e.Write("recipes/hardening/recipe.yaml", "steps:\n  - sysrc: {sendmail_enable: \"NO\"}\n")
+	recipeJail(e, "bsd", "recipes:\n  - {path: recipes/web}\n")
+	e.Write("projects/"+fleettest.Project+"/jails/lin.yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: [web1]\nmetadata:\n  name: lin\nstart: true\nrecipes:\n  - {path: recipes/web}\nspec:\n  image: freebsd-15\n  os: linux\n  profiles: [hardening]\n  storage: default\n  network:\n    - network: internal\n      ipv4: auto\n  firewall:\n    policies: [web]\n")
+	r := mustOK(t, run(t, e, "plan", "--json"))
+	for _, rc := range []string{"lin"} {
+		var rep struct{ Recipes []jsonRecipe }
+		if err := json.Unmarshal([]byte(r.out), &rep); err != nil {
+			t.Fatalf("not JSON: %v\n%s", err, r.out)
+		}
+		for _, it := range rep.Recipes {
+			if it.Jail == rc {
+				t.Fatalf("a Linux jail has a recipe item: %+v", it)
+			}
+		}
+	}
+	mustOK(t, run(t, e, "sync", "--apply"))
+	mustOK(t, run(t, e, "drift"))
+	if realApplies(e, "lin") != 0 {
+		t.Fatal("a recipe was applied to a Linux jail")
+	}
+	for _, c := range e.Hosts["web1"].Server.ApplyCalls() {
+		if c.Jail == "lin" {
+			t.Fatalf("a Linux jail was asked about a recipe: %+v", c)
+		}
+	}
+	if realApplies(e, "bsd") != 1 || labelsOf(t, e, "bsd")[recipeLabel+"web"] == "" {
+		t.Fatal("the FreeBSD jail was not done")
+	}
+}

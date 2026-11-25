@@ -8,7 +8,7 @@ import { api } from '@/api/endpoints'
 import { s } from '@/i18n'
 import { ApiError } from '@jailops/shared/api/client'
 import { runOp } from '@jailops/shared/composables/ops'
-import { declarations, parseVarsFile, render, RecipeError, type Rendered, type Values, type VarDecl } from '@/lib/recipe/render'
+import { declarations, parseVarsFile, render, RecipeError, type RenderedRequirement, type Rendered, type Values, type VarDecl } from '@/lib/recipe/render'
 import { readImport, pick, type Imported } from '@/lib/recipe/import'
 import type { ApplyResult } from '@jailops/shared/api/types'
 
@@ -28,6 +28,8 @@ export function useRecipe(jail: ComputedRef<string> | Ref<string>) {
   const problem = ref('')
   /** The number of steps of the last recipe the server found valid. */
   const valid = ref<number | null>(null)
+  /** The requirements of the last recipe the server found valid: checked in the jail when the recipe is applied. */
+  const requirements = ref<RenderedRequirement[]>([])
   const error = ref<ApiError | null>(null)
   const last = ref<RunResult | null>(null)
   const note = ref('')
@@ -52,6 +54,7 @@ export function useRecipe(jail: ComputedRef<string> | Ref<string>) {
   // an edit makes the last check and the last problem stale
   watch([text, files, () => ({ ...form })], () => {
     valid.value = null
+    requirements.value = []
     problem.value = ''
   })
 
@@ -97,12 +100,14 @@ export function useRecipe(jail: ComputedRef<string> | Ref<string>) {
   async function validate(): Promise<void> {
     error.value = null
     valid.value = null
+    requirements.value = []
     const r = build()
     if (!r) return
     busy.value = 'validate'
     try {
       const out = await api.recipes.validate({ recipe: r.recipe, sensitive: r.sensitive || undefined })
       valid.value = out.kind === 'sync' ? out.data.steps : r.recipe.steps.length
+      requirements.value = r.recipe.requirements ?? []
     } catch (e) {
       error.value = asApiError(e)
     } finally {
@@ -158,5 +163,5 @@ export function useRecipe(jail: ComputedRef<string> | Ref<string>) {
     }
   }
 
-  return { text, files, form, decls, declError, busy, problem, valid, error, last, note, validate, run, importFiles, clearSecrets, build }
+  return { text, files, form, decls, declError, busy, problem, valid, requirements, error, last, note, validate, run, importFiles, clearSecrets, build }
 }

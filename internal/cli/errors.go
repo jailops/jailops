@@ -48,7 +48,7 @@ func exitForCode(c api.Code) int {
 		return ExitConflict
 	case api.CodeUnsupported, api.CodeUnverified, api.CodeZFSIncompatible, api.CodeVersionSkew, api.CodeNotManaged:
 		return ExitUnsupported // not_managed: this host does not let JailOps do it
-	case api.CodeStepFailed:
+	case api.CodeStepFailed, api.CodeRequirementFailed:
 		return ExitFailure // the recipe's own command failed: not a fault of the server
 	case api.CodeInternal, api.CodeInterrupted:
 		return ExitInternal

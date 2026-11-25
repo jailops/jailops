@@ -127,6 +127,29 @@ describe('the Recipes tab', () => {
     expect(w!.findAll('[data-test="r-step"]').every((x) => x.text().includes('unchanged'))).toBe(true)
   })
 
+  it('shows the requirements, lists them as not checked in a dry run and stops an unmet one before any step', async () => {
+    mountTab()
+    const req = (check: string) => `requirements:\n  - check: [${check}]\n    message: sshd is not installed in the jail\nsteps:\n  - package: [curl]\n`
+    await type(req('test, -x, /usr/sbin/sshd'))
+    await t('r-validate').trigger('click')
+    await settle()
+    expect(t('r-requirement-preview').text()).toContain('sshd is not installed in the jail')
+    expect((seen.validate[0] as { recipe: { requirements: unknown[] } }).recipe.requirements).toHaveLength(1)
+    await t('r-dry').trigger('click')
+    await settle()
+    expect(t('r-requirement').text()).toContain('not checked')
+    await t('r-apply').trigger('click')
+    await settle()
+    expect(t('r-requirement').text()).toContain('met')
+    // a requirement that is not met: the error names it, and no step ran
+    await type(req('"false"'))
+    await t('r-apply').trigger('click')
+    await settle()
+    expect(t('error-panel').text()).toContain('requirement not met: sshd is not installed in the jail')
+    expect(t('r-unmet').text()).toContain('No step ran')
+    expect(w!.find('[data-test="r-steps"]').exists()).toBe(false)
+  })
+
   it('shows a failed step: which one, the exit status, and that the steps before it stay', async () => {
     mountTab()
     await type('steps:\n  - package: [curl]\n  - run: ["false"]\n')

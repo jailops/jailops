@@ -28,6 +28,7 @@ export type Code =
   | "internal"
   | "interrupted"
   | "step_failed"
+  | "requirement_failed"
   | "ip_conflict"
   | "pool_exhausted"
   | "image_in_use"
@@ -48,7 +49,7 @@ export type Code =
   | "locked"
   | "bad_passphrase"
 
-export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'precondition_failed', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'interrupted', 'step_failed', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired', 'not_managed', 'locked', 'bad_passphrase']
+export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'precondition_failed', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'interrupted', 'step_failed', 'requirement_failed', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired', 'not_managed', 'locked', 'bad_passphrase']
 
 export type DNSSource =
   | "network"
@@ -312,9 +313,15 @@ export interface ApplyRequest {
   sensitive?: boolean
 }
 
+export interface ApplyRequirement {
+  message: string
+  status: string
+}
+
 export interface ApplyResult {
   jail: string
   dry_run?: boolean
+  requirements?: ApplyRequirement[]
   steps: ApplyStep[]
 }
 
@@ -1717,6 +1724,7 @@ export interface ReachRule {
 }
 
 export interface Recipe {
+  requirements?: RecipeRequirement[]
   steps: RecipeStep[]
 }
 
@@ -1734,6 +1742,11 @@ export interface RecipeFile {
   mode?: string
   owner?: string
   group?: string
+}
+
+export interface RecipeRequirement {
+  check: string[]
+  message: string
 }
 
 export interface RecipeService {
@@ -1762,6 +1775,7 @@ export interface RecipeValidateRequest {
 export interface RecipeValidateResult {
   valid: boolean
   steps: number
+  requirements?: number
 }
 
 export interface Remote {

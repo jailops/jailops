@@ -74,3 +74,39 @@ func TestRecipe(t *testing.T) {
 		t.Error("nine MiB of files were accepted")
 	}
 }
+
+func TestRecipeRequirements(t *testing.T) {
+	steps := []api.RecipeStep{{Run: []string{"echo", "x"}}}
+	req := func(check []string, msg string) api.Recipe {
+		return api.Recipe{Requirements: []api.RecipeRequirement{{Check: check, Message: msg}}, Steps: steps}
+	}
+	if err := Recipe(req([]string{"test", "-x", "/usr/sbin/sshd"}, "sshd is not installed")); err != nil {
+		t.Fatal(err)
+	}
+	var many []api.RecipeRequirement
+	for i := 0; i <= RecipeMaxRequirements; i++ {
+		many = append(many, api.RecipeRequirement{Check: []string{"true"}, Message: "m"})
+	}
+	for name, r := range map[string]api.Recipe{
+		"no check":      req(nil, "m"),
+		"empty check":   req([]string{}, "m"),
+		"empty command": req([]string{""}, "m"),
+		"nul in a word": req([]string{"a\x00b"}, "m"),
+		"no message":    req([]string{"true"}, ""),
+		"blank message": req([]string{"true"}, "  "),
+		"two lines":     req([]string{"true"}, "a\nb"),
+		"long message":  req([]string{"true"}, strings.Repeat("x", 501)),
+		"too many":      {Requirements: many, Steps: steps},
+	} {
+		err := Recipe(r)
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		} else if !strings.Contains(err.Error(), "requirements") {
+			t.Errorf("%s: the error does not name the field: %v", name, err)
+		}
+	}
+	// a recipe of requirements alone still needs a step
+	if err := Recipe(api.Recipe{Requirements: req([]string{"true"}, "m").Requirements}); err == nil {
+		t.Error("a recipe without steps was accepted")
+	}
+}

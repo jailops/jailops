@@ -23,6 +23,7 @@ type applyFault struct {
 type fakeApply struct {
 	done  map[string]map[string]bool // jail key -> steps done
 	fault map[string]applyFault      // jail key -> the next real apply fails at a step
+	unmet map[string]string          // jail key -> the requirements of a real apply are not met (the text is the hint)
 	calls []ApplyCall
 }
 
@@ -40,6 +41,22 @@ func (s *Server) SeedApplyFailure(project, jail string, step int, msg string) {
 		return
 	}
 	s.apply.fault[k] = applyFault{step, msg}
+}
+
+// SeedUnmetRequirement makes a real apply of a recipe with requirements to the jail fail with requirement_failed before
+// any step, until it is called again with an empty hint.
+func (s *Server) SeedUnmetRequirement(project, jail, hint string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := project + "/" + jail
+	if s.apply.unmet == nil {
+		s.apply.unmet = map[string]string{}
+	}
+	if hint == "" {
+		delete(s.apply.unmet, k)
+		return
+	}
+	s.apply.unmet[k] = hint
 }
 
 // SeedApplyDrift forgets what was applied to the jail: a person changed it, and a dry run finds every step to change.

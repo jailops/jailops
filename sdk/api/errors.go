@@ -29,19 +29,20 @@ const (
 	CodeUnverified         Code = "unverified_platform" // needs FreeBSD or a missing kernel feature
 	CodeZFSIncompatible    Code = "zfs_incompatible"
 	CodeChainBroken        Code = "chain_broken"
-	CodeMergeConflict      Code = "merge_conflict"   // reserved; the server does not return it (an upgrade makes no /etc merge)
-	CodeQuotaExceeded      Code = "quota_exceeded"   // a project quota or the storage quota of a backup host would be exceeded
-	CodeRateLimited        Code = "rate_limited"     // too many failed attempts (HTTP 429)
-	CodeKeyNotEscrowed     Code = "key_not_escrowed" // raw backup refused: no recoverable key escrow
-	CodePlaintextDenied    Code = "plaintext_denied" // node target needs encrypted data or allow_plaintext
-	CodeMaintenance        Code = "maintenance"      // the backup node is read-only or offline (HTTP 503); retry later
-	CodeMissingChunks      Code = "missing_chunks"   // a commit references chunks the repository lacks (HTTP 409); upload them and retry
-	CodeLeaseExpired       Code = "lease_expired"    // the backup session timed out or was closed (HTTP 410)
-	CodeNotManaged         Code = "not_managed"      // a host management module is not enabled (HTTP 403); the hint names the lines to add
-	CodeLocked             Code = "locked"           // an encrypted volume waits for its passphrase (HTTP 409); unlock the jail first
-	CodeBadPassphrase      Code = "bad_passphrase"   // the passphrase of an encrypted volume is wrong (HTTP 403); nothing else is said
-	CodeStepFailed         Code = "step_failed"      // a step of a recipe failed (HTTP 422): the message names the step, the exit status and, unless the request is sensitive, the output
-	CodeInterrupted        Code = "interrupted"      // the daemon stopped while the operation ran; error.detail.recovery says what startup recovery did (Recovery*)
+	CodeMergeConflict      Code = "merge_conflict"     // reserved; the server does not return it (an upgrade makes no /etc merge)
+	CodeQuotaExceeded      Code = "quota_exceeded"     // a project quota or the storage quota of a backup host would be exceeded
+	CodeRateLimited        Code = "rate_limited"       // too many failed attempts (HTTP 429)
+	CodeKeyNotEscrowed     Code = "key_not_escrowed"   // raw backup refused: no recoverable key escrow
+	CodePlaintextDenied    Code = "plaintext_denied"   // node target needs encrypted data or allow_plaintext
+	CodeMaintenance        Code = "maintenance"        // the backup node is read-only or offline (HTTP 503); retry later
+	CodeMissingChunks      Code = "missing_chunks"     // a commit references chunks the repository lacks (HTTP 409); upload them and retry
+	CodeLeaseExpired       Code = "lease_expired"      // the backup session timed out or was closed (HTTP 410)
+	CodeNotManaged         Code = "not_managed"        // a host management module is not enabled (HTTP 403); the hint names the lines to add
+	CodeLocked             Code = "locked"             // an encrypted volume waits for its passphrase (HTTP 409); unlock the jail first
+	CodeBadPassphrase      Code = "bad_passphrase"     // the passphrase of an encrypted volume is wrong (HTTP 403); nothing else is said
+	CodeStepFailed         Code = "step_failed"        // a step of a recipe failed (HTTP 422): the message names the step, the exit status and, unless the request is sensitive, the output
+	CodeRequirementFailed  Code = "requirement_failed" // a requirement of a recipe is not met (HTTP 422): no step ran and nothing was changed; the message names each unmet requirement and the exit status of its check
+	CodeInterrupted        Code = "interrupted"        // the daemon stopped while the operation ran; error.detail.recovery says what startup recovery did (Recovery*)
 )
 
 // The values of error.detail.recovery on an interrupted operation: what startup recovery did with the run the
@@ -107,7 +108,7 @@ func (c Code) HTTPStatus() int {
 		return http.StatusConflict
 	case CodeRateLimited:
 		return http.StatusTooManyRequests
-	case CodeKeyNotEscrowed, CodePlaintextDenied, CodeStepFailed:
+	case CodeKeyNotEscrowed, CodePlaintextDenied, CodeStepFailed, CodeRequirementFailed:
 		return http.StatusUnprocessableEntity
 	case CodeMergeConflict:
 		return http.StatusConflict

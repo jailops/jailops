@@ -457,7 +457,9 @@ jailops image upgrade
 jailops info
 jailops jail  (aliases: jails)
 jailops jail apply
+    --all bool
     --file/-f string
+    --selector/-l stringArray
     --set stringArray
     --set-file stringArray
     --validate bool
