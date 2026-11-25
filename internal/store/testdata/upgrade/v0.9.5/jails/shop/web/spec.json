@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "metadata": {
+    "name": "web",
+    "uuid": "11111111-1111-4111-8111-111111111111",
+    "project": "shop",
+    "host": "00000000-0000-4000-8000-0000000000a1",
+    "scope": "host",
+    "generation": 1
+  },
+  "spec": {
+    "image": "freebsd-15-1",
+    "storage": "default",
+    "update": {},
+    "resources": {
+      "memory": "1G",
+      "pids": 200
+    },
+    "network": [
+      {
+        "network": "lan",
+        "ipv4": "10.77.0.2",
+        "ipv6": "2001:db8:77:1::10"
+      }
+    ],
+    "firewall": {
+      "policies": [
+        "web-access"
+      ]
+    },
+    "volumes": [
+      {
+        "volume": "data",
+        "mount": "/srv/data"
+      }
+    ],
+    "boot": {
+      "autostart": true,
+      "priority": 10
+    },
+    "expose": [
+      {
+        "proto": "tcp",
+        "ports": [
+          "80",
+          "443"
+        ],
+        "families": [
+          "4",
+          "6"
+        ],
+        "comment": "the site"
+      }
+    ]
+  }
+}
