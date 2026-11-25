@@ -10,6 +10,13 @@ API surface, in-place upgrades that keep what a host holds, the FreeBSD releases
 [supported-versions.md](supported-versions.md), and the release gates. It does not contain a cluster, a move of a jail to
 another host as one command or automatic failover, and none of them is planned (see below).
 
+## Next release
+
+- **`jailops jail audit` looks at the processes of a running jail.** A process that runs as root and is not one of the usual
+  system processes (init, cron, syslogd, sshd and the like) is a WARN, because a process as root in a jail is a real risk and often
+  a reason to give the service its own user. The list is read on the host, so the jail stays untouched. A stopped jail is still audited
+  by its files and settings, and its process check says why it was not made.
+
 ## Long-term roadmap
 
 After 1.0, in this order. The order matters more than the dates, and there are none. An item moves when something we learn says it should.
