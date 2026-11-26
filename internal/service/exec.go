@@ -45,9 +45,9 @@ type JailExecer interface {
 type ExecLimits struct {
 	// PerJail is the number of concurrent sessions of one jail (default 8).
 	PerJail int
-	// Idle ends a session in which nothing moves for this long (default 30m).
+	// Idle ends a session in which nothing moves for this long (zero: no limit, the default).
 	Idle time.Duration
-	// Max ends a session after this long (default 12h).
+	// Max ends a session after this long (zero: no limit, the default).
 	Max time.Duration
 }
 
@@ -55,12 +55,7 @@ func (l ExecLimits) withDefaults() ExecLimits {
 	if l.PerJail <= 0 {
 		l.PerJail = 8
 	}
-	if l.Idle <= 0 {
-		l.Idle = 30 * time.Minute
-	}
-	if l.Max <= 0 {
-		l.Max = 12 * time.Hour
-	}
+	l.Idle, l.Max = max(l.Idle, 0), max(l.Max, 0)
 	return l
 }
 

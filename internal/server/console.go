@@ -234,19 +234,27 @@ func (s *Server) runConsole(cs *consoleSession) {
 		}
 		exited <- code
 	}()
-	maxT := time.NewTimer(lim.Max)
-	defer maxT.Stop()
-	tick := time.NewTicker(lim.Idle/4 + time.Millisecond)
-	defer tick.Stop()
+	// A nil channel never fires: a limit that is zero is not enforced.
+	var maxC, tickC <-chan time.Time
+	if lim.Max > 0 {
+		maxT := time.NewTimer(lim.Max)
+		defer maxT.Stop()
+		maxC = maxT.C
+	}
+	if lim.Idle > 0 {
+		tick := time.NewTicker(lim.Idle/4 + time.Millisecond)
+		defer tick.Stop()
+		tickC = tick.C
+	}
 	var code int
 loop:
 	for {
 		select {
 		case code = <-exited:
 			break loop
-		case <-maxT.C:
+		case <-maxC:
 			_ = sess.Signal(9)
-		case <-tick.C:
+		case <-tickC:
 			cs.mu.Lock()
 			idle := time.Since(cs.last) > lim.Idle
 			cs.mu.Unlock()

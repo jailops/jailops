@@ -689,7 +689,8 @@ protocol that the web console uses: plain HTTPS requests plus an event stream,
 no connection upgrade, so it also works through proxies that cannot upgrade.
 The local terminal is switched to raw mode for the session and window size
 changes are forwarded. The session is audited and ends when the shell exits,
-at the idle or maximum time of the server, or when you close it.
+when you close it, or at the idle or maximum time of the server if the
+administrator set one (by default there is none).
 
 It needs the same rights as 'jailops exec'. Prefer 'jailops shell' when the
 connection can be upgraded: it carries binary input and one request per

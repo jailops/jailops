@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`jailops shell`, `jailops exec` and the console no longer end a session after 30 minutes without traffic or 12 hours.** `limits.exec_idle` and `limits.exec_max` are off unless set (unset or `0`: no limit, like an ssh login); a positive duration is enforced as before and a negative one is a configuration error. A quiet long command such as `pg_dump | gzip` or `zfs send` is no longer killed; revoking the credential still ends a session. (#203)
+
 ## 0.9.6 - 2026-11-25
 
 - **`jailops jail apply` takes many jails.** `-l KEY=VAL` (`--label` is the same) selects the jails that carry the labels and `--all` every jail of the project, as `jailops jail base add` does; a name and a selection exclude each other, and a Linux jail is not part of a selection. The recipe is rendered once (a file of `--set-file` is read once) and each jail is done on its own, one after the other, with one block of result per jail; a failure on one jail is reported as `jail/NAME: failed: ...` and the others go on, and the exit code is non-zero if any failed. `--dry-run` and `--validate` work with a selection. A jail that sync manages is named in the warning.

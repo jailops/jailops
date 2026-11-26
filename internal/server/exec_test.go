@@ -198,3 +198,62 @@ func TestExecThroughAHub(t *testing.T) {
 		t.Fatalf("host ran %d commands", n)
 	}
 }
+
+// execEnds runs the quiet "sleep" command under the given limits. It reports whether the server ended the session within
+// wait, and the stderr text and status; a session still alive after wait is killed by the test.
+func execEnds(t *testing.T, mutate func(c *daemon.Config), wait time.Duration) (ended bool, stderr string, code int) {
+	t.Helper()
+	e := dtest.New(t, dtest.Options{Mutate: mutate})
+	e.Seed()
+	c := ctxT(t)
+	startedWeb(t, e)
+	s, err := e.Admin.Jails().Exec(c, "web", []string{"sleep"}, sdk.ExecOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		stderr string
+		code   int
+	}
+	done := make(chan result, 1)
+	go func() { _, se, code := drain(s); done <- result{se, code} }()
+	select {
+	case r := <-done:
+		return true, r.stderr, r.code
+	case <-time.After(wait):
+		_ = s.Signal(9)
+		<-done
+		return false, "", 0
+	}
+}
+
+func TestExecLimitsAreOffByDefault(t *testing.T) {
+	// Zero means no limit, whether the key is unset or written as 0. The idle ticker used to fire every quarter of the limit;
+	// a session that is silent for longer than any positive limit used here must stay.
+	for name, mutate := range map[string]func(c *daemon.Config){
+		"unset": nil,
+		"zero": func(c *daemon.Config) {
+			c.Limits.ExecIdle, c.Limits.ExecMax = 0, 0
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if ended, se, _ := execEnds(t, mutate, 2*time.Second); ended {
+				t.Fatalf("a quiet session was ended without a limit: %q", se)
+			}
+		})
+	}
+}
+
+func TestExecIdleLimitEndsAQuietSession(t *testing.T) {
+	ended, se, code := execEnds(t, func(c *daemon.Config) { c.Limits.ExecIdle = daemon.Duration(time.Second) }, 20*time.Second)
+	if !ended || code == 0 || !strings.Contains(se, "jailops: the session was idle too long") {
+		t.Fatalf("ended=%v code=%d stderr=%q", ended, code, se)
+	}
+}
+
+func TestExecMaxLimitEndsASession(t *testing.T) {
+	ended, se, code := execEnds(t, func(c *daemon.Config) { c.Limits.ExecMax = daemon.Duration(time.Second) }, 20*time.Second)
+	if !ended || code == 0 || !strings.Contains(se, "jailops: the session reached its maximum duration") {
+		t.Fatalf("ended=%v code=%d stderr=%q", ended, code, se)
+	}
+}
