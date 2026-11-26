@@ -42,7 +42,7 @@ FreeBSD-base: {
 			},
 		},
 		HasPkgDB: true, Packages: 52, BasePackages: 50, UsedBytes: 70 << 20, DiskLimit: "10G", Running: true,
-		Hostname: "web", Addresses: []string{"10.0.0.5"}, JailopsRepoURL: "https://pkg.example.net/jailops",
+		Hostname: "web", Addresses: []string{"10.0.0.5"},
 		Vulns:       VulnAudit{DBDays: 1},
 		BaseUpdates: BaseUpdates{Checked: true, At: time.Date(2026, 11, 24, 3, 0, 0, 0, time.UTC)},
 		Params:      ParseJailConf(renderedConf),
@@ -308,8 +308,22 @@ func TestSSHDKeyboardInteractiveThroughPAMIsAPassword(t *testing.T) {
 	}
 }
 
-func TestRepoURL(t *testing.T) {
-	if u := RepoURL("# c\njailops: {\n  url: \"https://pkg.example.net/x\", // the mirror\n  enabled: yes\n}\n", "jailops"); u != "https://pkg.example.net/x" {
-		t.Fatalf("%q", u)
+// A repository the administrator added is fine when it is signed or fetched over https; only one that is neither is named.
+func TestCheckReposOnlyNamesUnsignedPlainHTTP(t *testing.T) {
+	repo := func(body string) Input {
+		return Input{Facts: Facts{Texts: map[string]string{"/usr/local/etc/pkg/repos/acme.conf": body}}}
+	}
+	for body, want := range map[string]api.JailAuditResult{
+		"acme: { url: \"https://pkg.example.org/x\" }":                                            api.AuditPass, // https
+		"acme: { url: \"http://pkg.example.org/x\", signature_type: \"pubkey\", pubkey: \"/k\" }": api.AuditPass, // signed
+		"acme: { url: \"http://pkg.example.org/x\", signature_type: \"fingerprints\" }":           api.AuditPass,
+		"acme: { url: \"pkg+https://pkg.example.org/x\" }":                                        api.AuditPass,
+		"acme: { url: \"http://pkg.example.org/x\" }":                                             api.AuditWarn,
+		"acme: { url: \"http://pkg.example.org/x\", signature_type: \"none\" }":                   api.AuditWarn,
+		"acme: { url: \"http://pkg.example.org/x\", enabled: no }":                                api.AuditPass, // off
+	} {
+		if c := checkRepos(repo(body)); c.Result != want {
+			t.Errorf("%s: %s, want %s (%s)", body, c.Result, want, c.Detail)
+		}
 	}
 }

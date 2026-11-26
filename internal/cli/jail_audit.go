@@ -24,7 +24,7 @@ jails and security, the CIS FreeBSD Benchmark): a link out of the root where the
 pkg's own files, a pkg.conf with plugins (CRITICAL, as for an upgrade); an account with uid 0 besides root and toor
 (CRITICAL); an account with an empty password; set-uid or set-gid files no package installed; directories anyone may
 write to without the sticky bit; files anyone may write to outside /tmp; files whose owner or group the jail does
-not have; package repositories that are not FreeBSD's; FreeBSD-base enabled inside the jail; packages with known
+not have; an enabled package repository that is neither signed nor fetched over https; FreeBSD-base enabled inside the jail; packages with known
 vulnerabilities (pkg audit, with the host's vulnerability database); newer base packages the last update check
 found; programs or libraries of the base that differ from their packages; sshd allowing root logins or passwords;
 enforce_statfs below 2.

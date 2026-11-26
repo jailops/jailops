@@ -2,7 +2,6 @@ package jailaudit
 
 import (
 	"fmt"
-	"net/url"
 	"path"
 	"regexp"
 	"slices"
@@ -36,8 +35,6 @@ type Input struct {
 	Addresses []string
 	Shell     string
 	Prompt    string
-	// JailopsRepoURL is the url of the host's JailOps package repository, which a jail with an app has ("" for none).
-	JailopsRepoURL string
 	// Vulns is what pkg audit found in a copy of the jail's package database with the host's vulnerability database.
 	Vulns VulnAudit
 	// BaseUpdates is what the last update check of the jail said of its base packages.
@@ -264,8 +261,8 @@ func checkSetID(in Input) api.JailAuditCheck {
 // repo is one package repository as pkg sees it after reading every file: where it is and whether it is on.
 type repo struct {
 	// File is the file that gave the url, On the last one that said whether it is enabled.
-	Name, URL, File, On string
-	Enabled             bool
+	Name, URL, Signature, File, On string
+	Enabled                        bool
 }
 
 // where is the file that decides whether the repository is on: the last one to say so, else the one that made it.
@@ -300,6 +297,9 @@ func repos(texts map[string]string) []repo {
 				if v, ok := b.keys["url"]; ok {
 					r.URL, r.File = v, p
 				}
+				if v, ok := b.keys["signature_type"]; ok {
+					r.Signature = strings.ToLower(v)
+				}
 				if v, ok := b.keys["enabled"]; ok {
 					r.Enabled, r.On = isYes(v), p
 				}
@@ -320,11 +320,11 @@ type uclBlock struct {
 
 var (
 	reUCLStart = regexp.MustCompile(`^\s*"?([A-Za-z0-9_.-]+)"?\s*[:=]?\s*\{`)
-	reUCLKey   = regexp.MustCompile(`(?i)^\s*(url|enabled)\s*[:=]\s*(?:"([^"]*)"|([^,;}\s]*))`)
+	reUCLKey   = regexp.MustCompile(`(?i)^\s*(url|enabled|signature_type)\s*[:=]\s*(?:"([^"]*)"|([^,;}\s]*))`)
 )
 
 // uclBlocks reads the top-level blocks of a repository file of pkg (UCL as the files of FreeBSD write it: NAME: { key:
-// value, ... }), with the keys url and enabled. Comments (#, //) are skipped.
+// value, ... }), with the keys url, enabled and signature_type. Comments (#, //) are skipped.
 func uclBlocks(text string) []uclBlock {
 	var out []uclBlock
 	depth := 0
@@ -369,42 +369,29 @@ func isYes(v string) bool {
 	return false
 }
 
-// officialRepos are the repositories FreeBSD's own files name.
-var officialRepos = []string{"FreeBSD", "FreeBSD-ports", "FreeBSD-ports-kmods", "FreeBSD-base"}
-
-// freebsdHost says whether a repository url is on FreeBSD's package servers.
-func freebsdHost(raw string) bool {
-	u, err := url.Parse(strings.TrimPrefix(raw, "pkg+"))
-	if err != nil {
-		return false
-	}
-	h := strings.ToLower(u.Hostname())
-	return h == "pkg.freebsd.org" || strings.HasSuffix(h, ".freebsd.org")
+// httpsURL says whether a repository url is fetched over https (pkg's own scheme prefix pkg+ is read through).
+func httpsURL(raw string) bool {
+	return strings.HasPrefix(strings.TrimPrefix(raw, "pkg+"), "https://")
 }
 
 func checkRepos(in Input) api.JailAuditCheck {
 	const id = "pkg.repositories"
-	var odd []string
+	var weak []string
 	for _, r := range repos(in.Facts.Texts) {
-		if !r.Enabled {
+		if !r.Enabled || r.Signature == "pubkey" || r.Signature == "fingerprints" || httpsURL(r.URL) {
 			continue
 		}
-		switch {
-		case slices.Contains(officialRepos, r.Name) && (r.URL == "" || freebsdHost(r.URL)):
-		case r.Name == "jailops" && in.JailopsRepoURL != "" && r.URL == in.JailopsRepoURL:
-		default:
-			u := r.URL
-			if u == "" {
-				u = "no url"
-			}
-			odd = append(odd, fmt.Sprintf("%s (%s, in %s)", r.Name, u, r.File))
+		u := r.URL
+		if u == "" {
+			u = "no url"
 		}
+		weak = append(weak, fmt.Sprintf("%s (%s, in %s)", r.Name, u, r.File))
 	}
-	if len(odd) == 0 {
-		return pass(id, GroupSecurity, "the enabled package repositories are FreeBSD's (and the host's JailOps repository)")
+	if len(weak) == 0 {
+		return pass(id, GroupSecurity, "every enabled package repository is signed or fetched over https")
 	}
-	return found(id, GroupSecurity, api.AuditWarn, "repositories that are not FreeBSD's: "+listed(odd, 0),
-		"keep a repository you added on purpose; otherwise remove its file or set enabled: no in it")
+	return found(id, GroupSecurity, api.AuditWarn, "repositories that are neither signed nor fetched over https: "+listed(weak, 0),
+		"give the repository a key (signature_type: \"pubkey\" and pubkey: ...), or an https url, or set enabled: no in its file")
 }
 
 func checkBaseRepo(in Input) api.JailAuditCheck {
@@ -835,14 +822,4 @@ func checkDevfsRuleset(in Input) api.JailAuditCheck {
 	}
 	return found(id, GroupPractice, api.AuditInfo, fmt.Sprintf("devfs_ruleset = %d: neither the stock ruleset of jails (4) nor the one JailOps makes for the jail's devices", p.DevfsRuleset),
 		"restart the jail: JailOps renders its jail.conf from the spec")
-}
-
-// RepoURL is the url the repository file text gives the repository name ("" for none).
-func RepoURL(text, name string) string {
-	for _, b := range uclBlocks(text) {
-		if b.name == name {
-			return b.keys["url"]
-		}
-	}
-	return ""
 }
