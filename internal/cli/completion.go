@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,14 @@ func (a *app) finishCompletion(root *cobra.Command) {
 				c.ValidArgsFunction = completeNone
 			}
 		}
+		if c.Runnable() && len(c.Commands()) == 0 && c.ValidArgsFunction != nil {
+			most := maxArgs(c)
+			c.ValidArgsFunction = stopAtLastArgument(c.ValidArgsFunction, most)
+			if c.Annotations == nil {
+				c.Annotations = map[string]string{}
+			}
+			c.Annotations[maxArgsAnnotation] = strconv.Itoa(most)
+		}
 		c.NonInheritedFlags().VisitAll(func(f *pflag.Flag) {
 			if _, ok := c.GetFlagCompletionFunc(f.Name); ok {
 				return
@@ -62,6 +71,44 @@ func (a *app) finishCompletion(root *cobra.Command) {
 	}
 	walk(root)
 }
+
+// maxArgsProbe is how many positional arguments maxArgs tries; a command that still accepts that many takes any number.
+const maxArgsProbe = 16
+
+// maxArgs is the most positional arguments a command accepts, read from its own Args check by trying 0..maxArgsProbe
+// arguments, or -1 when it takes any number.
+func maxArgs(c *cobra.Command) int {
+	if c.Args == nil {
+		return -1
+	}
+	most := -1
+	for n := 0; n <= maxArgsProbe; n++ {
+		if c.Args(c, make([]string, n)) == nil {
+			most = n
+		}
+	}
+	if most == maxArgsProbe {
+		return -1
+	}
+	return most
+}
+
+// stopAtLastArgument makes a completion offer nothing, and not the files of the directory, once the command has all
+// the arguments it accepts: a name after the last one would only fail with a usage error. max is -1 for no limit.
+func stopAtLastArgument(fn completer, max int) completer {
+	if max < 0 {
+		return fn
+	}
+	return func(cmd *cobra.Command, args []string, p string) ([]string, cobra.ShellCompDirective) {
+		if len(args) >= max {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		return fn(cmd, args, p)
+	}
+}
+
+// maxArgsAnnotation records the most arguments a command accepts (-1 for any number) once its completion stops there.
+const maxArgsAnnotation = "completion.maxargs"
 
 // typedAnnotation marks a command whose positional argument is typed by the operator and completes nothing.
 const typedAnnotation = "completion.typed"

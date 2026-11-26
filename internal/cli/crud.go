@@ -630,7 +630,9 @@ picks its columns and --sort orders its rows (columns: ` + strings.Join(d.column
 	if d.granted != nil {
 		cols = append(cols, "granted", "projects")
 	}
-	enumFlag(cmd, "columns", cols...)
+	_ = cmd.RegisterFlagCompletionFunc("columns", commaList(func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return cols, cobra.ShellCompDirectiveNoFileComp
+	}))
 	enumFlag(cmd, "sort", cols...)
 	if d.granted != nil {
 		cmd.Flags().BoolVar(&all, "all-projects", false, "every "+d.noun+" of the host with the projects it is granted to (a global administrator); the default is what the selected project is granted")

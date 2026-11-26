@@ -100,3 +100,59 @@ func TestAtSignIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// A command that has all its arguments completes nothing more, and not the files of the directory: the server's
+// names would only end in a usage error. `columns` completes every element of its comma separated list.
+func TestCompletionStopsAfterTheLastArgumentOnTheServer(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	h.srv.SeedImage(api.Image{Metadata: api.ObjectMeta{Name: "freebsd-151"},
+		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}})
+	h.srv.SeedGeneration("freebsd-151")
+	for _, name := range []string{"db", "web"} {
+		if o, e, code := h.run("", "jail", "create", name, "--image", "freebsd-151", "--network", "lan", "--storage", "default"); code != 0 {
+			t.Fatalf("%s: %s %s", name, o, e)
+		}
+	}
+	complete := func(args ...string) []string {
+		out, _, code := h.run("", append([]string{"__complete"}, args...)...)
+		if code != 0 {
+			t.Fatalf("%v: %d", args, code)
+		}
+		var names []string
+		for _, l := range strings.Split(out, "\n") {
+			if l != "" && !strings.HasPrefix(l, ":") {
+				names = append(names, strings.SplitN(l, "\t", 2)[0])
+			}
+		}
+		return names
+	}
+	if got := complete("jail", "show", ""); !slices.Contains(got, "web") {
+		t.Fatalf("jail show offers %v, want the jails", got)
+	}
+	for _, args := range [][]string{
+		{"jail", "show", "db", ""},
+		{"project", "show", "main", ""},
+		{"volume", "show", "vol1", ""},
+		{"remote", "switch", "local", ""},
+		{"config", "get", "db", "boot.autostart", ""},
+		{"expose", "db", "22", ""},
+		{"unexpose", "db", "22", ""},
+	} {
+		if got := complete(args...); len(got) != 0 {
+			t.Errorf("%v: offers %v after the last argument", args, got)
+		}
+		if out, _, _ := h.run("", append([]string{"__complete"}, args...)...); !strings.Contains(out, ":4") {
+			t.Errorf("%v: the files of the directory are not ruled out: %q", args, out)
+		}
+	}
+	got := complete("list", "-c", "name,")
+	if len(got) == 0 {
+		t.Errorf("list -c name, offers nothing, want the columns after the comma")
+	}
+	for _, g := range got {
+		if !strings.HasPrefix(g, "name,") {
+			t.Errorf("list -c name, offers %q, want the head kept", g)
+		}
+	}
+}
