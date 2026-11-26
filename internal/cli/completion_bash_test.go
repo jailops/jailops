@@ -163,7 +163,8 @@ func TestBashCompletion(t *testing.T) {
 		// cp: jail names with a colon, then the paths inside the jail, never the files of this machine
 		{line: "jailops cp w", want: []string{"web:"}, none: []string{"db:"}},
 		{line: "jailops cp ./a.yaml d", want: []string{"db:"}, none: []string{"web:"}},
-		{line: "jailops cp a", want: []string{"a.yaml"}, none: []string{"web:"}, needsBash: true},
+		// no jail starts with a: the script offers nothing and readline's default filename completion (complete -o default) takes over
+		{line: "jailops cp a", empty: true},
 		{line: "jailops cp web:", want: []string{"/"}, none: []string{"a.yaml", "b.txt"}},
 		{line: "jailops cp web:/et", want: []string{"/etc/"}, none: []string{"web:/etc/"}},
 		{line: "jailops cp web:/etc/", want: []string{"/etc/motd", "/etc/rc.conf"}, none: []string{"a.yaml"}},
