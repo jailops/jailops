@@ -66,6 +66,14 @@ func (s *Server) handleFileGet(c *rc) error {
 		c.sync(200, st, "")
 		return nil
 	}
+	if q.Get(api.FileQueryList) == "true" {
+		l, err := s.svc.JailFileList(ctx, name, p)
+		if err != nil {
+			return err
+		}
+		c.sync(200, l, "")
+		return nil
+	}
 	flag := func(k string) bool { return q.Get(k) == "true" }
 	opts := service.JailFileGetOpts{Recursive: flag(api.FileQueryRecursive), Preserve: flag(api.FileQueryPreserve), As: q.Get(api.FileQueryAs)}
 	if opts.As != "" && strings.ContainsAny(opts.As, "/\x00") {

@@ -27,6 +27,21 @@ func (j *JailClient) FileStat(ctx context.Context, name, p string) (api.JailFile
 	return st, err
 }
 
+// FileList lists the entries of a directory inside a jail, by name (extension jail_files_list): at most
+// api.MaxFileListEntries, and Truncated says when the directory has more. It reads without taking the jail's lock and
+// is not audited; a symlink is never followed, in the path or among the entries.
+func (j *JailClient) FileList(ctx context.Context, name, p string) (api.JailFileList, error) {
+	if err := j.c.need("jail_files_list"); err != nil {
+		return api.JailFileList{}, err
+	}
+	cp, err := api.CleanJailFilePath(p)
+	if err != nil {
+		return api.JailFileList{}, err
+	}
+	l, _, err := get[api.JailFileList](ctx, j.c, j.r.item(name)+"/files/"+escapePath(cp), url.Values{api.FileQueryList: {"true"}})
+	return l, err
+}
+
 // FileGetOptions are the options of FileGet.
 type FileGetOptions struct {
 	// Archive asks for a tar stream: of a regular file, a symlink or (with Recursive) a directory tree. Without it the

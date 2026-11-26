@@ -141,6 +141,33 @@ func (s *Server) jailFileGet(w http.ResponseWriter, r *http.Request) {
 		writeSync(w, 200, st)
 		return
 	}
+	if q.Get(api.FileQueryList) == "true" {
+		if n == nil {
+			writeErr(w, notFound("file", "/"+p))
+			return
+		}
+		if n.kind != 'd' {
+			writeErr(w, api.Errorf(api.CodeInvalid, "/%s is not a directory", p))
+			return
+		}
+		l := api.JailFileList{Path: "/" + p, Entries: []api.JailFileEntry{}}
+		for _, c := range children(t, p) {
+			if len(l.Entries) == api.MaxFileListEntries {
+				l.Truncated = true
+				break
+			}
+			e := api.JailFileEntry{Name: path.Base(c), Type: api.FileTypeFile}
+			switch t[c].kind {
+			case 'd':
+				e.Type = api.FileTypeDir
+			case 'l':
+				e.Type = api.FileTypeSymlink
+			}
+			l.Entries = append(l.Entries, e)
+		}
+		writeSync(w, 200, l)
+		return
+	}
 	if n == nil {
 		writeErr(w, notFound("file", "/"+p))
 		return

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -341,5 +342,74 @@ func TestJailPutMakesParentsRootWheel0755(t *testing.T) {
 	}
 	if st, err := os.Stat(filepath.Join(root, "opt/app/conf/f")); err != nil || st.Mode().Perm() != 0o600 {
 		t.Errorf("the file keeps its own mode: %v %v", st, err)
+	}
+}
+
+func TestJailList(t *testing.T) {
+	e := newEnv(t)
+	jail, root := jfTree(t, e)
+	ctx := context.Background()
+	l, err := e.local.JailList(ctx, service.JailStatReq{Jail: jail, Root: root, Path: "etc"})
+	if err != nil || l.Path != "/etc" || l.Truncated {
+		t.Fatalf("%+v %v", l, err)
+	}
+	got := map[string]api.JailFileType{}
+	var names []string
+	for _, en := range l.Entries {
+		got[en.Name] = en.Type
+		names = append(names, en.Name)
+	}
+	// a symlink is listed as a symlink, never followed; the entries come by name
+	if len(got) != 3 || got["motd"] != api.FileTypeFile || got["inside"] != api.FileTypeSymlink || got["out"] != api.FileTypeSymlink {
+		t.Errorf("%v", got)
+	}
+	if strings.Join(names, " ") != "inside motd out" {
+		t.Errorf("order %v", names)
+	}
+	if l, err = e.local.JailList(ctx, service.JailStatReq{Jail: jail, Root: root}); err != nil || len(l.Entries) == 0 || l.Path != "/" {
+		t.Errorf("root: %+v %v", l, err)
+	}
+	for p, code := range map[string]api.Code{
+		"etc/motd":     api.CodeInvalid,   // a file is not a directory
+		"etc/missing":  api.CodeNotFound,  // nothing there
+		"etcdir":       api.CodeForbidden, // a symlink to a directory is not followed
+		"etc/out":      api.CodeForbidden,
+		"etcdir/inner": api.CodeForbidden,
+		"../x":         api.CodeInvalid,
+		"a//b":         api.CodeInvalid,
+	} {
+		if _, err := e.local.JailList(ctx, service.JailStatReq{Jail: jail, Root: root, Path: p}); !api.IsCode(err, code) {
+			t.Errorf("%q: %v, want %s", p, err, code)
+		}
+	}
+}
+
+func TestJailListIsCapped(t *testing.T) {
+	e := newEnv(t)
+	jail, root := jfTree(t, e)
+	for i := 0; i < api.MaxFileListEntries+5; i++ {
+		mustWrite(t, filepath.Join(root, "many", "f"+strings.Repeat("x", 3)+strconv.Itoa(i)), "")
+	}
+	l, err := e.local.JailList(context.Background(), service.JailStatReq{Jail: jail, Root: root, Path: "many"})
+	if err != nil || len(l.Entries) != api.MaxFileListEntries || !l.Truncated {
+		t.Fatalf("%d entries, truncated=%v, %v", len(l.Entries), l.Truncated, err)
+	}
+}
+
+func TestJailListOverTheSocket(t *testing.T) {
+	e := newEnv(t)
+	jail, root := jfTree(t, e)
+	f := e.serve(t, selfPeers())
+	c, err := Dial(f.sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	l, err := c.JailList(context.Background(), service.JailStatReq{Jail: jail, Root: root, Path: "etc"})
+	if err != nil || len(l.Entries) != 3 {
+		t.Fatalf("%+v %v", l, err)
+	}
+	if _, err := c.JailList(context.Background(), service.JailStatReq{Jail: jail, Root: root, Path: "etcdir"}); !api.IsCode(err, api.CodeForbidden) {
+		t.Fatalf("%v", err)
 	}
 }

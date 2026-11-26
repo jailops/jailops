@@ -80,7 +80,7 @@ jailops cp web:/etc/rc.conf db:/etc/rc.conf.web
 jailops cp ./motd -l role=web :/etc/motd
 jailops cp --mkdir -r ./app web:/opt/app`,
 		Args:              cobra.MinimumNArgs(2),
-		ValidArgsFunction: completeFiles,
+		ValidArgsFunction: a.completeCpWord,
 	}
 	targets := a.jailTargets(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -517,4 +517,116 @@ func (a *app) cpToMany(ctx context.Context, srcs []cpSpec, dstPath string, jails
 // putQuiet is putOne without the line of output: the many-jail copy writes one line per jail itself.
 func (a *app) putQuiet(ctx context.Context, c *sdk.Client, src string, dst cpSpec, dstIsDir bool, o cpOpts) error {
 	return a.putOne(ctx, c, src, dst, dstIsDir, o, false)
+}
+
+// completeCpWord completes one word of jailops cp. Each word says by its own shape whether it is local or in a jail
+// (parseCpSpec), so the position does not matter:
+//
+//   - a bare word (no slash, no leading dot or tilde, no colon) is a jail name, offered as NAME: with no space after
+//     it, or a file of the current directory; without a matching jail or an answering server the shell's own file
+//     completion runs unchanged;
+//   - NAME: and NAME:/dir/pre complete inside the jail, from the directory listing of the server (extension
+//     jail_files_list): NAME:/dir/entry, with a slash after a directory. The files of this machine are never offered
+//     for such a word, and nothing is offered when the server does not answer in time;
+//   - :/path (the selector form) has no single jail to look into: nothing;
+//   - every other word is local: the shell's own file completion.
+func (a *app) completeCpWord(cmd *cobra.Command, _ []string, word string) ([]string, cobra.ShellCompDirective) {
+	if strings.HasPrefix(word, ":") {
+		return completeNone(cmd, nil, word)
+	}
+	if i := strings.IndexByte(word, ':'); i >= 0 {
+		jail, rest := word[:i], word[i+1:]
+		if strings.Contains(jail, "/") || !cpJailRE.MatchString(jail) || (rest != "" && rest[0] != '/') {
+			return completeFiles(cmd, nil, word) // a local name with a colon in it
+		}
+		return a.completeInJail(cmd, jail, rest)
+	}
+	if word != "" && (strings.ContainsAny(word, "/~") || word[0] == '.') {
+		return completeFiles(cmd, nil, word)
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
+	defer cancel()
+	c, err := a.connect(ctx)
+	if err != nil {
+		return completeFiles(cmd, nil, word)
+	}
+	jails, err := collect(c.Jails().List(ctx))
+	if err != nil {
+		return completeFiles(cmd, nil, word)
+	}
+	var out []string
+	for _, j := range jails {
+		if n := j.Metadata.Name; strings.HasPrefix(n, word) && cpJailRE.MatchString(n) {
+			out = append(out, n+":")
+		}
+	}
+	if len(out) == 0 {
+		return completeFiles(cmd, nil, word)
+	}
+	if es, err := os.ReadDir("."); err == nil {
+		for _, e := range es {
+			if n := e.Name(); strings.HasPrefix(n, word) && !strings.HasPrefix(n, ".") {
+				if e.IsDir() {
+					n += "/"
+				}
+				out = append(out, n)
+			}
+		}
+	}
+	return out, noSpaceAfterDirs(out)
+}
+
+// completeInJail completes rest, the part after NAME:, from the directory the server lists.
+func (a *app) completeInJail(cmd *cobra.Command, jail, rest string) ([]string, cobra.ShellCompDirective) {
+	ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
+	defer cancel()
+	c, err := a.connect(ctx)
+	if err != nil {
+		return completeNone(cmd, nil, rest)
+	}
+	if rest == "" { // NAME: is the jail; its root is the next step
+		jails, err := collect(c.Jails().List(ctx))
+		if err != nil {
+			return completeNone(cmd, nil, rest)
+		}
+		for _, j := range jails {
+			if j.Metadata.Name == jail {
+				return []string{jail + ":/"}, cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
+			}
+		}
+		return completeNone(cmd, nil, rest)
+	}
+	dir, prefix := rest[:strings.LastIndexByte(rest, '/')+1], rest[strings.LastIndexByte(rest, '/')+1:]
+	if _, err := api.CleanJailFilePath(dir); err != nil {
+		return completeNone(cmd, nil, rest)
+	}
+	l, err := c.Jails().FileList(ctx, jail, dir)
+	if err != nil {
+		return completeNone(cmd, nil, rest)
+	}
+	var out []string
+	for _, e := range l.Entries {
+		if !strings.HasPrefix(e.Name, prefix) || (strings.HasPrefix(e.Name, ".") && !strings.HasPrefix(prefix, ".")) {
+			continue
+		}
+		cand := jail + ":" + dir + e.Name
+		if e.Type == api.FileTypeDir {
+			cand += "/"
+		}
+		out = append(out, cand)
+	}
+	return out, noSpaceAfterDirs(out)
+}
+
+// noSpaceAfterDirs is the directive for candidates of which some end a part of a name (a jail NAME: or a directory):
+// no space follows them, so that the name can go on. A file alone still gets its space.
+func noSpaceAfterDirs(cands []string) cobra.ShellCompDirective {
+	d := cobra.ShellCompDirectiveNoFileComp
+	for _, c := range cands {
+		if strings.HasSuffix(c, "/") || strings.HasSuffix(c, ":") {
+			d |= cobra.ShellCompDirectiveNoSpace
+			break
+		}
+	}
+	return d
 }

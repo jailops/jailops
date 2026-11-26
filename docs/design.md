@@ -773,10 +773,10 @@ jailops apply -f site.yaml          # create or update every document of a file
   `jailops jail logs NAME [FILE]` (also `jailops logs`) is the client, `-f` follows. Extension `jail_logs`.
 - **Files.** `GET|PUT /api/v1/jails/<n>/files/<path>` (extension `jail_files`, operator, audited) and `jailops cp` move
   files and trees between a client and a jail root. The daemon and the helper always exchange a tar stream (ops
-  `fs.jail_stat`, `fs.jail_get`, `fs.jail_put`, over `sdk/tarcopy`): every path segment is opened below an
+  `fs.jail_stat`, `fs.jail_list`, `fs.jail_get`, `fs.jail_put`, over `sdk/tarcopy`): every path segment is opened below an
   `os.Root` of the jail root without following a symlink, entries are regular files, directories and symlinks with
   clean relative names, set-id bits are stripped, a file is written under a temporary name and renamed, and bytes,
-  entries and depth are bounded (`limits.file_copy_bytes`). A plain GET or PUT is one file wrapped in a one-entry tar.
+  entries and depth are bounded (`limits.file_copy_bytes`). A plain GET or PUT is one file wrapped in a one-entry tar. `?list=true` (extension `jail_files_list`, for shell completion) lists one directory the same way as `?stat=true` reads one path: operator, no lock, not audited, no symlink followed, at most 1000 entries.
   A root that is not mounted is `busy`, and so is a jail that an operation or a package hold has (the copy takes the
   jail's lock without waiting): an in-place upgrade checks the root's links before pkg runs on it. The routes stream, so they are exempt from the body limit and deadlines.
 - **All logs at once, and forwarding.** `GET /api/v1/logs` (extension `logs_unified`, operator in every project read)
@@ -1504,7 +1504,7 @@ changed through the helper.
 
 Browsers cannot perform the `jailops-exec/1` HTTP upgrade, so the web console uses a relay: a session created with
 `POST /api/v1/jails/{name}/console`, input by POST, output as server-sent events (API extension `jail_console`). The
-session is owned by the creating actor and ends with the process or after an idle period.
+session is owned by the creating actor and ends with the process, or after the idle or maximum time if `limits.exec_idle` or `limits.exec_max` is set (off by default).
 
 **Mounts, links and the start-time recheck (October 2026 audit).** `mount(8)` runs on the host and resolves symbolic links
 in an fstab. A jail's root user owns its tree, so it could replace a directory of it with a link and have a mount point
@@ -1847,7 +1847,7 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
   uplink are covered by phase 11 of `scripts/ci-freebsd-pf.sh`, which has not run on a host yet.
 - **Exec (8.3).** `POST /api/v1/jails/<n>/exec` upgrades to a framed stream (`PROTOCOL.md`, Exec). The daemon takes the
   backend as `service.JailExecer`; the helper client provides it, `--dev` uses `jexec -l` in process. Limits per
-  jail, idle and total time are configuration (`limits.exec_*`). The helper side and TTY handling ran on FreeBSD 15.1 (18.2).
+  jail are configuration (`limits.exec_sessions_per_jail`); idle and total time (`limits.exec_idle`, `limits.exec_max`) are off unless set. The helper side and TTY handling ran on FreeBSD 15.1 (18.2).
 - **Host tuning (5, 6).** The reconcile loop loads the modules it needs (if_epair, pf; linux64, linprocfs,
   linsysfs and fdescfs only while a Linux jail exists; dummynet only while a device has a bandwidth limit) before it touches their sysctls, sets
   `kern.elf64.fallback_brand=3` while a Linux jail exists, and re-asserts

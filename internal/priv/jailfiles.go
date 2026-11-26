@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -252,6 +253,58 @@ func (l *Local) JailStat(ctx context.Context, q service.JailStatReq) (api.JailFi
 	return out, nil
 }
 
+// JailList implements Host: the entries of a directory of a jail root, by name, at most api.MaxFileListEntries. Every
+// segment of the path is a plain directory (a symlink is refused, never followed); nothing is stat-ed per entry.
+func (l *Local) JailList(ctx context.Context, q service.JailStatReq) (api.JailFileList, error) {
+	segs, err := relSegments(q.Path)
+	if err != nil {
+		return api.JailFileList{}, err
+	}
+	jr, err := l.jailRootOf(q.Jail, q.Root)
+	if err != nil {
+		return api.JailFileList{}, err
+	}
+	defer jr.Close()
+	dir, err := parentOf(jr, segs, false)
+	if err != nil {
+		return api.JailFileList{}, copyErr(err)
+	}
+	if dir != jr {
+		defer dir.Close()
+	}
+	f, err := dir.Open(".")
+	if err != nil {
+		return api.JailFileList{}, copyErr(err)
+	}
+	defer f.Close()
+	es, err := f.ReadDir(api.MaxFileListEntries + 1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return api.JailFileList{}, copyErr(err)
+	}
+	out := api.JailFileList{Path: "/" + q.Path, Entries: []api.JailFileEntry{}}
+	if len(es) > api.MaxFileListEntries {
+		es, out.Truncated = es[:api.MaxFileListEntries], true
+	}
+	for _, e := range es {
+		out.Entries = append(out.Entries, api.JailFileEntry{Name: e.Name(), Type: entryType(e.Type())})
+	}
+	sort.Slice(out.Entries, func(i, j int) bool { return out.Entries[i].Name < out.Entries[j].Name })
+	return out, nil
+}
+
+// entryType names the type bits of a directory entry.
+func entryType(m fs.FileMode) api.JailFileType {
+	switch {
+	case m&fs.ModeSymlink != 0:
+		return api.FileTypeSymlink
+	case m.IsDir():
+		return api.FileTypeDir
+	case m.IsRegular():
+		return api.FileTypeFile
+	}
+	return api.FileTypeOther
+}
+
 func octal(m fs.FileMode) string {
 	const digits = "01234567"
 	v := uint32(m)
@@ -343,6 +396,9 @@ func init() {
 	register(OpFSJailStat, false, func(ctx context.Context, h Host, a service.JailStatReq, _ *callIO) (any, error) {
 		return h.JailStat(ctx, a)
 	})
+	register(OpFSJailList, false, func(ctx context.Context, h Host, a service.JailStatReq, _ *callIO) (any, error) {
+		return h.JailList(ctx, a)
+	})
 	register(OpFSJailGet, true, func(ctx context.Context, h Host, a service.JailGetReq, c *callIO) (any, error) {
 		st, err := h.JailGet(ctx, a, c.Out)
 		return copyRes{st}, err
@@ -356,6 +412,11 @@ func init() {
 // JailStat implements Host.
 func (c *Client) JailStat(ctx context.Context, q service.JailStatReq) (api.JailFileStat, error) {
 	return callJSON[api.JailFileStat](ctx, c, OpFSJailStat, q, callOpts{})
+}
+
+// JailList implements Host.
+func (c *Client) JailList(ctx context.Context, q service.JailStatReq) (api.JailFileList, error) {
+	return callJSON[api.JailFileList](ctx, c, OpFSJailList, q, callOpts{})
 }
 
 // JailGet implements Host.
