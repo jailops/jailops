@@ -73,6 +73,26 @@ func TestEveryFlagAndArgumentIsClassified(t *testing.T) {
 				}
 			}
 			if c.ValidArgsFunction != nil {
+				// completion stops where the command takes no more arguments: what the command accepts is probed here
+				// by its own Args check, and finishCompletion must have recorded the same limit and wrapped the completion
+				most := -1
+				for n := 0; n <= 16; n++ {
+					if c.Args == nil || c.Args(c, make([]string, n)) == nil {
+						most = n
+					}
+				}
+				if most == 16 {
+					most = -1
+				}
+				if got := c.Annotations[maxArgsAnnotation]; got != itoa(most) {
+					problems = append(problems, path+": completion stops after "+got+" arguments, the command accepts "+itoa(most))
+				}
+				if most >= 0 {
+					full := make([]string, most)
+					if vals, dir := c.ValidArgsFunction(c, full, ""); len(vals) != 0 || dir&cobra.ShellCompDirectiveNoFileComp == 0 {
+						problems = append(problems, path+": offers something after its last argument")
+					}
+				}
 				// at every position the argument is a name, a value or a path: the files of the directory are offered
 				// only where the argument is a path (pathArguments)
 				for n := 0; n < 4; n++ {
@@ -142,3 +162,40 @@ var pathArguments = map[string]string{
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// TestCompletionStopsAfterTheLastArgument checks the wrapper itself with a completion that always has something to
+// offer: it is silent from the argument after the last one, and a command that takes any number is never cut off.
+func TestCompletionStopsAfterTheLastArgument(t *testing.T) {
+	offer := func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return []string{"web"}, cobra.ShellCompDirectiveDefault
+	}
+	for _, c := range []struct {
+		name string
+		args cobra.PositionalArgs
+		max  int
+	}{
+		{"exact1", cobra.ExactArgs(1), 1},
+		{"exact2", cobra.ExactArgs(2), 2},
+		{"max1", cobra.MaximumNArgs(1), 1},
+		{"range", cobra.RangeArgs(1, 2), 2},
+		{"none", cobra.NoArgs, 0},
+		{"min1", cobra.MinimumNArgs(1), -1},
+		{"arbitrary", cobra.ArbitraryArgs, -1},
+	} {
+		cmd := &cobra.Command{Use: c.name, Args: c.args}
+		if got := maxArgs(cmd); got != c.max {
+			t.Errorf("%s: maxArgs = %d, want %d", c.name, got, c.max)
+		}
+		fn := stopAtLastArgument(offer, c.max)
+		for n := 0; n < 5; n++ {
+			vals, dir := fn(cmd, make([]string, n), "")
+			if c.max >= 0 && n >= c.max {
+				if len(vals) != 0 || dir != cobra.ShellCompDirectiveNoFileComp {
+					t.Errorf("%s: %d arguments given, still offers %v (%d)", c.name, n, vals, dir)
+				}
+			} else if len(vals) != 1 {
+				t.Errorf("%s: %d arguments given, offers %v", c.name, n, vals)
+			}
+		}
+	}
+}

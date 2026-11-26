@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Tab stops offering names after the last argument.** `jailops jail show db <Tab>`, `project show`, `volume show`, `config get`, `expose`, `remote switch` and every other command offer nothing, and not the files of the directory, once they have all the arguments they accept; before, the same names came again and the command then failed with a usage error. The limit is read from the command's own argument check, and the completion audit test fails for a command that goes on. `-c`/`--columns` of the list commands completes every element of its comma separated list, not only the first. (#199)
+
 ## 0.9.6 - 2026-11-25
 
 - **`jailops jail apply` takes many jails.** `-l KEY=VAL` (`--label` is the same) selects the jails that carry the labels and `--all` every jail of the project, as `jailops jail base add` does; a name and a selection exclude each other, and a Linux jail is not part of a selection. The recipe is rendered once (a file of `--set-file` is read once) and each jail is done on its own, one after the other, with one block of result per jail; a failure on one jail is reported as `jail/NAME: failed: ...` and the others go on, and the exit code is non-zero if any failed. `--dry-run` and `--validate` work with a selection. A jail that sync manages is named in the warning.
