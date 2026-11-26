@@ -68,3 +68,24 @@ func TestConfigDropsRemovedAppLogKeys(t *testing.T) {
 		t.Error("an unknown key under sources was accepted")
 	}
 }
+
+// exec_idle and exec_max are opt-in: unset or 0 is no limit, a negative value is an error.
+func TestExecLimitsConfig(t *testing.T) {
+	cfg, err := daemon.Decode(strings.NewReader("pool: tank\n"))
+	if err != nil || cfg.Limits.ExecIdle != 0 || cfg.Limits.ExecMax != 0 {
+		t.Fatalf("defaults: %+v %v", cfg.Limits, err)
+	}
+	cfg, err = daemon.Decode(strings.NewReader("pool: tank\nlimits:\n  exec_idle: 0\n  exec_max: 0s\n"))
+	if err != nil || cfg.Limits.ExecIdle != 0 || cfg.Limits.ExecMax != 0 {
+		t.Fatalf("zero: %+v %v", cfg.Limits, err)
+	}
+	cfg, err = daemon.Decode(strings.NewReader("pool: tank\nlimits:\n  exec_idle: 30m\n  exec_max: 12h\n"))
+	if err != nil || cfg.Limits.ExecIdle.Std() != 30*time.Minute || cfg.Limits.ExecMax.Std() != 12*time.Hour {
+		t.Fatalf("set: %+v %v", cfg.Limits, err)
+	}
+	for _, bad := range []string{"exec_idle: -1m", "exec_max: -1h", "exec_idle: -1d"} {
+		if _, err := daemon.Decode(strings.NewReader("pool: tank\nlimits:\n  " + bad + "\n")); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+}

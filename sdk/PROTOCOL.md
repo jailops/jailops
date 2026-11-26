@@ -198,8 +198,8 @@ success the reply is `101 Switching Protocols` and the connection carries frames
 The payload is at most 65536 bytes (a longer frame ends the session). Types: 1 `stdin` (an empty
 frame is end of input), 2 `stdout`, 3 `stderr` (absent in TTY mode, where stderr is merged into
 stdout), 4 `resize` (rows and cols, two u16 BE), 5 `signal` (an i32 BE signal number), 6 `exit` (an i32
-BE exit status, the last frame). A session that is idle too long or runs too long is ended with exit
-status -1. Closing the connection kills the command. HTTP/1.1 only: the client does not offer h2 on this
+BE exit status, the last frame). A session is not limited by default; if the server sets an idle or maximum time
+(`limits.exec_idle`, `limits.exec_max`), a session that exceeds one is ended with exit status -1. Closing the connection kills the command. HTTP/1.1 only: the client does not offer h2 on this
 request. The same authentication, project and audit rules as every route apply, and the audit entry
 carries the argv of the command; through a hub the upgrade is forwarded like any request.
 

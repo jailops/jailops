@@ -59,8 +59,8 @@ limits:
   request_timeout: 60s
   # file_copy_bytes: 2147483648  # the most bytes one jailops cp transfer or console upload may carry
   # exec_sessions_per_jail: 8
-  # exec_idle: 30m
-  # exec_max: 12h
+  # exec_idle: 0   # end a shell or exec session after this long without traffic (default 0: never)
+  # exec_max: 0    # end a session after this long (default 0: never)
   # auth_failure_threshold: 5     # failed authentications from one source before it is locked out
 
 # Dedicated networks for `jailops project create NAME --new-network`: each project gets a subnet carved from this pool.

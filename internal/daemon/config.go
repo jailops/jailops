@@ -317,8 +317,9 @@ type Limits struct {
 	// source (bad token, untrusted certificate, forged requestor claim)
 	// before that source is locked out (default 5).
 	AuthFailureThreshold int `yaml:"auth_failure_threshold"`
-	// ExecSessionsPerJail, ExecIdle and ExecMax bound exec sessions
-	// (defaults 8, 30m and 12h).
+	// ExecSessionsPerJail bounds the concurrent exec sessions of a jail
+	// (default 8). ExecIdle ends a session without traffic and ExecMax a
+	// session that lasts this long; both are off unless set (zero: no limit).
 	ExecSessionsPerJail int      `yaml:"exec_sessions_per_jail"`
 	ExecIdle            Duration `yaml:"exec_idle"`
 	ExecMax             Duration `yaml:"exec_max"`
@@ -422,6 +423,9 @@ func (c Config) finish() (Config, error) {
 	}
 	if c.Audit.Retention.Std() < 24*time.Hour || c.Audit.MaxEntries < 1000 {
 		return c, fmt.Errorf("config: audit.retention must be at least 1d and audit.max_entries at least 1000")
+	}
+	if c.Limits.ExecIdle < 0 || c.Limits.ExecMax < 0 {
+		return c, fmt.Errorf("config: limits.exec_idle and limits.exec_max must not be negative (0 or unset: no limit)")
 	}
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":

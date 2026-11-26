@@ -69,7 +69,7 @@ func headerHasToken(h http.Header, key, token string) bool {
 }
 
 // pump moves frames between the connection and the session until the command
-// ends, the client goes away, the stream idles or the session lives too long.
+// ends, the client goes away, the stream idles or the session lives too long (both limits are optional).
 // It returns the exit status (-1 when the session was cut off). still is asked at every keepalive tick whether the
 // caller's credential still holds; a revoked one ends the session.
 func (s *Server) pump(conn net.Conn, rd *bufio.Reader, st *service.ExecStart, lim service.ExecLimits, still func() bool) int {
@@ -94,19 +94,26 @@ func (s *Server) pump(conn net.Conn, rd *bufio.Reader, st *service.ExecStart, li
 	}
 	done := make(chan struct{})
 	defer close(done)
-	maxT := time.AfterFunc(lim.Max, func() { kill("the session reached its maximum duration") })
-	defer maxT.Stop()
+	if lim.Max > 0 {
+		maxT := time.AfterFunc(lim.Max, func() { kill("the session reached its maximum duration") })
+		defer maxT.Stop()
+	}
 	go func() {
 		defer func() { supervise.Report(nil, "exec-session", recover()) }()
-		t := time.NewTicker(lim.Idle/4 + time.Millisecond)
-		defer t.Stop()
+		// A nil channel never fires: with no idle limit the ticker does not exist.
+		var idleC <-chan time.Time
+		if lim.Idle > 0 {
+			t := time.NewTicker(lim.Idle/4 + time.Millisecond)
+			defer t.Stop()
+			idleC = t.C
+		}
 		ka := time.NewTicker(s.cfg.KeepAlive)
 		defer ka.Stop()
 		for {
 			select {
 			case <-done:
 				return
-			case <-t.C:
+			case <-idleC:
 				if time.Since(time.Unix(0, last.Load())) > lim.Idle {
 					kill("the session was idle too long")
 					return
