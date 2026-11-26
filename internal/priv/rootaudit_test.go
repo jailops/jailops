@@ -149,7 +149,7 @@ func TestAuditRootFindsWhatWasPlanted(t *testing.T) {
 	w("etc/master.passwd", cleanPasswd+"backdoor:$6$x$y:0:0::0:0:x:/root:/bin/sh\nguest::1001:1001::0:0:x:/home/guest:/bin/sh\n", 0o600)
 	os.Remove(filepath.Join(root, "etc/crontab"))
 	os.Symlink("/etc/master.passwd", filepath.Join(root, "etc/crontab"))
-	w("usr/local/etc/pkg/repos/extra.conf", "extra: { url: \"https://pkg.example.org/${ABI}\", enabled: yes }\n", 0o644)
+	w("usr/local/etc/pkg/repos/extra.conf", "extra: { url: \"http://pkg.example.org/${ABI}\", enabled: yes }\n", 0o644)
 	w("usr/local/etc/pkg/repos/FreeBSD-base.conf", "FreeBSD-base: { enabled: yes }\n", 0o644)
 	w("usr/local/etc/pkg.conf", "PKG_ENABLE_PLUGINS = true;\n", 0o644)
 	w("tmp/.x/rootsh", "x", 0o4755)
