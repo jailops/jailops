@@ -104,6 +104,9 @@ func TestBashCompletion(t *testing.T) {
 			t.Fatalf("%v: %s %s", args, o, e)
 		}
 	}
+	h.srv.SeedJailFile("main", "web", "/etc/motd", []byte("welcome\n"), 0o644)
+	h.srv.SeedJailFile("main", "web", "/etc/rc.conf", []byte("sshd_enable=YES\n"), 0o644)
+	h.srv.SeedJailFile("main", "web", "/usr/local/etc/app.conf", []byte("a=1\n"), 0o644)
 	work := t.TempDir()
 	for _, f := range []string{"a.yaml", "b.txt"} {
 		if err := os.WriteFile(filepath.Join(work, f), nil, 0o600); err != nil {
@@ -157,6 +160,19 @@ func TestBashCompletion(t *testing.T) {
 		{line: "jailops exec web -- ", empty: true},
 		{line: "jailops doctor ", empty: true},
 		{line: "jailops -o ", want: []string{"table", "json", "yaml", "csv"}},
+		// cp: jail names with a colon, then the paths inside the jail, never the files of this machine
+		{line: "jailops cp w", want: []string{"web:"}, none: []string{"db:"}},
+		{line: "jailops cp ./a.yaml d", want: []string{"db:"}, none: []string{"web:"}},
+		// no jail starts with a: the script offers nothing and readline's default filename completion (complete -o default) takes over
+		{line: "jailops cp a", empty: true},
+		{line: "jailops cp web:", want: []string{"/"}, none: []string{"a.yaml", "b.txt"}},
+		{line: "jailops cp web:/et", want: []string{"/etc/"}, none: []string{"web:/etc/"}},
+		{line: "jailops cp web:/etc/", want: []string{"/etc/motd", "/etc/rc.conf"}, none: []string{"a.yaml"}},
+		{line: "jailops cp ./a.yaml web:/usr/local/et", want: []string{"/usr/local/etc/"}},
+		{line: "jailops cp web:/usr/local/etc/a", want: []string{"/usr/local/etc/app.conf"}},
+		{line: "jailops jail cp web:/etc/m", want: []string{"/etc/motd"}},
+		{line: "jailops cp ghost:/et", empty: true},
+		{line: "jailops cp ./a.yaml -l tier=front :/e", empty: true},
 		{line: "jailops apply -f ", want: []string{"a.yaml"}, none: []string{"b.txt"}, needsBash: true},
 	}
 

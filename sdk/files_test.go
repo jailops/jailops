@@ -76,3 +76,29 @@ func TestJailFilesAgainstFake(t *testing.T) {
 	}
 	d.Close()
 }
+
+func TestFileListAgainstFake(t *testing.T) {
+	srv, c := newEnv(t)
+	seedBasics(srv)
+	mustJail(t, c, "web", webSpec())
+	ctx := ctxT(t)
+	srv.SeedJailFile("web", "web", "/etc/motd", []byte("welcome\n"), 0o644)
+	srv.SeedJailFile("web", "web", "/etc/conf.d/x", []byte("x"), 0o644)
+	j := c.Jails()
+	l, err := j.FileList(ctx, "web", "/etc")
+	if err != nil || l.Path != "/etc" || len(l.Entries) != 2 || l.Entries[0].Name != "conf.d" || l.Entries[0].Type != api.FileTypeDir || l.Entries[1].Name != "motd" {
+		t.Fatalf("%v %+v", err, l)
+	}
+	if _, err = j.FileList(ctx, "web", "/etc/motd"); !api.IsCode(err, api.CodeInvalid) {
+		t.Fatalf("a file: %v", err)
+	}
+	if _, err = j.FileList(ctx, "web", "/nothing"); !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("missing: %v", err)
+	}
+	if _, err = j.FileList(ctx, "ghost", "/etc"); !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("ghost: %v", err)
+	}
+	if _, err = j.FileList(ctx, "web", "/etc/../x"); !api.IsCode(err, api.CodeInvalid) {
+		t.Fatalf("dot dot: %v", err)
+	}
+}

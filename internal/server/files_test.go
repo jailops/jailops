@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -279,4 +280,68 @@ func TestJailFilesAreAudited(t *testing.T) {
 	if !put || !get {
 		t.Fatalf("put=%v get=%v in %+v", put, get, entries)
 	}
+}
+
+// The directory listing is the twin of ?stat=true: operators only, below the jail root, no symlink followed, capped,
+// and it leaves no audit entry.
+func TestJailFileListOverHTTP(t *testing.T) {
+	e := seeded(t)
+	c := ctxT(t)
+	mustJail(t, e, "web")
+	jailFile(t, e, "web", "etc/motd", "welcome\n")
+	jailFile(t, e, "web", "etc/conf.d/x", "x")
+	if err := os.Symlink("/", filepath.Join(e.JailRootDir("alpha", "web"), "etc", "up")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := e.Admin.Info(c)
+	if err != nil || !hasStr(info.APIExtensions, "jail_files_list") {
+		t.Fatalf("extension: %v %v", err, info.APIExtensions)
+	}
+	_, err = e.Client(api.PermReadonly).Jails().FileList(c, "web", "/etc")
+	wantCode(t, err, api.CodeForbidden)
+	op := e.Client(api.PermOperator)
+	before, err := e.Admin.Audit(c, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := op.Jails().FileList(c, "web", "/etc")
+	if err != nil || l.Path != "/etc" || len(l.Entries) != 3 {
+		t.Fatalf("%v %+v", err, l)
+	}
+	want := map[string]api.JailFileType{"conf.d": api.FileTypeDir, "motd": api.FileTypeFile, "up": api.FileTypeSymlink}
+	for _, en := range l.Entries {
+		if want[en.Name] != en.Type {
+			t.Errorf("%+v", en)
+		}
+	}
+	if l, err = op.Jails().FileList(c, "web", "/"); err != nil || len(l.Entries) == 0 {
+		t.Fatalf("root: %v %+v", err, l)
+	}
+	_, err = op.Jails().FileList(c, "web", "/etc/motd")
+	wantCode(t, err, api.CodeInvalid)
+	_, err = op.Jails().FileList(c, "web", "/etc/missing")
+	wantCode(t, err, api.CodeNotFound)
+	_, err = op.Jails().FileList(c, "web", "/etc/up")
+	wantCode(t, err, api.CodeForbidden)
+	_, err = op.Jails().FileList(c, "web", "/etc/../x")
+	wantCode(t, err, api.CodeInvalid)
+	after, err := e.Admin.Audit(c, 100)
+	if err != nil || len(after) != len(before) {
+		t.Fatalf("a listing is audited: %d entries before, %d after (%v)", len(before), len(after), err)
+	}
+	// capped
+	for i := 0; i < api.MaxFileListEntries+1; i++ {
+		jailFile(t, e, "web", "many/f"+strconv.Itoa(i), "")
+	}
+	if l, err = op.Jails().FileList(c, "web", "/many"); err != nil || len(l.Entries) != api.MaxFileListEntries || !l.Truncated {
+		t.Fatalf("%v %d %v", err, len(l.Entries), l.Truncated)
+	}
+}
+
+func TestJailFileListNeedsAMountedRoot(t *testing.T) {
+	e := seeded(t)
+	c := ctxT(t)
+	mustJail(t, e, "web") // its root holds nothing: not mounted
+	_, err := e.Client(api.PermOperator).Jails().FileList(c, "web", "/etc")
+	wantCode(t, err, api.CodeBusy)
 }

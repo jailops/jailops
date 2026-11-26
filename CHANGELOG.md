@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Tab in `jailops cp` completes jail names and the paths inside the jail.** A word is read by its own shape: `w<Tab>` offers `web:` (no space after the colon) next to the local files, `web:/usr/local/et<Tab>` lists the jail's own directory, and nothing after `NAME:` is ever a file of the machine you type on (bash used to complete the host's paths there). `NAME:/path` is unchanged. The server has a read-only listing for it, `GET /api/v1/jails/{name}/files/{path}?list=true` (extension `jail_files_list`, SDK `FileList`): same role as `?stat=true`, no jail lock, no audit entry, no symlink followed, at most 1000 entries. (#184)
+
 ## 0.9.6 - 2026-11-25
 
 - **`jailops jail apply` takes many jails.** `-l KEY=VAL` (`--label` is the same) selects the jails that carry the labels and `--all` every jail of the project, as `jailops jail base add` does; a name and a selection exclude each other, and a Linux jail is not part of a selection. The recipe is rendered once (a file of `--set-file` is read once) and each jail is done on its own, one after the other, with one block of result per jail; a failure on one jail is reported as `jail/NAME: failed: ...` and the others go on, and the exit code is non-zero if any failed. `--dry-run` and `--validate` work with a selection. A jail that sync manages is named in the warning.

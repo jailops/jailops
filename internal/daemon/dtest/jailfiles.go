@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -67,6 +68,48 @@ func (d dirJailFiles) parent(r *os.Root, p string, mkdir bool) (*os.Root, error)
 		}
 	}
 	return cur, nil
+}
+
+func (d dirJailFiles) JailList(_ context.Context, q service.JailStatReq) (api.JailFileList, error) {
+	r, err := d.open(q.Root)
+	if err != nil {
+		return api.JailFileList{}, err
+	}
+	defer r.Close()
+	dir, err := d.parent(r, q.Path, false)
+	if err != nil {
+		return api.JailFileList{}, err
+	}
+	if dir != r {
+		defer dir.Close()
+	}
+	f, err := dir.Open(".")
+	if err != nil {
+		return api.JailFileList{}, err
+	}
+	defer f.Close()
+	es, err := f.ReadDir(api.MaxFileListEntries + 1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return api.JailFileList{}, err
+	}
+	out := api.JailFileList{Path: "/" + q.Path, Entries: []api.JailFileEntry{}}
+	if len(es) > api.MaxFileListEntries {
+		es, out.Truncated = es[:api.MaxFileListEntries], true
+	}
+	for _, e := range es {
+		t := api.FileTypeOther
+		switch m := e.Type(); {
+		case m&fs.ModeSymlink != 0:
+			t = api.FileTypeSymlink
+		case m.IsDir():
+			t = api.FileTypeDir
+		case m.IsRegular():
+			t = api.FileTypeFile
+		}
+		out.Entries = append(out.Entries, api.JailFileEntry{Name: e.Name(), Type: t})
+	}
+	sort.Slice(out.Entries, func(i, j int) bool { return out.Entries[i].Name < out.Entries[j].Name })
+	return out, nil
 }
 
 func (d dirJailFiles) JailStat(_ context.Context, q service.JailStatReq) (api.JailFileStat, error) {

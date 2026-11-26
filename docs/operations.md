@@ -339,6 +339,10 @@ the output and the exit status, and the stopped ones are named.
     jailops cp -r db:/var/db/app web2:/var/db/
     jailops cp ./motd -l role=web :/etc/motd
 
+Tab completes the words of `cp` one by one: a jail name comes with its colon (`web:`), and after the colon Tab lists the
+paths inside the jail, never the files of the machine you type on. A path that starts with `/`, `./`, `../` or `~` is
+local. Completion needs a daemon that has the listing (extension `jail_files_list`) and gives up after three seconds.
+
 The rules are those of `cp`: with several sources the destination is a directory, a directory needs `-r`, a file that
 exists is replaced (written under a temporary name and renamed), and `--mkdir` creates a missing destination directory.
 `-p` keeps owner, group and modification times; otherwise files belong to root in the jail and get the time of the

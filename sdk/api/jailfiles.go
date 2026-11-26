@@ -12,6 +12,7 @@ import (
 // started, but its root has to be mounted (the dataset of a stopped jail is not: the answer is busy).
 //
 //	GET  ...?stat=true            what is there: JailFileStat
+//	GET  ...?list=true            the entries of a directory: JailFileList (extension jail_files_list)
 //	GET  ...                      the bytes of a regular file
 //	GET  ...?archive=tar          a tar stream of a file, a symlink or (recursive=true) a directory tree
 //	PUT  ...                      writes the body (Content-Length required) as the regular file at the path
@@ -23,6 +24,7 @@ import (
 // Query parameters of the file routes.
 const (
 	FileQueryStat      = "stat"
+	FileQueryList      = "list"
 	FileQueryArchive   = "archive"
 	FileQueryRecursive = "recursive"
 	FileQueryPreserve  = "preserve"
@@ -75,6 +77,23 @@ type JailFileStat struct {
 	Gid        int          `json:"gid,omitempty"`
 	ModifiedAt *time.Time   `json:"modified_at,omitempty"`
 	Link       string       `json:"link,omitempty"` // the target of a symlink (text, never followed)
+}
+
+// MaxFileListEntries bounds the entries of one directory listing; a longer directory is cut and says so.
+const MaxFileListEntries = 1000
+
+// JailFileEntry is one entry of a directory of a jail: its name and what it is, without following a symlink.
+type JailFileEntry struct {
+	Name string       `json:"name"`
+	Type JailFileType `json:"type"`
+}
+
+// JailFileList is the answer of ?list=true: the entries of the directory at Path, by name. Truncated says that the
+// directory has more than MaxFileListEntries entries and some are not listed.
+type JailFileList struct {
+	Path      string          `json:"path"`
+	Entries   []JailFileEntry `json:"entries"`
+	Truncated bool            `json:"truncated,omitempty"`
 }
 
 // JailFileCopy is what a transfer did: the answer of PUT.

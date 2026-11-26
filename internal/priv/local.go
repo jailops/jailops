@@ -63,8 +63,8 @@ type Host interface {
 	Remove(ctx context.Context, path string) error
 	// RemoveAll removes a tree where that is allowed (see Config.recursiveRemovable), else it is Remove.
 	RemoveAll(ctx context.Context, path string) error
-	// JailStat, JailGet and JailPut are the file transfers into and out of a jail root (jailfiles.go): what is
-	// there, a tar stream of a file or tree, and a tar stream written below a directory.
+	// JailStat, JailList, JailGet and JailPut are the file transfers into and out of a jail root (jailfiles.go): what is
+	// there, the entries of a directory, a tar stream of a file or tree, and a tar stream written below a directory.
 	service.JailFiles
 	// ListLogs lists the log files of a jail (dir is <jail root>/var/log) and
 	// TailFile reads a window from the end of one; see logs.go.

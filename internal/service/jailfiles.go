@@ -16,6 +16,9 @@ import (
 type JailFiles interface {
 	// JailStat says what is at a path (a missing one has the type "none").
 	JailStat(ctx context.Context, q JailStatReq) (api.JailFileStat, error)
+	// JailList lists the entries of a directory, at most api.MaxFileListEntries; a path that is not a directory is
+	// invalid, a missing one not_found.
+	JailList(ctx context.Context, q JailStatReq) (api.JailFileList, error)
 	// JailGet writes the file, symlink or tree at the path to out as a tar stream, its entries named below As.
 	JailGet(ctx context.Context, q JailGetReq, out io.Writer) (tarcopy.Stats, error)
 	// JailPut writes the tar stream in below the directory at the path.
@@ -141,6 +144,24 @@ func (s *Service) JailFileStat(ctx context.Context, name, p string) (api.JailFil
 		return api.JailFileStat{}, s.fileErr(err, name, key, p)
 	}
 	return st, nil
+}
+
+// JailFileList lists the directory at a path of a jail root ("" is the root). Like JailFileStat it takes no lock and
+// leaves no audit entry: it only reads the host's view of the jail.
+func (s *Service) JailFileList(ctx context.Context, name, p string) (api.JailFileList, error) {
+	p, err := api.CleanJailFilePath(p)
+	if err != nil {
+		return api.JailFileList{}, err
+	}
+	_, key, err := s.fileJail(ctx, name)
+	if err != nil {
+		return api.JailFileList{}, err
+	}
+	l, err := s.d.JailFiles.JailList(ctx, JailStatReq{Jail: key, Root: s.rootMount(key), Path: p})
+	if err != nil {
+		return api.JailFileList{}, s.fileErr(err, name, key, p)
+	}
+	return l, nil
 }
 
 // JailFileGet writes the tar stream of a path of a jail root to out. The project of the jail is returned for the audit
